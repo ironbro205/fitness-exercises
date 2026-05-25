@@ -2893,7 +2893,9 @@ var KEYS = {
   PLATEAU_CHECK: 'fitness_plateau_check',
   ONE_RM_DATA: 'fitness_one_rm_data',
   ONE_RM_INITIALIZED: 'fitness_one_rm_initialized',
-  CONDITION_LOG: 'fitness_condition_log'
+  CONDITION_LOG: 'fitness_condition_log',
+  ACTIVE_SESSION: 'fitness_active_session',
+  REST_TIMER: 'fitness_rest_timer'
 };
 
 var storage = {
@@ -2916,6 +2918,13 @@ var storage = {
     }
   }
 };
+
+function saveActiveSession() {
+  storage.set(KEYS.ACTIVE_SESSION, state.activeSession);
+}
+function saveRestTimer() {
+  storage.set(KEYS.REST_TIMER, state.restTimer);
+}
 
 // ═══════════════════════════════════════════════
 // 기본 프로필
@@ -4882,7 +4891,8 @@ window.startGeneratedRoutine = function() {
       reason: r.reason
     }
   };
-  
+  saveActiveSession();
+
   // 마법사 상태 리셋
   state.workoutWizardStep = 1;
   state.generatedRoutine = null;
@@ -5401,7 +5411,8 @@ window.startSession = function(sessionType) {
     currentExerciseIdx: 0,
     exercises: exercises
   };
-  
+  saveActiveSession();
+
   render();
 };
 
@@ -5421,6 +5432,8 @@ window.endSession = function() {
     state.activeSession = null;
     state.restTimer = null;
     state.editingSet = null;
+    saveActiveSession();
+    saveRestTimer();
     if (restTickerInterval) { clearInterval(restTickerInterval); restTickerInterval = null; }
     render();
     return;
@@ -5544,8 +5557,10 @@ function finalizeSession() {
   state.activeSession = null;
   state.restTimer = null;
   state.editingSet = null;
+  saveActiveSession();
+  saveRestTimer();
   if (restTickerInterval) { clearInterval(restTickerInterval); restTickerInterval = null; }
-  
+
   render();
 }
 
@@ -5622,6 +5637,7 @@ window.adjustWeight = function(delta) {
   var s = state.editingSet;
   var set = state.activeSession.exercises[s.exerciseIdx].sets[s.setIdx];
   set.weight = Math.max(0, (set.weight || 0) + delta);
+  saveActiveSession();
   render();
 };
 
@@ -5630,6 +5646,7 @@ window.adjustReps = function(delta) {
   var s = state.editingSet;
   var set = state.activeSession.exercises[s.exerciseIdx].sets[s.setIdx];
   set.reps = Math.max(0, (set.reps || 0) + delta);
+  saveActiveSession();
   render();
 };
 
@@ -5638,6 +5655,7 @@ window.toggleWarmup = function() {
   var s = state.editingSet;
   var set = state.activeSession.exercises[s.exerciseIdx].sets[s.setIdx];
   set.isWarmup = !set.isWarmup;
+  saveActiveSession();
   render();
 };
 
@@ -5670,14 +5688,18 @@ window.completeSet = function() {
     setIdx: s.setIdx
   };
   state.editingSet = null;
-  
+  saveActiveSession();
+  saveRestTimer();
+
   render();
   startRestTimerTick();
 };
 
 // 휴식 스킵
 window.skipRest = function() {
+  if (restTickerInterval) { clearInterval(restTickerInterval); restTickerInterval = null; }
   state.restTimer = null;
+  saveRestTimer();
   render();
 };
 
@@ -5685,6 +5707,7 @@ window.skipRest = function() {
 window.addRestTime = function() {
   if (state.restTimer) {
     state.restTimer.duration += 30;
+    saveRestTimer();
     render();
   }
 };
@@ -5704,8 +5727,23 @@ function startRestTimerTick() {
       // 시간 다 됨 - 알림 (진동)
       if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
       state.restTimer = null;
+      saveRestTimer();
       clearInterval(restTickerInterval);
       restTickerInterval = null;
+      render();
+      return;
+    }
+    // 세트 편집 시트가 열려 있으면 시트가 깜빡이지 않도록
+    // 타이머 영역만 부분 업데이트
+    if (state.editingSet) {
+      var el = document.getElementById('rest-time-text');
+      if (el) {
+        var remaining = state.restTimer.duration - elapsed;
+        var mins = Math.floor(remaining / 60);
+        var secs = remaining % 60;
+        el.textContent = mins + ':' + String(secs).padStart(2, '0');
+      }
+      return;
     }
     render();
   }, 1000);
@@ -5715,6 +5753,7 @@ function startRestTimerTick() {
 window.goToExercise = function(idx) {
   if (state.activeSession) {
     state.activeSession.currentExerciseIdx = idx;
+    saveActiveSession();
     render();
   }
 };
@@ -5822,7 +5861,7 @@ function renderWorkoutSession() {
             '<div class="rest-icon">' + icon('clock', 18) + '</div>' +
             '<div>' +
               '<p class="text-[10px] font-mono text-stone-500 uppercase">휴식 중</p>' +
-              '<p class="font-bebas text-2xl accent">' + restStr + '</p>' +
+              '<p id="rest-time-text" class="font-bebas text-2xl accent">' + restStr + '</p>' +
             '</div>' +
           '</div>' +
           '<div class="flex gap-2">' +
@@ -10541,7 +10580,24 @@ function init() {
       state.plateauCheck = cachedPlateau;
     }
   }
-  
+
+  // 진행 중이던 운동 세션 복원 (백그라운드/새로고침에서 돌아왔을 때)
+  var savedSession = storage.get(KEYS.ACTIVE_SESSION);
+  if (savedSession && savedSession.exercises && savedSession.startTime) {
+    state.activeSession = savedSession;
+  }
+  var savedRest = storage.get(KEYS.REST_TIMER);
+  if (savedRest && savedRest.startTime && savedRest.duration) {
+    var elapsedSec = Math.floor((Date.now() - savedRest.startTime) / 1000);
+    if (elapsedSec < savedRest.duration) {
+      state.restTimer = savedRest;
+      startRestTimerTick();
+    } else {
+      // 자리비운 사이 휴식 시간 종료된 경우 정리
+      storage.set(KEYS.REST_TIMER, null);
+    }
+  }
+
   render();
 }
 
