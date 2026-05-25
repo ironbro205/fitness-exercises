@@ -3773,6 +3773,44 @@ var EXERCISE_GIFS = {
   '카프 레이즈 머신': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0594-bOOdeyc.gif'
 };
 
+// 운동 이름 → GIF URL 매칭 (정확 일치 실패 시 토큰 기반 fuzzy 매칭)
+// AI가 "머신 시티드 숄더 프레스" 같은 변형 이름을 만들어도 "숄더 프레스 머신" 키와 매칭되도록.
+function findExerciseGif(name) {
+  if (!name) return null;
+  if (EXERCISE_GIFS[name]) return EXERCISE_GIFS[name];
+
+  var stripSpace = function(s) { return s.replace(/\s+/g, ''); };
+  var nameNoSpace = stripSpace(name);
+  var keys = Object.keys(EXERCISE_GIFS);
+
+  // 1) 공백 무시 완전 일치
+  for (var i = 0; i < keys.length; i++) {
+    if (stripSpace(keys[i]) === nameNoSpace) return EXERCISE_GIFS[keys[i]];
+  }
+
+  // 2) 토큰 기반: 매핑 키의 모든 토큰이 운동 이름에 (순서 무관) 모두 존재
+  var nameTokens = name.split(/\s+/).filter(Boolean);
+  var best = null;
+  for (var j = 0; j < keys.length; j++) {
+    var keyTokens = keys[j].split(/\s+/).filter(Boolean);
+    var allFound = keyTokens.every(function(kt) {
+      return nameTokens.indexOf(kt) !== -1;
+    });
+    if (allFound) {
+      // 더 많은 토큰이 일치 = 더 구체적
+      if (!best || keyTokens.length > best.tokens) {
+        best = { key: keys[j], tokens: keyTokens.length };
+      }
+    }
+  }
+
+  if (!best) {
+    console.log('[GIF] 매칭 실패:', name);
+    return null;
+  }
+  return EXERCISE_GIFS[best.key];
+}
+
 // 세션별 데이터
 // ═══════════════════════════════════════════════
 // 초기 1RM 데이터 (사용자가 기존 앱에서 가져온 값)
@@ -6027,10 +6065,13 @@ function renderWorkoutSession() {
         '<h2 class="font-bebas text-2xl mb-1">' + exercise.name + '</h2>' +
         '<p class="text-xs font-mono text-stone-400">' + exercise.type + '</p>' +
         '<div class="exercise-gif-wrap">' +
-          (EXERCISE_GIFS[exercise.name] 
-            ? '<img src="' + EXERCISE_GIFS[exercise.name] + '" alt="' + exercise.name + '" onerror="this.style.display=\'none\'; this.nextElementSibling.style.display=\'flex\'" />' +
-              '<div class="exercise-gif-placeholder" style="display: none;">이미지 로드 실패</div>'
-            : '<div class="exercise-gif-placeholder" style="display: flex;">동작 가이드 준비 중</div>') +
+          (function() {
+            var gifUrl = findExerciseGif(exercise.name);
+            return gifUrl
+              ? '<img src="' + gifUrl + '" alt="' + exercise.name + '" onerror="this.style.display=\'none\'; this.nextElementSibling.style.display=\'flex\'" />' +
+                '<div class="exercise-gif-placeholder" style="display: none;">이미지 로드 실패</div>'
+              : '<div class="exercise-gif-placeholder" style="display: flex;">동작 가이드 준비 중</div>';
+          })() +
         '</div>' +
       '</div>' +
       
