@@ -4475,7 +4475,13 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
     '   이때 changes=[], updatedRoutine=null (확정 안 함)\n' +
     '4. **확실한 요청 시만 updatedRoutine 생성**\n' +
     '5. **종목별 자동 분석 활용**: 한 부위 4개 이상 = 과잉 / 동일 부위·각도 중복 금지\n' +
-    '6. **무게**: 메인 1RM×70~80%, 보조 65~75%, 고립 60~70%, 2.5kg 단위 반올림\n\n' +
+    '6. **무게**: 메인 1RM×70~80%, 보조 65~75%, 고립 60~70%, 2.5kg 단위 반올림\n' +
+    '7. **횟수 (type별 필수 가이드)**:\n' +
+    '   - 메인 복합 (isMain:true): "5-8" 또는 "6-8"\n' +
+    '   - 보조 복합 (compound, isMain:false): "8-10" 또는 "8-12"\n' +
+    '   - 고립 일반: "10-15"\n' +
+    '   - 소근육 고립 (사이드/리어 레터럴 레이즈, 페이스 풀, 푸시다운, 컬류, 카프 레이즈, 힙 어덕션 등): "12-20"\n' +
+    '   ※ 가벼운 무게 다회수 운동을 무겁게 적은 횟수로 추천하지 말 것\n\n' +
     
     '## ❌ 절대 금지\n' +
     '- 자동 분석 무시하고 단일 종목만 평가\n' +
@@ -5700,6 +5706,35 @@ window.closeSetEditor = function() {
   render();
 };
 
+// 시트 내부 표시만 부분 업데이트 (시트 깜빡임 방지 - 전체 render 대신 사용)
+function updateEditSheetDisplay() {
+  if (!state.editingSet) return;
+  var s = state.editingSet;
+  var ex = state.activeSession.exercises[s.exerciseIdx];
+  var set = ex.sets[s.setIdx];
+
+  var w = document.getElementById('sheet-weight-value');
+  if (w) w.textContent = set.weight !== null ? set.weight : 0;
+
+  var r = document.getElementById('sheet-reps-value');
+  if (r) r.textContent = set.reps;
+
+  var t = document.getElementById('sheet-warmup-toggle');
+  if (t) {
+    if (set.isWarmup) t.classList.add('on');
+    else t.classList.remove('on');
+  }
+
+  var label = document.getElementById('sheet-set-label');
+  if (label) {
+    var setNum = 0;
+    for (var k = 0; k <= s.setIdx; k++) {
+      if (!ex.sets[k].isWarmup) setNum++;
+    }
+    label.textContent = (set.isWarmup ? '워밍업' : '세트 ' + setNum) + ' 편집';
+  }
+}
+
 // 무게/횟수 조정
 window.adjustWeight = function(delta) {
   if (!state.editingSet) return;
@@ -5707,7 +5742,7 @@ window.adjustWeight = function(delta) {
   var set = state.activeSession.exercises[s.exerciseIdx].sets[s.setIdx];
   set.weight = Math.max(0, (set.weight || 0) + delta);
   saveActiveSession();
-  render();
+  updateEditSheetDisplay();
 };
 
 window.adjustReps = function(delta) {
@@ -5716,7 +5751,7 @@ window.adjustReps = function(delta) {
   var set = state.activeSession.exercises[s.exerciseIdx].sets[s.setIdx];
   set.reps = Math.max(0, (set.reps || 0) + delta);
   saveActiveSession();
-  render();
+  updateEditSheetDisplay();
 };
 
 window.toggleWarmup = function() {
@@ -5725,7 +5760,7 @@ window.toggleWarmup = function() {
   var set = state.activeSession.exercises[s.exerciseIdx].sets[s.setIdx];
   set.isWarmup = !set.isWarmup;
   saveActiveSession();
-  render();
+  updateEditSheetDisplay();
 };
 
 // 세트 완료 → 휴식 타이머 시작
@@ -5960,20 +5995,20 @@ function renderWorkoutSession() {
           
           '<div class="flex items-center justify-between mb-5">' +
             '<div>' +
-              '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">' + setLabel + ' 편집</p>' +
+              '<p id="sheet-set-label" class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">' + setLabel + ' 편집</p>' +
               '<p class="font-bebas text-2xl mt-1">' + ex.name + '</p>' +
             '</div>' +
             '<button class="session-header-btn" onclick="closeSetEditor()">' + icon('close', 18) + '</button>' +
           '</div>' +
-          
+
           // 워밍업 토글
           '<div class="warmup-toggle">' +
             '<p class="text-sm font-display">워밍업 세트</p>' +
-            '<div class="toggle-switch ' + (set.isWarmup ? 'on' : '') + '" onclick="toggleWarmup()">' +
+            '<div id="sheet-warmup-toggle" class="toggle-switch ' + (set.isWarmup ? 'on' : '') + '" onclick="toggleWarmup()">' +
               '<div class="toggle-knob"></div>' +
             '</div>' +
           '</div>' +
-          
+
           // 무게 입력
           '<div class="input-group">' +
             '<div class="input-label">' +
@@ -5981,7 +6016,7 @@ function renderWorkoutSession() {
               '<p>kg</p>' +
             '</div>' +
             '<div class="number-display">' +
-              '<p>' + (set.weight !== null ? set.weight : 0) + '</p>' +
+              '<p id="sheet-weight-value">' + (set.weight !== null ? set.weight : 0) + '</p>' +
             '</div>' +
             '<div class="adj-grid">' +
               '<button class="adj-btn" onclick="adjustWeight(-5)">−5</button>' +
@@ -5990,7 +6025,7 @@ function renderWorkoutSession() {
               '<button class="adj-btn accent-btn" onclick="adjustWeight(5)">+5</button>' +
             '</div>' +
           '</div>' +
-          
+
           // 횟수 입력
           '<div class="input-group">' +
             '<div class="input-label">' +
@@ -5998,7 +6033,7 @@ function renderWorkoutSession() {
               '<p>목표: ' + ex.targetReps + '</p>' +
             '</div>' +
             '<div class="number-display">' +
-              '<p>' + set.reps + '</p>' +
+              '<p id="sheet-reps-value">' + set.reps + '</p>' +
             '</div>' +
             '<div class="adj-grid">' +
               '<button class="adj-btn" onclick="adjustReps(-5)">−5</button>' +
@@ -8656,7 +8691,13 @@ async function generateFullRoutine(bodyPart) {
     '5. **무게**: 위 "추천 작업 무게" 표 그대로 사용 (메인=메인값, 보조=보조값, 고립=고립값)\n' +
     '6. 1RM 없는 종목 → weight: null (사용자가 측정)\n' +
     '7. 정체기(🔥) 표시된 종목은 무게 +2.5kg 도전 또는 종목 교체 제안\n' +
-    '8. **컨디션 반영**: 컨텍스트 "컨디션 추이"가 있으면 강도 조절 (buildUserContext 분류와 동일)\n' +
+    '8. **횟수 (type별 필수 가이드)**:\n' +
+    '   - 메인 복합 (isMain:true, type:"복합"): "5-8" 또는 "6-8"\n' +
+    '   - 보조 복합 (type:"보조"): "8-10" 또는 "8-12"\n' +
+    '   - 고립 일반 (type:"고립"): "10-15"\n' +
+    '   - 소근육 고립 (사이드/리어 레터럴 레이즈, 페이스 풀, 푸시다운, 컬류, 카프 레이즈, 힙 어덕션 등): "12-20"\n' +
+    '   ※ 가벼운 무게·다회수가 적절한 종목을 무겁게 적은 횟수로 추천 금지\n' +
+    '9. **컨디션 반영**: 컨텍스트 "컨디션 추이"가 있으면 강도 조절 (buildUserContext 분류와 동일)\n' +
     '   - 평균 RPE ≥ 8.5 또는 컨디션 ≤ 2 = 회복 모드 (RIR 3~4, 볼륨 -20%, intensity:"light")\n' +
     '   - 평균 RPE 7~8.4 또는 컨디션 3 = 평상시 (intensity:"moderate")\n' +
     '   - 평균 RPE < 7 + 컨디션 4~5 = 도전 가능 (intensity:"challenging")\n' +
