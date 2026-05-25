@@ -10679,6 +10679,67 @@ function init() {
 init();
 
 // ═══════════════════════════════════════════════
+// 운동 화면 좌우 스와이프 → 다음/이전 종목
+// ═══════════════════════════════════════════════
+(function() {
+  var startX = 0;
+  var startY = 0;
+  var startTime = 0;
+  var tracking = false;
+
+  document.addEventListener('touchstart', function(e) {
+    if (e.touches.length !== 1) { tracking = false; return; }
+    // 스크롤 가능한 입력 영역(input, textarea)에서 시작한 터치는 무시
+    var t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) {
+      tracking = false;
+      return;
+    }
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    startTime = Date.now();
+    tracking = true;
+  }, { passive: true });
+
+  document.addEventListener('touchend', function(e) {
+    if (!tracking) return;
+    tracking = false;
+
+    // 운동 진행 중 + 다른 오버레이 없을 때만 동작
+    if (!state.activeSession) return;
+    if (state.editingSet) return;
+    if (state.completedSession) return;
+    if (state.foodInputOpen) return;
+    if (state.itemDetailSheet) return;
+    if (state.resetConfirming) return;
+
+    var touch = e.changedTouches[0];
+    if (!touch) return;
+
+    var dx = touch.clientX - startX;
+    var dy = touch.clientY - startY;
+    var dt = Date.now() - startTime;
+
+    // 임계값: 수평 60px 이상, 수평이 수직보다 1.5배 이상 우세, 800ms 이내
+    if (Math.abs(dx) < 60) return;
+    if (Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    if (dt > 800) return;
+
+    var session = state.activeSession;
+    var idx = session.currentExerciseIdx;
+    var total = session.exercises.length;
+
+    if (dx < 0 && idx < total - 1) {
+      // 좌로 스와이프 → 다음 종목
+      window.goToExercise(idx + 1);
+    } else if (dx > 0 && idx > 0) {
+      // 우로 스와이프 → 이전 종목
+      window.goToExercise(idx - 1);
+    }
+  }, { passive: true });
+})();
+
+// ═══════════════════════════════════════════════
 // PWA - Service Worker 등록
 // ═══════════════════════════════════════════════
 if ('serviceWorker' in navigator) {
