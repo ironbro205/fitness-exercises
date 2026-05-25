@@ -1084,6 +1084,68 @@ button {
   color: #00d4ff;
 }
 
+/* 컨디션 입력 */
+.condition-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.condition-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.condition-label {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #a8a29e;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 4px;
+}
+.condition-buttons {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+.condition-buttons.rpe-10 {
+  /* RPE 10개: 5칸 × 2줄 */
+  grid-template-columns: repeat(5, 1fr);
+}
+.cond-btn {
+  background: #0f1525;
+  border: 1px solid #1a2540;
+  color: #a8a29e;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 14px 0;
+  min-height: 44px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.cond-btn-wide {
+  padding: 14px 0;
+  font-size: 16px;
+}
+.cond-btn:active {
+  transform: scale(0.95);
+}
+.cond-btn.selected {
+  background: #00d4ff;
+  color: #050810;
+  border-color: #00d4ff;
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
+}
+.condition-hint {
+  font-size: 10px;
+  color: #6b6661;
+  font-family: 'JetBrains Mono', monospace;
+}
+
 .stat-card {
   background: #0f1525;
   border: 1px solid #1a2540;
@@ -2830,7 +2892,8 @@ var KEYS = {
   WEEKLY_REVIEW: 'fitness_weekly_review',
   PLATEAU_CHECK: 'fitness_plateau_check',
   ONE_RM_DATA: 'fitness_one_rm_data',
-  ONE_RM_INITIALIZED: 'fitness_one_rm_initialized'
+  ONE_RM_INITIALIZED: 'fitness_one_rm_initialized',
+  CONDITION_LOG: 'fitness_condition_log'
 };
 
 var storage = {
@@ -2984,7 +3047,7 @@ function icon(name, size) {
 var state = {
   currentTab: 'home',
   profile: null,
-  data: { workoutLog: [], nutritionLog: [], personalRecords: [] },
+  data: { workoutLog: [], nutritionLog: [], personalRecords: [], bodyLog: [], conditionLog: [] },
   // 운동 세션 진행 중 상태
   activeSession: null,
   editingSet: null,
@@ -3620,6 +3683,9 @@ async function analyzeFoodWithAI(text) {
     }
     
     var data = await response.json();
+    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+      return { error: 'AI 응답이 비어있어요. 다시 시도해주세요.' };
+    }
     var content = data.content[0].text;
     
     // JSON 추출 (```json 블록 제거)
@@ -3755,18 +3821,19 @@ var INITIAL_1RM = {
 var EXERCISE_ALIASES_1RM = {
   '체스트 프레스 머신': '머신 체스트 프레스',
   '인클라인 덤벨 프레스': '덤벨 인클라인 벤치 프레스',
+  '인클라인 덤벨 벤치 프레스': '덤벨 인클라인 벤치 프레스',  // 옛 표준명 매핑
   '펙덱 플라이': '머신 펙 덱 플라이',
   '숄더 프레스 머신': '머신 시티드 숄더 프레스',
   '사이드 레터럴 레이즈': '덤벨 사이드 레터럴 레이즈',
   '트라이셉스 푸시다운': '케이블 푸시 다운',
   '랫풀다운': '랫 풀 다운',
   '시티드 로우 머신': '머신 시티드 로우',
-  '인클라인 덤벨 컬': '인클라인 덤벨 컬',
   '해머 컬': '덤벨 해머 컬',
   '레그프레스': '레그 프레스',
-  '레그 익스텐션': '머신 레그 익스텐션',
-  '시티드 햄스트링 컬': '머신 라잉 레그 컬',
-  '힙 어덕션': '머신 힙 어브덕션'
+  '레그 익스텐션': '머신 레그 익스텐션'
+  // 제거: '인클라인 덤벨 컬' → '인클라인 덤벨 컬' (자기 자신 무의미)
+  // 제거: '시티드 햄스트링 컬' → '머신 라잉 레그 컬' (다른 운동 - 시티드/라잉 자세 다름)
+  // 제거: '힙 어덕션' → '머신 힙 어브덕션' (어덕션=내전근 vs 어브덕션=둔근, 정반대 운동)
 };
 
 // ═══════════════════════════════════════════════
@@ -3832,6 +3899,45 @@ function suggestWorkingWeight(exerciseName, percentage) {
   // 머신/덤벨에 따라 반올림
   // 덤벨: 0.5kg 단위, 머신: 2.5kg 단위 (간단히 둘 다 2.5kg)
   return Math.round(weight / 2.5) * 2.5;
+}
+
+// 1RM 없는 종목에 대해 같은 부위 종목의 1RM 평균으로 추정
+// 안전장치: 표본 2개 이상에서만 추정 (표본 1개 = 변동성 너무 큼)
+function estimate1RMFromPart(exerciseName) {
+  // 이미 1RM 있으면 그거 사용
+  var direct = get1RM(exerciseName);
+  if (direct) return { weight: direct, source: 'direct', confidence: 'high' };
+  
+  var info = getExercisePart(exerciseName);
+  if (!info) return null;
+  
+  var oneRMData = storage.get(KEYS.ONE_RM_DATA, {});
+  var samePartRMs = [];
+  
+  Object.keys(EXERCISE_BODY_PART_MAP).forEach(function(name) {
+    if (name === exerciseName) return;
+    var otherInfo = EXERCISE_BODY_PART_MAP[name];
+    if (otherInfo.primary !== info.primary) return;
+    if (otherInfo.compound !== info.compound) return;
+    var rm = oneRMData[name];
+    if (rm) samePartRMs.push(rm);
+  });
+  
+  if (samePartRMs.length === 0) return null;
+  
+  // 안전: 표본 1개는 신뢰도 낮음 → confidence: low로 표시 (시스템 프롬프트에서 활용 제한)
+  var confidence = samePartRMs.length >= 3 ? 'medium' : (samePartRMs.length >= 2 ? 'low' : 'very_low');
+  
+  // 평균 × 0.85 (다른 종목이므로 보수적으로)
+  var avg = samePartRMs.reduce(function(s, r) { return s + r; }, 0) / samePartRMs.length;
+  var estimated = Math.round(avg * 0.85 / 2.5) * 2.5;
+  
+  return { 
+    weight: estimated, 
+    source: 'estimated_from_part', 
+    basedOn: samePartRMs.length + '개 종목 평균',
+    confidence: confidence
+  };
 }
 
 // 1RM 초기화 (첫 실행)
@@ -4257,55 +4363,92 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
     '- 빈 루틴에 처음 종목을 추가할 때는 6~7개로 완전한 루틴을 구성하세요.\n'
     : '';
   
-  var systemPrompt = '당신은 사용자의 피트니스 코치입니다. 사용자가 현재 루틴을 수정해달라고 요청했습니다. ' +
-    '변경안을 만들어 제시하세요. 사용자가 [적용하기] 버튼을 눌러야 실제 반영됩니다. JSON으로만 응답.' +
-    freeIntro + '\n\n' +
+  // 무게 추천 계산 (1RM 기반)
+  var oneRMData = storage.get(KEYS.ONE_RM_DATA, {});
+  var routineBalance = analyzeRoutineBalance(currentRoutine.exercises);
+  
+  var systemPrompt = '당신은 과학적 근거 기반의 피트니스 코치다. ' +
+    '운동 루틴 화면에서 사용자가 보낸 메시지를 두 가지 의도로 분기 처리: (1) modify=루틴 수정 (2) question=일반 질문/대화. JSON으로만 응답.\n' +
+    freeIntro + '\n' +
     
-    '## 응답 톤\n' +
-    '- reply에는 "이렇게 수정하면 어떨까요?", "~하는 게 좋을 것 같아요" 같이 제안하는 어투를 쓸 것\n' +
-    '- 자동 적용된 것처럼 ("수정했어요", "변경 완료") 표현 금지\n' +
-    '- 사용자가 [적용하기] 버튼을 눌러야 적용됨\n\n' +
+    '═════════════════════════════════════\n' +
+    '🎯 [데이터] 현재 루틴 자동 분석 (이 데이터 그대로 신뢰)\n' +
+    '═════════════════════════════════════\n' +
+    formatBalanceAnalysis(routineBalance) + '\n\n' +
     
-    '## 수정 원칙\n' +
-    '1. **사용자 요청 최우선** — 사용자가 원하는 변경 정확히 반영\n' +
-    '2. **과학적 근거** — 무리한 요청(부위 균형 깨지는 등)은 부드럽게 조언\n' +
-    '3. **1RM 기반** — 무게 변경 시 1RM의 적정 비율 유지\n' +
-    '4. **머신/덤벨 우선** — 종목 교체 시 사용자 환경 고려\n' +
-    '5. **간결한 답변** — 채팅에 답하는 것이므로 친근하고 짧게\n\n' +
+    '═════════════════════════════════════\n' +
+    '📋 [데이터] 사용자 컨텍스트\n' +
+    '═════════════════════════════════════\n' +
+    context + '\n' +
+    
+    '═════════════════════════════════════\n' +
+    '⚙️ [규칙] 의도 판단 + 응답 형식\n' +
+    '═════════════════════════════════════\n' +
+    
+    '## intent 판단\n' +
+    '- "modify": 루틴 변경 (추가/제거/교체/무게·세트 조정)\n' +
+    '  예) "체스트 프레스 빼줘", "어깨 더", "다시 짜봐", "무게 줄여"\n' +
+    '- "question": 운동 지식/이론/방법 질문, 대화\n' +
+    '  예) "후방어깨는 당기기?", "RIR이 뭐야?", "왜 이 순서?"\n' +
+    '- 모호한 변경 의도 ("별로야", "마음에 안 들어", "다른 거") → Case B (modify + 선택지) 우선\n' +
+    '  → 단순 의견 질문("이 종목 좋아?")만 question\n' +
+    '- 헷갈리면 question (수정은 확실할 때만 직접 적용)\n\n' +
+    
+    '## modify 응답 원칙 (가장 중요!)\n' +
+    '1. **위 자동 분석 데이터 인용 필수** — reply 첫 문장에 부위별 종목 수 명시\n' +
+    '   예: "현재 가슴 3개, 어깨 측면 0개라..."\n' +
+    '2. **부족 부위 우선 보충** — 사용자 컨텍스트 "부족 부위" 종목으로 교체 권장\n' +
+    '3. **모호 요청 시 옵션 제시** — "별로야" 같은 요청은 1-2-3 선택지로\n' +
+    '   이때 changes=[], updatedRoutine=null (확정 안 함)\n' +
+    '4. **확실한 요청 시만 updatedRoutine 생성**\n' +
+    '5. **종목별 자동 분석 활용**: 한 부위 4개 이상 = 과잉 / 동일 부위·각도 중복 금지\n' +
+    '6. **무게**: 메인 1RM×70~80%, 보조 65~75%, 고립 60~70%, 2.5kg 단위 반올림\n\n' +
+    
+    '## ❌ 절대 금지\n' +
+    '- 자동 분석 무시하고 단일 종목만 평가\n' +
+    '- "체스트 프레스 별로" → "인클라인 체스트 프레스로 교체" (같은 부위 재추가 = 무의미)\n' +
+    '- 사용자 부족 부위 무시\n' +
+    '- 자동 적용된 것처럼 표현 ("수정했어요" X / "어떠세요?" O)\n\n' +
+    
+    '## 🧬 과학 근거 (인용 시 활용)\n' +
+    '- 부위당 주 10~20세트 (Pelland 2024) / RIR 1~3 (Refalo 2023)\n' +
+    '- 부위당 주 2회 자극 우월 (Schoenfeld 2016)\n' +
+    '- 신장 위치 강조 우월 (Maeo 2023) / 머신=프리웨이트 (Schwanbeck)\n' +
+    '- 5~30회 반복 모두 유효 (IUSCA 2021)\n\n' +
     
     '## 응답 형식\n' +
+    '### Case A (intent=modify, 확정안 있음)\n' +
     '{\n' +
-    '  "reply": "변경안을 제안하는 메시지 (1~3문장, ~할게요 X / ~하면 어떨까요? O)",\n' +
-    '  "changes": [\n' +
-    '    { "type": "add" | "remove" | "modify", "exercise": "종목명", "detail": "변경 내용 (예: 80kg → 75kg)" }\n' +
-    '  ],\n' +
+    '  "intent": "modify",\n' +
+    '  "reply": "자동 분석 인용 + 변경안 제안 (1~3문장)",\n' +
+    '  "changes": [{"type": "add|remove|replace|modify", "exercise": "종목명", "detail": "변경 내용"}],\n' +
     '  "updatedRoutine": {\n' +
-    '    "headline": "업데이트될 루틴 한 줄",\n' +
-    '    "duration": 60,\n' +
-    '    "totalSets": 18,\n' +
-    '    "intensity": "moderate",\n' +
-    '    "exercises": [\n' +
-    '      { "name": "종목명", "type": "복합|고립|보조", "isMain": true/false, "sets": 3, "reps": "8-10", "weight": 150, "rir": 2, "note": "한 줄 노트" }\n' +
-    '    ]\n' +
+    '    "headline": "한 줄", "duration": 60, "totalSets": 18, "intensity": "moderate",\n' +
+    '    "exercises": [{"name":"종목","type":"복합|고립|보조","isMain":bool,"sets":3,"reps":"8-10","weight":150,"rir":2,"note":"이유"}]\n' +
     '  }\n' +
     '}\n\n' +
     
-    '## 응답 가이드\n' +
-    '- reply는 변경안 제안 메시지. 1~3문장으로 친근하게.\n' +
-    '- changes는 변경 내역 요약.\n' +
-    '- updatedRoutine은 변경이 반영된 전체 루틴 (미리보기용).\n' +
-    '- 변경 필요 없으면 reply만 채우고 changes는 빈 배열, updatedRoutine은 null.\n' +
-    '- FREE 모드에서 빈 루틴에 첫 종목 추가 시 6~7개로 완전 구성.\n\n' +
+    '### Case B (intent=modify, 모호해서 확인 필요)\n' +
+    '{\n' +
+    '  "intent": "modify",\n' +
+    '  "reply": "자동 분석 인용 + 1-2-3 선택지 제시",\n' +
+    '  "changes": [],\n' +
+    '  "updatedRoutine": null\n' +
+    '}\n\n' +
     
-    '## 현재 루틴\n' +
+    '### Case C (intent=question)\n' +
+    '{\n' +
+    '  "intent": "question",\n' +
+    '  "reply": "답변 (2~5문장, 과학 근거 인용)"\n' +
+    '}\n\n' +
+    
+    '## 현재 루틴 (JSON)\n' +
     JSON.stringify({
       headline: currentRoutine.headline,
       bodyPart: currentRoutine.bodyPart,
       isFree: isFree,
       exercises: currentRoutine.exercises
-    }, null, 2) + '\n\n' +
-    
-    '## 사용자 데이터\n' + context;
+    }, null, 2);
   
   // 대화 이력 포함
   var messages = chatHistory.slice(-10).map(function(m) {
@@ -4337,6 +4480,9 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
     }
     
     var data = await response.json();
+    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+      return { error: 'AI 응답이 비어있어요. 다시 시도해주세요.' };
+    }
     var content = data.content[0].text;
     
     var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -4345,11 +4491,31 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
       parsed = JSON.parse(cleaned);
     } catch (e) {
       var match = cleaned.match(/\{[\s\S]*\}/);
-      if (match) parsed = JSON.parse(match[0]);
-      else return { error: 'JSON 파싱 실패' };
+      if (match) {
+        try {
+          parsed = JSON.parse(match[0]);
+        } catch (e2) {
+          // JSON 추출 실패 - 텍스트를 question 답변으로 처리
+          return {
+            intent: 'question',
+            reply: cleaned || '응답을 받지 못했어요. 다시 질문해주세요.',
+            changes: [],
+            updatedRoutine: null
+          };
+        }
+      } else {
+        // 아예 JSON이 없음 - 자연어 답변으로 간주
+        return {
+          intent: 'question',
+          reply: cleaned || '응답을 받지 못했어요. 다시 질문해주세요.',
+          changes: [],
+          updatedRoutine: null
+        };
+      }
     }
     
     return {
+      intent: parsed.intent || (parsed.updatedRoutine ? 'modify' : 'question'),
       reply: parsed.reply || '',
       changes: Array.isArray(parsed.changes) ? parsed.changes : [],
       updatedRoutine: parsed.updatedRoutine || null
@@ -4401,8 +4567,17 @@ window.sendRoutineModification = async function() {
       role: 'assistant',
       content: '⚠️ 수정 실패: ' + result.error
     });
+  } else if (result.intent === 'question') {
+    // 일반 질문/대화 - 답변만 표시, 변경안 없음
+    state.routineChatHistory.push({
+      role: 'assistant',
+      content: result.reply,
+      changes: [],
+      pendingRoutine: null,
+      approvalStatus: null
+    });
   } else {
-    // 봇 답변 + 변경 카드 + 대기 중인 변경안 (자동 적용 X)
+    // 루틴 수정 (modify) - 변경 카드 + 대기 중인 변경안
     state.routineChatHistory.push({
       role: 'assistant',
       content: result.reply,
@@ -5279,12 +5454,15 @@ function finalizeSession() {
       exercisesDone.push({
         name: ex.name,
         type: ex.type,
-        sets: doneSets.length,
+        sets: doneSets.length,        // 숫자 (기존 호환)
+        setsCount: doneSets.length,   // 명시적 (새 분석 함수용)
+        setsDetail: doneSets,          // 풀 세트 배열 (상세 분석용)
         weights: weights,
         reps: reps,
         maxWeight: maxWeight,
         lastWeight: ex.lastWeight,
-        lastReps: ex.lastReps
+        lastReps: ex.lastReps,
+        isMain: !!ex.isMain
       });
       
       // PR 감지
@@ -5336,10 +5514,23 @@ function finalizeSession() {
       state.data.personalRecords.unshift(pr);
     });
     storage.set(KEYS.PERSONAL_RECORDS, state.data.personalRecords);
+    
+    // 프로필 자동 갱신: 풀업/친업 PR 시 pullupRange 업데이트
+    var pullupPR = newPRs.find(function(pr) {
+      return (pr.exerciseName === '풀업' || pr.exerciseName === '친업') && pr.reps;
+    });
+    if (pullupPR && pullupPR.reps) {
+      var newReps = pullupPR.reps;
+      var lo = Math.max(1, newReps - 2);
+      var hi = newReps + 2;
+      state.profile.pullupRange = lo + '~' + hi;
+      storage.set(KEYS.PROFILE, state.profile);
+    }
   }
   
   // 완료 화면용 데이터 저장
   state.completedSession = {
+    workoutId: newWorkout.id,
     sessionName: session.sessionName,
     duration: durationMin,
     exerciseCount: exercisesDone.length,
@@ -5360,6 +5551,8 @@ function finalizeSession() {
 
 // 완료 화면 → 홈으로
 window.goHome = function() {
+  // 컨디션 데이터 저장
+  saveCompletionCondition();
   state.completedSession = null;
   state.currentTab = 'home';
   render();
@@ -5367,10 +5560,50 @@ window.goHome = function() {
 
 // 완료 화면 → 운동 메인으로
 window.goToWorkout = function() {
+  saveCompletionCondition();
   state.completedSession = null;
   state.currentTab = 'workout';
   render();
 };
+
+// RPE 선택
+window.setCompleteRpe = function(rpe) {
+  if (state.completedSession) {
+    state.completedSession.rpe = rpe;
+    render();
+  }
+};
+
+// 컨디션 선택
+window.setCompleteCondition = function(c) {
+  if (state.completedSession) {
+    state.completedSession.condition = c;
+    render();
+  }
+};
+
+// 완료 시점 컨디션 저장
+function saveCompletionCondition() {
+  if (!state.completedSession) return;
+  var cs = state.completedSession;
+  // RPE 또는 컨디션 중 하나라도 입력했으면 저장
+  if (!cs.rpe && !cs.condition) return;
+  
+  var entry = {
+    id: 'cd_' + Date.now(),
+    date: new Date().toISOString().split('T')[0],
+    workoutId: cs.workoutId || null,
+    sessionName: cs.sessionName,
+    rpe: cs.rpe || null,           // 1~10 (Rate of Perceived Exertion)
+    condition: cs.condition || null, // 1~5 (전반 컨디션)
+    duration: cs.duration,
+    timestamp: Date.now()
+  };
+  
+  if (!state.data.conditionLog) state.data.conditionLog = [];
+  state.data.conditionLog.unshift(entry);
+  storage.set(KEYS.CONDITION_LOG, state.data.conditionLog);
+}
 
 // 세트 클릭 → 편집 시트 열기
 window.openSetEditor = function(exerciseIdx, setIdx) {
@@ -5910,6 +6143,43 @@ function renderWorkoutComplete() {
       '<div class="card mb-4">' +
         '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-3">종목별 기록</p>' +
         '<div>' + exerciseSummary + '</div>' +
+      '</div>' +
+      
+      // 컨디션 입력 카드
+      '<div class="card mb-4">' +
+        '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-3">오늘 컨디션</p>' +
+        '<div class="condition-grid">' +
+          // 운동 강도 체감 (RPE 1~10, 5칸 × 2줄)
+          '<div class="condition-row">' +
+            '<p class="condition-label">강도 체감</p>' +
+            '<div class="condition-buttons rpe-10">' +
+              (function() {
+                var rpe = state.completedSession.rpe || 0;
+                var html = '';
+                for (var i = 1; i <= 10; i++) {
+                  var sel = i === rpe ? ' selected' : '';
+                  html += '<button class="cond-btn' + sel + '" onclick="setCompleteRpe(' + i + ')">' + i + '</button>';
+                }
+                return html;
+              })() +
+            '</div>' +
+            '<p class="condition-hint">1: 너무 쉬움 / 5: 적정 / 10: 한계</p>' +
+          '</div>' +
+          // 전반 컨디션 (1~5)
+          '<div class="condition-row">' +
+            '<p class="condition-label">전반 컨디션</p>' +
+            '<div class="condition-buttons">' +
+              (function() {
+                var c = state.completedSession.condition || 0;
+                return [1,2,3,4,5].map(function(i) {
+                  var sel = i === c ? ' selected' : '';
+                  return '<button class="cond-btn cond-btn-wide' + sel + '" onclick="setCompleteCondition(' + i + ')">' + i + '</button>';
+                }).join('');
+              })() +
+            '</div>' +
+            '<p class="condition-hint">1: 매우 나쁨 / 5: 매우 좋음</p>' +
+          '</div>' +
+        '</div>' +
       '</div>' +
       
       // 코치 메시지
@@ -6832,6 +7102,7 @@ window.executeResetAll = function() {
   localStorage.setItem(KEYS.NUTRITION_LOG, JSON.stringify([]));
   localStorage.setItem(KEYS.PERSONAL_RECORDS, JSON.stringify([]));
   localStorage.setItem(KEYS.BODY_LOG, JSON.stringify([]));
+  localStorage.setItem(KEYS.CONDITION_LOG, JSON.stringify([]));
   localStorage.setItem(KEYS.PROFILE, JSON.stringify(DEFAULT_PROFILE));
   
   showToast('✓ 모든 데이터 삭제 완료');
@@ -7203,7 +7474,431 @@ function renderMore() {
 // ═══════════════════════════════════════════════
 
 // 사용자 데이터 컨텍스트 생성 (코치가 알아야 할 모든 정보)
-function buildUserContext() {
+// ═══════════════════════════════════════════════
+// 종목 → 부위 매핑 (균형 분석용)
+// ═══════════════════════════════════════════════
+var EXERCISE_BODY_PART_MAP = {
+  // 가슴 (chest)
+  '머신 체스트 프레스': { primary: 'chest', secondary: ['triceps', 'shoulders_front'], compound: true, angle: 'flat' },
+  '체스트 프레스 머신': { primary: 'chest', secondary: ['triceps', 'shoulders_front'], compound: true, angle: 'flat' },
+  '스미스 인클라인 벤치 프레스': { primary: 'chest_upper', secondary: ['shoulders_front', 'triceps'], compound: true, angle: 'incline' },
+  '덤벨 인클라인 벤치 프레스': { primary: 'chest_upper', secondary: ['shoulders_front', 'triceps'], compound: true, angle: 'incline' },  // 표준명 (1RM 데이터 키)
+  '덤벨 벤치 프레스': { primary: 'chest', secondary: ['shoulders_front', 'triceps'], compound: true, angle: 'flat' },
+  '머신 펙 덱 플라이': { primary: 'chest', secondary: [], compound: false, angle: 'flat', stretched: true },
+  '펙덱 플라이': { primary: 'chest', secondary: [], compound: false, angle: 'flat', stretched: true },
+  '케이블 플라이': { primary: 'chest', secondary: [], compound: false, angle: 'flat', stretched: true },
+  '케이블 크로스오버': { primary: 'chest_lower', secondary: [], compound: false, angle: 'decline', stretched: true },
+  '덤벨 플라이': { primary: 'chest', secondary: [], compound: false, angle: 'flat', stretched: true },
+  
+  // 어깨 (shoulders)
+  '머신 시티드 숄더 프레스': { primary: 'shoulders_front', secondary: ['shoulders_side', 'triceps'], compound: true },
+  '숄더 프레스 머신': { primary: 'shoulders_front', secondary: ['shoulders_side', 'triceps'], compound: true },
+  '덤벨 숄더 프레스': { primary: 'shoulders_front', secondary: ['shoulders_side', 'triceps'], compound: true },
+  '덤벨 아놀드 프레스': { primary: 'shoulders_front', secondary: ['shoulders_side', 'triceps'], compound: true },
+  '덤벨 사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false },
+  '사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false },
+  '케이블 원 암 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, stretched: true },
+  '리버스 펙 덱 플라이': { primary: 'shoulders_rear', secondary: ['upper_back'], compound: false },
+  '원암 리버스 펙 덱 플라이': { primary: 'shoulders_rear', secondary: [], compound: false },
+  '페이스 풀': { primary: 'shoulders_rear', secondary: ['upper_back'], compound: false },
+  
+  // 삼두 (triceps)
+  '케이블 푸시 다운': { primary: 'triceps', secondary: [], compound: false },
+  '트라이셉스 푸시다운': { primary: 'triceps', secondary: [], compound: false },
+  '케이블 오버헤드 트라이셉스 익스텐션': { primary: 'triceps', secondary: [], compound: false, stretched: true },
+  '케이블 트라이셉스 킥백': { primary: 'triceps', secondary: [], compound: false },
+  '어시스트 딥스': { primary: 'chest_lower', secondary: ['triceps', 'shoulders_front'], compound: true },  // 상체 전방 기울임 = 가슴 강조 (사용자 기본). 직립 + 좁은 그립이면 삼두 강조.
+  '딥스': { primary: 'chest_lower', secondary: ['triceps', 'shoulders_front'], compound: true },
+  '클로즈 그립 벤치 프레스': { primary: 'triceps', secondary: ['chest', 'shoulders_front'], compound: true },
+  
+  // 등/광배 (back/lats)
+  '풀업': { primary: 'lats', secondary: ['biceps', 'upper_back'], compound: true },
+  '친업': { primary: 'lats', secondary: ['biceps'], compound: true },
+  '랫풀다운': { primary: 'lats', secondary: ['biceps'], compound: true },
+  '랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true },
+  '클로즈 그립 랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true },
+  '리버스 그립 랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true },
+  '머신 시티드 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true },
+  '시티드 로우 머신': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true },
+  '케이블 시티드 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true },
+  'T 바 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true },
+  '덤벨 인클라인 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true },
+  '덤벨 로우': { primary: 'lats', secondary: ['upper_back', 'biceps'], compound: true },
+  '바벨 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true },
+  '케이블 암 풀 다운': { primary: 'lats', secondary: [], compound: false, stretched: true },
+  '풀오버': { primary: 'lats', secondary: ['chest'], compound: false, stretched: true },
+  '케이블 슈러그': { primary: 'traps', secondary: [], compound: false },
+  '켈소 슈러그': { primary: 'upper_back', secondary: ['traps'], compound: false },
+  '덤벨 슈러그': { primary: 'traps', secondary: [], compound: false },
+  
+  // 이두 (biceps)
+  '바벨 컬': { primary: 'biceps', secondary: ['forearms'], compound: false },
+  '덤벨 해머 컬': { primary: 'biceps', secondary: ['forearms'], compound: false },
+  '해머 컬': { primary: 'biceps', secondary: ['forearms'], compound: false },
+  '덤벨 프리처 컬': { primary: 'biceps', secondary: [], compound: false },
+  '이지 바 프리처 컬': { primary: 'biceps', secondary: [], compound: false },
+  '인클라인 덤벨 컬': { primary: 'biceps', secondary: [], compound: false, stretched: true },
+  '덤벨 얼터네이트 컬': { primary: 'biceps', secondary: ['forearms'], compound: false },
+  '컨센트레이션 컬': { primary: 'biceps', secondary: [], compound: false },
+  '케이블 컬': { primary: 'biceps', secondary: [], compound: false },
+  
+  // 하체 - 대퇴사두
+  '레그 프레스': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true },
+  '핵 스쿼트': { primary: 'quads', secondary: ['glutes'], compound: true },
+  '리버스 브이 스쿼트': { primary: 'quads', secondary: ['glutes'], compound: true },
+  '스미스 머신 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true },
+  '바벨 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true },
+  '프론트 스쿼트': { primary: 'quads', secondary: ['glutes'], compound: true },
+  '머신 레그 익스텐션': { primary: 'quads', secondary: [], compound: false },
+  '레그 익스텐션': { primary: 'quads', secondary: [], compound: false },
+  '시시 스쿼트': { primary: 'quads', secondary: [], compound: false, stretched: true },
+  
+  // 하체 - 햄스트링/둔근
+  '바벨 루마니안 데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back'], compound: true, stretched: true },
+  '덤벨 루마니안 데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back'], compound: true, stretched: true },
+  '루마니안 데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back'], compound: true, stretched: true },
+  '데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back', 'upper_back'], compound: true },
+  '머신 라잉 레그 컬': { primary: 'hamstrings', secondary: [], compound: false },
+  '라잉 레그 컬': { primary: 'hamstrings', secondary: [], compound: false },
+  '시티드 레그 컬': { primary: 'hamstrings', secondary: [], compound: false, stretched: true },
+  '햄스트링 컬': { primary: 'hamstrings', secondary: [], compound: false },
+  '머신 힙 쓰러스트': { primary: 'glutes', secondary: ['hamstrings'], compound: true },
+  '바벨 힙 쓰러스트': { primary: 'glutes', secondary: ['hamstrings'], compound: true },
+  '힙 쓰러스트': { primary: 'glutes', secondary: ['hamstrings'], compound: true },
+  '머신 힙 어브덕션': { primary: 'glutes_med', secondary: [], compound: false },
+  '힙 어덕션': { primary: 'adductors', secondary: [], compound: false },
+  '힙 어브덕션': { primary: 'glutes_med', secondary: [], compound: false },
+  '덤벨 불가리안 스플릿 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true },
+  '불가리안 스플릿 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true },
+  '덤벨 싱글 레그 데드리프트': { primary: 'hamstrings', secondary: ['glutes'], compound: true, stretched: true },
+  '런지': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true },
+  
+  // 종아리
+  '카프 레이즈': { primary: 'calves', secondary: [], compound: false, stretched: true },
+  '시티드 카프 레이즈': { primary: 'calves', secondary: [], compound: false, stretched: true },
+  '스탠딩 카프 레이즈': { primary: 'calves', secondary: [], compound: false, stretched: true },
+  
+  // 코어
+  '머신 시티드 크런치': { primary: 'abs', secondary: [], compound: false },
+  '크런치': { primary: 'abs', secondary: [], compound: false },
+  '케이블 닐링 사이드 크런치': { primary: 'obliques', secondary: ['abs'], compound: false },
+  '러시안 트위스트': { primary: 'obliques', secondary: ['abs'], compound: false },
+  '플랭크': { primary: 'abs', secondary: ['obliques'], compound: false },
+  '인클라인 덤벨 와이 레이즈': { primary: 'shoulders_rear', secondary: ['traps'], compound: false }
+};
+
+// 부위 그룹 (대분류) - 부위 균형 분석 및 합산 진단용
+// 형식: 통합부위코드: { kr: '한국어명', subParts: ['세부 부위 코드들...'] }
+var BODY_PART_GROUPS = {
+  chest:           { kr: '가슴',       subParts: ['chest', 'chest_upper', 'chest_lower'] },
+  shoulders_front: { kr: '어깨 전면',  subParts: ['shoulders_front'] },
+  shoulders_side:  { kr: '어깨 측면',  subParts: ['shoulders_side'] },
+  shoulders_rear:  { kr: '어깨 후면',  subParts: ['shoulders_rear'] },
+  triceps:         { kr: '삼두',       subParts: ['triceps'] },
+  lats:            { kr: '광배',       subParts: ['lats'] },
+  upper_back:      { kr: '등 중부',    subParts: ['upper_back', 'traps'] },
+  biceps:          { kr: '이두',       subParts: ['biceps'] },
+  forearms:        { kr: '전완',       subParts: ['forearms'] },
+  quads:           { kr: '대퇴사두',   subParts: ['quads'] },
+  hamstrings:      { kr: '햄스트링',   subParts: ['hamstrings'] },
+  glutes:          { kr: '둔근',       subParts: ['glutes', 'glutes_med'] },
+  adductors:       { kr: '내전근',     subParts: ['adductors'] },
+  calves:          { kr: '종아리',     subParts: ['calves'] },
+  abs:             { kr: '복근',       subParts: ['abs', 'obliques'] },
+  lower_back:      { kr: '요추',       subParts: ['lower_back'] }
+};
+
+// 부족 부위 → 권장 종목 매핑 (AI에게 직접 매칭 제공)
+// 각 종목의 primary 부위가 권장 부위와 일치해야 함 (예외: forearms/lower_back은 secondary 자극으로 보충)
+var WEAK_PART_EXERCISE_MAP = {
+  chest:           ['머신 펙 덱 플라이', '케이블 플라이', '머신 체스트 프레스', '스미스 인클라인 벤치 프레스'],
+  shoulders_front: ['머신 시티드 숄더 프레스', '덤벨 숄더 프레스', '덤벨 아놀드 프레스'],
+  shoulders_side:  ['케이블 원 암 레터럴 레이즈', '덤벨 사이드 레터럴 레이즈'],
+  shoulders_rear:  ['리버스 펙 덱 플라이', '페이스 풀', '원암 리버스 펙 덱 플라이'],
+  triceps:         ['케이블 푸시 다운', '케이블 오버헤드 트라이셉스 익스텐션', '케이블 트라이셉스 킥백'],
+  lats:            ['풀업', '클로즈 그립 랫 풀 다운', '랫 풀 다운', '케이블 암 풀 다운'],
+  upper_back:      ['머신 시티드 로우', 'T 바 로우', '케이블 슈러그'],
+  biceps:          ['인클라인 덤벨 컬', '이지 바 프리처 컬', '바벨 컬'],
+  forearms:        ['덤벨 해머 컬(이두 보조 자극)', '바벨 컬(이두 보조 자극)'],
+  quads:           ['레그 프레스', '핵 스쿼트', '머신 레그 익스텐션', '덤벨 불가리안 스플릿 스쿼트'],
+  hamstrings:      ['바벨 루마니안 데드리프트', '시티드 레그 컬', '머신 라잉 레그 컬'],
+  glutes:          ['머신 힙 쓰러스트', '머신 힙 어브덕션'],
+  adductors:       ['힙 어덕션'],
+  calves:          ['시티드 카프 레이즈', '스탠딩 카프 레이즈'],
+  abs:             ['머신 시티드 크런치', '케이블 닐링 사이드 크런치'],
+  lower_back:      ['바벨 루마니안 데드리프트(햄스트링 보조 자극)']
+};
+
+// 통합 부위 코드 → 한국어 라벨 빠른 조회 (현재 직접 BODY_PART_GROUPS[g].kr 사용)
+// 헬퍼 미사용 — 호출 위치 추가 시 재활성화
+
+// volumeByPart (세부 부위 단위) → 그룹 합산 (가슴 합계, 어깨 합계 등)
+function groupVolumeBy(volumeByPart) {
+  var grouped = {};
+  Object.keys(BODY_PART_GROUPS).forEach(function(g) {
+    var total = 0;
+    BODY_PART_GROUPS[g].subParts.forEach(function(sub) {
+      total += (volumeByPart[sub] || 0);
+    });
+    if (total > 0) grouped[g] = total;
+  });
+  return grouped;
+}
+
+// 부위 한국어
+var BODY_PART_KR = {
+  chest: '가슴', chest_upper: '가슴 상부', chest_lower: '가슴 하부',
+  shoulders_front: '어깨 전면', shoulders_side: '어깨 측면', shoulders_rear: '어깨 후면',
+  triceps: '삼두', biceps: '이두',
+  lats: '광배', upper_back: '등 중부', traps: '승모근', forearms: '전완',
+  quads: '대퇴사두', hamstrings: '햄스트링', glutes: '둔근', glutes_med: '중둔근',
+  calves: '종아리', adductors: '내전근',
+  abs: '복근', obliques: '복사근', lower_back: '요추'
+};
+
+// 종목명 → 부위 정보 찾기 (퍼지 매칭)
+function getExercisePart(exerciseName) {
+  if (!exerciseName) return null;
+  // 정확한 매칭
+  if (EXERCISE_BODY_PART_MAP[exerciseName]) return EXERCISE_BODY_PART_MAP[exerciseName];
+  
+  // 부분 매칭 (포함 관계)
+  var name = exerciseName.toLowerCase();
+  for (var key in EXERCISE_BODY_PART_MAP) {
+    if (key.toLowerCase().includes(name) || name.includes(key.toLowerCase())) {
+      return EXERCISE_BODY_PART_MAP[key];
+    }
+  }
+  
+  // 키워드 기반 추측
+  if (name.indexOf('체스트') >= 0 || name.indexOf('가슴') >= 0 || name.indexOf('벤치') >= 0 || name.indexOf('플라이') >= 0) {
+    return { primary: 'chest', secondary: [], compound: name.indexOf('플라이') < 0, angle: name.indexOf('인클라인') >= 0 ? 'incline' : 'flat' };
+  }
+  if (name.indexOf('숄더') >= 0 || name.indexOf('레터럴') >= 0) {
+    return { primary: name.indexOf('레터럴') >= 0 ? 'shoulders_side' : 'shoulders_front', secondary: [], compound: name.indexOf('프레스') >= 0 };
+  }
+  if (name.indexOf('컬') >= 0) return { primary: 'biceps', secondary: [], compound: false };
+  if (name.indexOf('푸시 다운') >= 0 || name.indexOf('익스텐션') >= 0 && name.indexOf('트라이셉') >= 0) return { primary: 'triceps', secondary: [], compound: false };
+  if (name.indexOf('로우') >= 0) return { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true };
+  if (name.indexOf('풀다운') >= 0 || name.indexOf('풀 다운') >= 0 || name.indexOf('풀업') >= 0) return { primary: 'lats', secondary: ['biceps'], compound: true };
+  if (name.indexOf('스쿼트') >= 0 || name.indexOf('레그 프레스') >= 0) return { primary: 'quads', secondary: ['glutes'], compound: true };
+  if (name.indexOf('레그 익스텐션') >= 0) return { primary: 'quads', secondary: [], compound: false };
+  if (name.indexOf('레그 컬') >= 0 || name.indexOf('햄스트링') >= 0 || name.indexOf('rdl') >= 0 || name.indexOf('데드리프트') >= 0) return { primary: 'hamstrings', secondary: ['glutes'], compound: true };
+  if (name.indexOf('힙') >= 0) return { primary: 'glutes', secondary: [], compound: false };
+  if (name.indexOf('카프') >= 0 || name.indexOf('종아리') >= 0) return { primary: 'calves', secondary: [], compound: false };
+  
+  return null;
+}
+
+// ═══════════════════════════════════════════════
+// 루틴 균형 분석 (AI에게 줄 가공된 데이터)
+// ═══════════════════════════════════════════════
+function analyzeRoutineBalance(exercises) {
+  if (!exercises || exercises.length === 0) return { partCounts: {}, totalExercises: 0, mainCount: 0, isolationCount: 0, stretchedCount: 0, warnings: [] };
+  
+  var partCounts = {};        // primary 기준 (정수)
+  var partCountsWithSec = {}; // primary 1.0 + secondary 0.3 (소수)
+  var compoundCount = 0;
+  var isolationCount = 0;
+  var stretchedCount = 0;
+  var mainCount = 0;
+  var unknownExercises = [];
+  
+  exercises.forEach(function(ex) {
+    var info = getExercisePart(ex.name);
+    if (!info) {
+      unknownExercises.push(ex.name);
+      return;
+    }
+    
+    if (ex.isMain) mainCount++;
+    
+    // primary 부위 +1
+    partCounts[info.primary] = (partCounts[info.primary] || 0) + 1;
+    partCountsWithSec[info.primary] = (partCountsWithSec[info.primary] || 0) + 1.0;
+    
+    // secondary 부위 +0.3 (자극 기여도)
+    if (info.secondary && info.secondary.length > 0) {
+      info.secondary.forEach(function(s) {
+        partCountsWithSec[s] = (partCountsWithSec[s] || 0) + 0.3;
+      });
+    }
+    
+    if (info.compound) compoundCount++;
+    else isolationCount++;
+    
+    if (info.stretched) stretchedCount++;
+  });
+  
+  var warnings = [];
+  var totalEx = exercises.length;
+  
+  // 한 부위 primary 4개 이상 = 과잉
+  Object.keys(partCounts).forEach(function(part) {
+    if (partCounts[part] >= 4) {
+      warnings.push((BODY_PART_KR[part] || part) + ' 종목 ' + partCounts[part] + '개 (과잉 - 3개 이하 권장)');
+    }
+  });
+  
+  // 동일 부위·각도 중복 체크
+  var angleMap = {};
+  exercises.forEach(function(ex) {
+    var info = getExercisePart(ex.name);
+    if (!info || !info.angle) return;
+    var key = info.primary + '_' + info.angle;
+    angleMap[key] = (angleMap[key] || 0) + 1;
+  });
+  Object.keys(angleMap).forEach(function(key) {
+    if (angleMap[key] >= 2) {
+      var parts = key.split('_');
+      warnings.push('동일 부위·각도 중복: ' + (BODY_PART_KR[parts[0]] || parts[0]) + ' ' + parts[1] + ' ' + angleMap[key] + '개');
+    }
+  });
+  
+  if (mainCount === 0 && totalEx >= 3) {
+    warnings.push('메인 종목(isMain) 없음 - 1~2개 지정 권장');
+  }
+  if (mainCount > 3) {
+    warnings.push('메인 종목 ' + mainCount + '개 (1~2개 권장 - 너무 많음)');
+  }
+  
+  if (stretchedCount === 0 && totalEx >= 4) {
+    warnings.push('신장 위치 강조 종목 없음 - 1개 이상 권장 (Maeo 2023)');
+  }
+  
+  return {
+    partCounts: partCounts,
+    partCountsWithSec: partCountsWithSec,
+    totalExercises: totalEx,
+    compoundCount: compoundCount,
+    isolationCount: isolationCount,
+    stretchedCount: stretchedCount,
+    mainCount: mainCount,
+    unknownExercises: unknownExercises,
+    warnings: warnings
+  };
+}
+
+// 균형 분석 결과를 텍스트로 변환
+function formatBalanceAnalysis(analysis) {
+  if (!analysis || analysis.totalExercises === 0) return '루틴 비어있음';
+  
+  var lines = [];
+  lines.push('총 ' + analysis.totalExercises + '개 종목 (메인 ' + analysis.mainCount + ', 복합 ' + analysis.compoundCount + ', 고립 ' + analysis.isolationCount + ', 신장강조 ' + analysis.stretchedCount + ')');
+  
+  // primary 부위 카운트
+  var partList = Object.keys(analysis.partCounts).sort(function(a, b) { return analysis.partCounts[b] - analysis.partCounts[a]; });
+  if (partList.length > 0) {
+    lines.push('primary 부위: ' + partList.map(function(p) { return (BODY_PART_KR[p] || p) + ' ' + analysis.partCounts[p]; }).join(', '));
+  }
+  
+  // primary + secondary 통합 (실제 자극)
+  if (analysis.partCountsWithSec) {
+    var secList = Object.keys(analysis.partCountsWithSec).sort(function(a, b) { return analysis.partCountsWithSec[b] - analysis.partCountsWithSec[a]; });
+    if (secList.length > 0) {
+      lines.push('실제 자극 (secondary 0.3 포함): ' + secList.map(function(p) { return (BODY_PART_KR[p] || p) + ' ' + analysis.partCountsWithSec[p].toFixed(1); }).join(', '));
+    }
+  }
+  
+  if (analysis.warnings.length > 0) {
+    lines.push('⚠️ 경고: ' + analysis.warnings.join(' | '));
+  }
+  
+  if (analysis.unknownExercises && analysis.unknownExercises.length > 0) {
+    lines.push('⚠️ 매핑 안 된 종목 (부위 추측 불가): ' + analysis.unknownExercises.join(', '));
+  }
+  
+  return lines.join('\n');
+}
+
+// 최근 N주 부위별 누적 세트 수 (주간 볼륨 분석)
+function getRecentVolumeByPart(weeks) {
+  var today = new Date();
+  var since = new Date(today);
+  since.setDate(today.getDate() - (weeks * 7));
+  
+  var workouts = state.data.workoutLog.filter(function(w) {
+    return new Date(w.date) >= since;
+  });
+  
+  var volumeByPart = {};
+  
+  workouts.forEach(function(w) {
+    if (!w.exercises || !Array.isArray(w.exercises)) return;
+    w.exercises.forEach(function(ex) {
+      var info = getExercisePart(ex.name);
+      if (!info) return;
+      
+      // 실제 완료 세트 수 카운트 (우선순위: setsCount > sets(number) > setsDetail > sets(array))
+      var setCount = 0;
+      if (typeof ex.setsCount === 'number') {
+        setCount = ex.setsCount;
+      } else if (typeof ex.sets === 'number') {
+        setCount = ex.sets;
+      } else if (Array.isArray(ex.setsDetail)) {
+        setCount = ex.setsDetail.filter(function(s) { return s.completed && !s.isWarmup; }).length;
+      } else if (Array.isArray(ex.sets)) {
+        setCount = ex.sets.filter(function(s) { return s.completed && !s.isWarmup; }).length;
+      }
+      
+      if (setCount === 0) return;
+      
+      // primary 부위에 풀 세트
+      volumeByPart[info.primary] = (volumeByPart[info.primary] || 0) + setCount;
+      
+      // secondary 부위에 0.3 세트 (메타분석상 secondary 자극 30~40%)
+      if (info.secondary && info.secondary.length > 0) {
+        info.secondary.forEach(function(s) {
+          volumeByPart[s] = (volumeByPart[s] || 0) + setCount * 0.3;
+        });
+      }
+    });
+  });
+  
+  return volumeByPart;
+}
+
+// 부족/과잉 부위 식별 (그룹 합산 기반)
+// volumeByPart는 세부 부위 단위 → 가슴(chest+chest_upper+chest_lower) 합산해서 진단
+function getVolumeDiagnosis(volumeByPart, weeks) {
+  var lacking = [];
+  var optimal = [];
+  var excessive = [];
+  
+  // 그룹 합산
+  var groupedVol = groupVolumeBy(volumeByPart);
+  
+  // 모든 그룹 평가
+  Object.keys(BODY_PART_GROUPS).forEach(function(g) {
+    var weeklyVol = (groupedVol[g] || 0) / weeks;
+    var label = BODY_PART_GROUPS[g].kr;
+    var entry = { group: g, label: label, vol: weeklyVol };
+    
+    if (weeklyVol < 4) {
+      // 0세트인 경우 (운동 안 함)는 진단에서 제외할지 포함할지 — 일단 제외
+      // 사용자가 그 부위 운동 안 했을 때 매번 "부족" 표시는 노이즈
+      if (weeklyVol > 0) {
+        entry.label += ' (주' + weeklyVol.toFixed(1) + '세트)';
+        lacking.push(entry);
+      }
+    } else if (weeklyVol >= 4 && weeklyVol < 10) {
+      // MEV 통과, MAV 미달 — 별도 분류 없이 통과
+    } else if (weeklyVol >= 10 && weeklyVol <= 20) {
+      entry.label += ' (주' + weeklyVol.toFixed(1) + '세트)';
+      optimal.push(entry);
+    } else if (weeklyVol > 20) {
+      entry.label += ' (주' + weeklyVol.toFixed(1) + '세트)';
+      excessive.push(entry);
+    }
+  });
+  
+  return { lacking: lacking, optimal: optimal, excessive: excessive };
+}
+
+function buildUserContext(options) {
+  options = options || {};
+  // options.focusBodyPart: 'push' | 'pull' | 'legs' → 그 부위 1RM만 포함 (토큰 절약)
+  var focusBodyPart = options.focusBodyPart || null;
   var profile = state.profile;
   var today = new Date();
   var todayStr = getTodayStr();
@@ -7257,24 +7952,38 @@ function buildUserContext() {
   // PR
   var recentPRs = state.data.personalRecords.slice(0, 5);
   
-  // 최근 운동 종목별 무게
+  // 최근 운동 종목별 무게 (max weight + 진행 추이)
   var recentLifts = {};
-  recentWorkouts.slice(0, 5).forEach(function(w) {
-    if (w.exercisesData) {
-      w.exercisesData.forEach(function(ex) {
-        if (!recentLifts[ex.name]) {
-          recentLifts[ex.name] = { weight: ex.maxWeight, date: w.date };
-        }
-      });
+  recentWorkouts.slice(0, 10).forEach(function(w) {
+    var exList = w.exercises || w.exercisesData;
+    if (!exList || !Array.isArray(exList)) return;
+    exList.forEach(function(ex) {
+      if (!ex.name) return;
+      var weight = ex.maxWeight !== undefined ? ex.maxWeight : (ex.weight !== undefined ? ex.weight : null);
+      if (weight === null || weight === undefined) return;
+      
+      if (!recentLifts[ex.name]) {
+        recentLifts[ex.name] = { weight: weight, date: w.date, history: [] };
+      }
+      recentLifts[ex.name].history.push({ weight: weight, date: w.date });
+    });
+  });
+  
+  // 정체기 감지: 최근 3회 같은 무게 시 표시
+  Object.keys(recentLifts).forEach(function(name) {
+    var hist = recentLifts[name].history.slice(0, 3);
+    if (hist.length >= 3 && hist[0].weight === hist[1].weight && hist[1].weight === hist[2].weight) {
+      recentLifts[name].plateau = true;
     }
   });
   
   // 컨텍스트 문자열 구성
+  var pullupRangeStr = profile.pullupRange || '4~8';
   var ctx = '## 사용자 정보\n';
   ctx += '- 나이: ' + profile.age + '세, 키: ' + profile.height + 'cm, 체중: ' + currentWeight + 'kg\n';
   ctx += '- 목표: 린매스 (체지방↓ + 근육↑)\n';
   ctx += '- 경력: 명목상 중급, 실질 초~중급\n';
-  ctx += '- 환경: 헬스장 머신/덤벨 위주, 프리웨이트 불안, 풀업 4~8개 가능\n';
+  ctx += '- 환경: 헬스장 머신/덤벨 위주, 풀업 ' + pullupRangeStr + '개 가능\n';
   ctx += '- 사이클: ' + profile.currentCycle + '차 / ' + profile.currentWeek + '주차 (' + profile.cyclePhase + ')\n';
   ctx += '- 목표: 단백질 ' + profile.proteinTarget + 'g, 칼로리 ' + profile.calorieTarget + 'kcal/일, 주 ' + profile.workoutFreq + '회 운동\n\n';
   
@@ -7309,6 +8018,47 @@ function buildUserContext() {
   }
   ctx += '\n';
   
+  // ⭐ 부위별 주간 볼륨 분석 (가장 중요)
+  var volumeByPart = getRecentVolumeByPart(2);  // 2주 기준
+  var volumeKeys = Object.keys(volumeByPart);
+  if (volumeKeys.length > 0) {
+    var diagnosis = getVolumeDiagnosis(volumeByPart, 2);
+    var groupedVol = groupVolumeBy(volumeByPart);
+    
+    ctx += '## 부위별 주간 볼륨 분석 (최근 2주 평균, 세트/주, 그룹 합산)\n';
+    ctx += '※ Pelland 2024: 부위당 주 10~20세트가 최적 / 4세트 미만 = 부족 / 20세트 초과 = 과잉\n';
+    ctx += '※ 가슴 = chest+chest_upper+chest_lower 합산. 어깨 측면/전면/후면 별도. 등 중부 = upper_back+traps.\n';
+    
+    // 그룹 단위로 표시 (가슴 합산)
+    var partVolStrs = [];
+    Object.keys(BODY_PART_GROUPS).forEach(function(g) {
+      var vol = (groupedVol[g] || 0) / 2;
+      if (vol > 0) {
+        var status = vol < 4 ? '🔴' : (vol < 10 ? '🟡' : (vol <= 20 ? '🟢' : '🔥'));
+        partVolStrs.push(status + ' ' + BODY_PART_GROUPS[g].kr + ' ' + vol.toFixed(1));
+      }
+    });
+    if (partVolStrs.length > 0) {
+      ctx += partVolStrs.join(' / ') + '\n';
+    }
+    
+    if (diagnosis.lacking.length > 0) {
+      ctx += '⚠️ **부족 부위 (보충 필요)**:\n';
+      diagnosis.lacking.forEach(function(item) {
+        var recs = WEAK_PART_EXERCISE_MAP[item.group] || [];
+        ctx += '- ' + item.label;
+        if (recs.length > 0) {
+          ctx += ' → 권장 종목: ' + recs.slice(0, 3).join(', ');
+        }
+        ctx += '\n';
+      });
+    }
+    if (diagnosis.excessive.length > 0) {
+      ctx += '🔥 **과잉 부위 (휴식 권장)**: ' + diagnosis.excessive.map(function(e) { return e.label; }).join(', ') + '\n';
+    }
+    ctx += '\n';
+  }
+  
   if (recentPRs.length > 0) {
     ctx += '## 최근 PR\n';
     recentPRs.forEach(function(pr) {
@@ -7322,41 +8072,135 @@ function buildUserContext() {
   }
   
   if (Object.keys(recentLifts).length > 0) {
-    ctx += '## 최근 종목별 무게 (참고)\n';
+    // 정체기 종목 별도 추출
+    var plateauList = [];
+    Object.keys(recentLifts).forEach(function(name) {
+      if (recentLifts[name].plateau) plateauList.push(name + ' ' + recentLifts[name].weight + 'kg');
+    });
+    
+    if (plateauList.length > 0) {
+      ctx += '## 🔥 정체기 감지 (3회 이상 같은 무게)\n';
+      ctx += '- ' + plateauList.join(', ') + '\n';
+      ctx += '- 권장: +2.5kg 도전 또는 종목 변경 / 더블 프로그레션 적용\n\n';
+    }
+    
+    ctx += '## 최근 종목별 무게 진행\n';
     Object.keys(recentLifts).forEach(function(name) {
       var info = recentLifts[name];
-      if (info.weight !== null && info.weight !== undefined) {
-        ctx += '- ' + name + ': ' + info.weight + 'kg (' + daysAgo(info.date) + ')\n';
-      }
+      if (info.weight === null || info.weight === undefined) return;
+      var marker = info.plateau ? ' 🔥' : '';
+      ctx += '- ' + name + ': ' + info.weight + 'kg (' + daysAgo(info.date) + ')' + marker + '\n';
     });
     ctx += '\n';
   }
   
-  // 1RM 데이터 (사용자 능력의 핵심 지표)
+  // 1RM 데이터 (부위별 그룹화 + 추천 작업 무게 자동 계산)
+  // focusBodyPart 옵션 시 그 부위만 표시 (토큰 절약)
   var oneRMData = storage.get(KEYS.ONE_RM_DATA, {});
   var oneRMKeys = Object.keys(oneRMData);
   if (oneRMKeys.length > 0) {
-    ctx += '## 추정 1RM (사용자 능력 지표 - 작업 무게는 1RM의 70~80% 권장)\n';
+    // 부위 필터 (focusBodyPart 있을 때)
+    var partFilter = null;
+    if (focusBodyPart) {
+      var partKeysByGroup = {
+        push: ['chest', 'chest_upper', 'chest_lower', 'shoulders_front', 'shoulders_side', 'triceps'],
+        pull: ['lats', 'upper_back', 'traps', 'shoulders_rear', 'biceps'],
+        legs: ['quads', 'hamstrings', 'glutes', 'glutes_med', 'calves', 'adductors', 'abs', 'obliques']
+      };
+      partFilter = partKeysByGroup[focusBodyPart] || null;
+    }
     
-    // 카테고리별로 분류 (가독성)
-    var categories = {
-      '하체': ['레그 프레스', '핵 스쿼트', '리버스 브이 스쿼트', '머신 레그 익스텐션', '바벨 루마니안 데드리프트', '머신 라잉 레그 컬', '머신 힙 쓰러스트', '머신 힙 어브덕션', '덤벨 불가리안 스플릿 스쿼트', '덤벨 싱글 레그 데드리프트'],
-      '가슴': ['머신 체스트 프레스', '스미스 인클라인 벤치 프레스', '머신 펙 덱 플라이', '덤벨 인클라인 벤치 프레스', '케이블 플라이'],
-      '어깨': ['머신 시티드 숄더 프레스', '덤벨 숄더 프레스', '덤벨 아놀드 프레스', '덤벨 사이드 레터럴 레이즈', '케이블 원 암 레터럴 레이즈'],
-      '삼두': ['케이블 푸시 다운', '케이블 오버헤드 트라이셉스 익스텐션', '케이블 트라이셉스 킥백', '어시스트 딥스'],
-      '등': ['머신 시티드 로우', '케이블 시티드 로우', '클로즈 그립 랫 풀 다운', 'T 바 로우', '리버스 그립 랫 풀 다운', '랫 풀 다운', '케이블 암 풀 다운', '덤벨 인클라인 로우', '리버스 펙 덱 플라이', '원암 리버스 펙 덱 플라이', '페이스 풀', '케이블 슈러그', '켈소 슈러그'],
-      '이두': ['바벨 컬', '덤벨 해머 컬', '덤벨 프리처 컬', '이지 바 프리처 컬', '인클라인 덤벨 컬', '덤벨 얼터네이트 컬'],
-      '코어': ['머신 시티드 크런치', '케이블 닐링 사이드 크런치', '인클라인 덤벨 와이 레이즈']
-    };
+    ctx += '## 🏋️ 사용자 1RM + 추천 작업 무게' + (focusBodyPart ? ' (' + focusBodyPart.toUpperCase() + ' 부위만)' : ' (부위별)') + '\n';
+    ctx += '※ 모든 무게는 2.5kg 단위로 반올림 완료. 메인(70%), 보조(65%), 고립(60%)\n\n';
     
-    Object.keys(categories).forEach(function(cat) {
-      var items = categories[cat].filter(function(name) { return oneRMData[name] !== undefined; });
-      if (items.length === 0) return;
-      ctx += '### ' + cat + '\n';
-      items.forEach(function(name) {
-        ctx += '- ' + name + ': ' + oneRMData[name] + 'kg\n';
+    // 부위별 자동 그룹화
+    var byPart = {};
+    oneRMKeys.forEach(function(name) {
+      var info = getExercisePart(name);
+      if (!info) {
+        if (focusBodyPart) return;  // 필터 활성 시 미매핑 제외
+        if (!byPart['기타']) byPart['기타'] = [];
+        byPart['기타'].push(name);
+        return;
+      }
+      // 부위 필터 적용
+      if (partFilter && partFilter.indexOf(info.primary) === -1) return;
+      
+      var partKr = BODY_PART_KR[info.primary] || info.primary;
+      if (!byPart[partKr]) byPart[partKr] = [];
+      byPart[partKr].push(name);
+    });
+    
+    Object.keys(byPart).sort().forEach(function(partKr) {
+      ctx += '### ' + partKr + '\n';
+      byPart[partKr].forEach(function(name) {
+        var rm = oneRMData[name];
+        var rmDisplay = Math.round(rm);
+        var main = Math.round(rm * 0.70 / 2.5) * 2.5;
+        var sub = Math.round(rm * 0.65 / 2.5) * 2.5;
+        var iso = Math.round(rm * 0.60 / 2.5) * 2.5;
+        ctx += '- ' + name + ': 1RM ' + rmDisplay + 'kg → 메인 ' + main + 'kg / 보조 ' + sub + 'kg / 고립 ' + iso + 'kg\n';
       });
     });
+    ctx += '\n';
+  }
+  
+  // 영양 × 운동 연결 분석
+  var workedOutToday = state.data.workoutLog.some(function(w) { return w.date === todayStr; });
+  if (workedOutToday) {
+    var proteinDeficit = profile.proteinTarget - todayProtein;
+    if (proteinDeficit > 30) {
+      ctx += '## ⚠️ 영양·회복 경고\n';
+      ctx += '- 오늘 운동 완료. 현재 단백질 ' + todayProtein + 'g (목표 대비 -' + proteinDeficit + 'g 부족)\n';
+      ctx += '- 회복 위해 단백질 ' + proteinDeficit + 'g 추가 섭취 권장 (운동 후 24시간 내 핵심)\n\n';
+    } else if (todayKcal < profile.calorieTarget * 0.6) {
+      ctx += '## ⚠️ 영양·회복 경고\n';
+      ctx += '- 오늘 운동 완료. 칼로리 ' + todayKcal + 'kcal (목표의 60% 미만)\n';
+      ctx += '- 큰 적자 시 근손실 위험. 추가 섭취 권장\n\n';
+    }
+  }
+  
+  // 컨디션 추이 (최근 5회)
+  var conditionLog = state.data.conditionLog || [];
+  if (conditionLog.length > 0) {
+    var recent5 = conditionLog.slice(0, 5);
+    var avgRpe = 0, avgCond = 0, rpeCnt = 0, condCnt = 0;
+    recent5.forEach(function(c) {
+      if (c.rpe) { avgRpe += c.rpe; rpeCnt++; }
+      if (c.condition) { avgCond += c.condition; condCnt++; }
+    });
+    ctx += '## 컨디션 추이 (최근 ' + recent5.length + '회)\n';
+    if (recent5.length < 3) {
+      ctx += '※ 표본 부족 (3회 미만) - 추세 판단 보류, 참고용\n';
+    }
+    if (rpeCnt > 0) {
+      var avgRpeNum = avgRpe / rpeCnt;
+      var rpeStatus;
+      if (recent5.length < 3) {
+        rpeStatus = '(참고)';
+      } else {
+        rpeStatus = avgRpeNum >= 8.5 ? '🔥 매우 높음 (오버트레이닝 위험)' :
+                    avgRpeNum >= 7 ? '🟡 도전적' :
+                    avgRpeNum >= 5 ? '🟢 적정' : '🔵 가벼움';
+      }
+      ctx += '- 강도 체감(RPE) 평균: ' + avgRpeNum.toFixed(1) + '/10 ' + rpeStatus + '\n';
+    }
+    if (condCnt > 0) {
+      var avgCondNum = avgCond / condCnt;
+      var condStatus;
+      if (recent5.length < 3) {
+        condStatus = '(참고)';
+      } else {
+        condStatus = avgCondNum <= 2 ? '🔴 회복 부족 (디로드 권장)' :
+                     avgCondNum <= 3 ? '🟡 보통' : '🟢 양호';
+      }
+      ctx += '- 전반 컨디션 평균: ' + avgCondNum.toFixed(1) + '/5 ' + condStatus + '\n';
+    }
+    // 최신 1회 detail
+    var latest = recent5[0];
+    if (latest.rpe || latest.condition) {
+      ctx += '- 마지막 세션 (' + latest.date + '): RPE ' + (latest.rpe || '-') + '/10, 컨디션 ' + (latest.condition || '-') + '/5\n';
+    }
     ctx += '\n';
   }
   
@@ -7367,46 +8211,63 @@ function buildUserContext() {
 function getCoachSystemPrompt() {
   var context = buildUserContext();
   
-  return '당신은 사용자의 개인 피트니스 코치다. 운동생리학, 영양학, 스포츠과학의 최신 연구 근거를 바탕으로 코칭한다.\n\n' +
+  return '당신은 사용자의 개인 피트니스 코치다. 운동생리학·영양학·스포츠과학의 최신 메타분석 근거에 기반해 코칭한다. ' +
+    '사용자의 실제 데이터(위 컨텍스트)를 분석해 개인화된 조언을 한다.\n\n' +
+    
     '## 코칭 원칙\n' +
-    '1. **과학적 근거 우선** — 최신 연구 기반, 추측 금지\n' +
-    '2. **사용자 환경 존중** — 머신/덤벨 중심, 프리웨이트 강요 금지\n' +
-    '3. **점진적 과부하** — 매주 중량 또는 횟수 1단계 상승\n' +
-    '4. **현재 능력 기준** — 사용자의 실제 데이터를 기반으로 조언\n' +
-    '5. **간결하고 실행 가능한** — 한 번에 1~2개 핵심 포인트만\n\n' +
+    '1. **과학적 근거 우선** — 메타분석 인용 (Pelland 2024, Schoenfeld 등). 추측 금지.\n' +
+    '2. **데이터 기반 개인화** — 사용자 데이터의 부족/과잉 부위, 1RM, 단백질 평균 등을 직접 인용.\n' +
+    '3. **사용자 환경 존중** — 머신/덤벨 중심. 프리웨이트 강요 금지.\n' +
+    '4. **점진적 과부하** — 구체적 수치 (예: 62.5 → 65kg).\n' +
+    '5. **간결하고 실행 가능** — 한 번에 1~2개 핵심 포인트.\n\n' +
     
-    '## 운동 지침 (근거 기반)\n' +
-    '- **볼륨**: 부위당 주 10~20세트 (최적). 초중급은 10~14세트 시작.\n' +
-    '- **빈도**: 부위당 주 2회 (분산)\n' +
-    '- **강도**: RIR 1~3 (실패까지 1~3회 남기기). 매 세트 실패까지 갈 필요 없음.\n' +
-    '- **반복**: 5~30회 모두 유효 (실패 근접 조건). 복합 6~10, 고립 10~15.\n' +
-    '- **휴식**: 복합 2~3분, 고립 1~2분.\n' +
-    '- **점진 과부하**: 목표 횟수 상단 2회 연속 달성 시 → 중량 +2.5~5kg.\n' +
-    '- **신장 강조**: 근육 늘어난 위치에서 부하 → 사르코메어 추가 (가장 효과적).\n' +
-    '- **머신 = 프리웨이트**: 근비대 효과 동등. 머신 위주여도 문제 없음.\n' +
-    '- **주기화**: 5~6주 사이클 (적응→구축→강화→디로드).\n\n' +
+    '## 🧬 핵심 과학 근거 (인용)\n' +
+    '### 운동\n' +
+    '- **볼륨**: 부위당 주 10~20세트 최적. 1세트 증가마다 +0.24% 근비대 (Pelland 2024).\n' +
+    '- **빈도**: 부위당 주 2회 > 1회 (Schoenfeld 2016 메타분석).\n' +
+    '- **강도**: RIR 1~3 권장. 매 세트 실패 = 누적 피로↑ (Refalo 2023).\n' +
+    '- **반복 범위**: 5~30회 모두 동등한 근비대 (실패 근접 조건, IUSCA 2021).\n' +
+    '- **신장 강조**: 신장 위치 부분 가동 > 단축 위치 (Maeo 2023). 사르코메어 추가.\n' +
+    '- **머신 = 프리웨이트**: 근비대 효과 동등 (Schwanbeck).\n' +
+    '- **휴식**: 복합 2~3분, 고립 1~2분. 짧은 휴식 = 볼륨 감소 (Schoenfeld 2016).\n' +
+    '- **점진 과부하**: 더블 프로그레션 (목표 횟수 상단 2회 연속 → +2.5~5kg).\n' +
+    '- **주기화**: 5~6주 사이클 (적응→구축→강화→디로드).\n' +
+    '\n' +
+    '### 영양\n' +
+    '- **단백질 총량**: 1.6~2.2g/kg/일. 1.6g 이후 plateau (Morton 2018 메타).\n' +
+    '- **분배 (총량만큼 중요)**: 끼니당 30~40g, 3~4시간 간격, 3~4끼.\n' +
+    '- **로이신 임계점**: 끼니당 2.5g (동물성 단백질 25g+) → MPS 최대 자극.\n' +
+    '- **칼로리**: 리컴포지션 -200~300kcal 적자. -500+ = 근손실 위험 (Helms).\n' +
+    '- **타이밍**: 24시간 총량/분배가 핵심. 운동 후 30분 골든타임은 과장 (ISSN 2017).\n' +
+    '- **취침 전**: 카제인 25~40g → 야간 MPS +22% (Trommelen 2016).\n' +
+    '- **크레아틴**: 매일 3~5g. 가장 입증된 보충제 (ISSN).\n' +
+    '\n' +
+    '### 회복\n' +
+    '- **수면 7~9h**: 5일간 4~6h → MPS 20%↓, 테스토 15%↓.\n' +
+    '- **부위 회복**: 소근육 24~36h, 가슴/등/하체 48~72h.\n' +
+    '- **디로드**: 5~6주마다 1주, 볼륨 50%, 중량 유지, RIR 3~5.\n\n' +
     
-    '## 영양 지침 (근거 기반)\n' +
-    '- **단백질 총량**: 1.6~2.2g/kg/일 (린매스). 사용자 77.5kg 기준 155g.\n' +
-    '- **단백질 분배 (총량만큼 중요)**: 끼니당 30~40g, 3~4시간 간격, 하루 3~4끼.\n' +
-    '- **로이신 임계점**: 끼니당 2.5g 로이신 (동물성 단백질 25g+) → MPS 최대 자극.\n' +
-    '- **칼로리**: 리컴포지션엔 유지 -200~300kcal. 큰 적자(-500+)는 근손실.\n' +
-    '- **타이밍**: 운동 후 30분~2시간 내 단백질 30~40g. 24시간 총량/분배가 핵심.\n' +
-    '- **취침 전**: 카제인 25g (그릭요거트 등) → 야간 MPS.\n\n' +
-    
-    '## 회복 지침\n' +
-    '- **수면 7~9시간**: 4~6시간 5일 지속 → MPS 20% 감소.\n' +
-    '- **부위 회복**: 24~36h (소근육), 48~72h (가슴/등/하체).\n' +
-    '- **디로드**: 5~6주마다 1주, 볼륨 50%, 중량 유지.\n\n' +
+    '## 🎯 데이터 활용 방식 (필수)\n' +
+    '응답에 사용자 데이터를 직접 인용하라:\n' +
+    '- "이번 주 어깨 측면 주 2.5세트로 부족해요" (부위별 볼륨 데이터 인용)\n' +
+    '- "가슴 합계 주 18세트, 어깨 측면은 2세트로 불균형" (그룹 합산 인용)\n' +
+    '- "1RM 레그프레스 240kg 기준, 작업 무게는 168kg 권장" (1RM 인용)\n' +
+    '- "단백질 7일 평균 130g인데 목표 155g과 25g 차이" (영양 데이터 인용)\n' +
+    '- "지난 PUSH가 화요일이었으니 이번엔 PULL이 적절" (운동 기록 인용)\n' +
+    '- "체스트프레스 65kg 3회 연속 같음 = 정체기, +2.5kg 도전 권장" (정체기 활용)\n' +
+    '- "최근 RPE 평균 9 (5회 기준) = 강도 너무 높음, 디로드 1주 권장" (컨디션 활용)\n' +
+    '\n' +
+    '※ "부위별 주간 볼륨" 섹션은 그룹 합산 (가슴 = chest+chest_upper+chest_lower 등). 그대로 인용 OK.\n' +
+    '데이터에 없는 추측 금지. "더 강해질 수 있어요" 같은 막연한 응원 X.\n\n' +
     
     '## 응답 스타일\n' +
-    '- **간결하게**: 모바일에서 읽기 좋게 짧은 문단.\n' +
-    '- **구체적으로**: "더 무거운 무게"가 아니라 "65kg → 67.5kg".\n' +
-    '- **사용자 데이터 활용**: 아래 컨텍스트의 실제 수치를 인용.\n' +
-    '- **친근하면서 전문적**: 반말/존댓말 균형, 코치다운 자신감.\n' +
-    '- **한 번에 1~2가지** 핵심만. 정보 폭격 금지.\n' +
-    '- 강조는 **굵게**, 운동명은 `백틱`으로.\n' +
-    '- 사용자가 묻지 않은 것까지 늘어놓지 말 것.\n\n' +
+    '- **간결**: 모바일 가독성. 2~5문장.\n' +
+    '- **구체**: "더 무겁게" X → "65 → 67.5kg" O.\n' +
+    '- **사용자 데이터 인용**: 위 데이터 안에서만 답하기.\n' +
+    '- **친근하면서 전문적**: 코치다운 자신감.\n' +
+    '- **한 번에 1~2가지** 핵심만.\n' +
+    '- 강조는 **굵게**, 운동명은 `백틱`.\n' +
+    '- 묻지 않은 것 늘어놓지 말 것.\n\n' +
     
     '## 사용자 현재 데이터\n' +
     context;
@@ -7446,6 +8307,9 @@ async function callCoachAPI(messages) {
     }
     
     var data = await response.json();
+    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+      return { error: 'AI 응답이 비어있어요. 다시 시도해주세요.' };
+    }
     var text = data.content[0].text;
     
     return { text: text };
@@ -7471,22 +8335,34 @@ async function fetchAIRecommendation() {
   
   var context = buildUserContext();
   
-  var systemPrompt = '당신은 사용자의 피트니스 코치입니다. 사용자 데이터를 분석해서 오늘의 운동을 추천하세요. ' +
+  var systemPrompt = '당신은 사용자의 피트니스 코치입니다. 사용자 데이터를 분석해서 오늘 어떤 부위를 운동해야 하는지 추천하세요. ' +
     '반드시 JSON 형식으로만 응답하세요. 추가 설명 없이 JSON만.\n\n' +
-    '## 추천 규칙\n' +
-    '- session: "push", "pull", "legs", "free" 중 하나\n' +
-    '- 부위당 주 2회 균형, 너무 자주 한 부위 피하기\n' +
-    '- 사이클 단계 고려 (적응기는 가볍게, 강화기는 도전)\n' +
-    '- 회복 부족 신호 있으면 가벼운 옵션이나 휴식 권유\n\n' +
+    
+    '## 🧬 과학적 근거\n' +
+    '- 부위당 주 2회 자극이 1회보다 우월 (Schoenfeld 2016)\n' +
+    '- 부위당 주 10~20세트 최적 (Pelland 2024)\n' +
+    '- 48~72시간 회복 보장 (큰 근육)\n\n' +
+    
+    '## 🎯 추천 로직 (이 순서대로 판단)\n' +
+    '1. **부족 부위 확인**: 사용자 데이터의 "부족 부위" 리스트 보기\n' +
+    '   - 가슴/어깨/삼두 부족 → push 추천\n' +
+    '   - 광배/등/이두 부족 → pull 추천\n' +
+    '   - 하체/햄스트링/둔근 부족 → legs 추천\n' +
+    '2. **이번 주 운동 부위**: 24시간 이내 같은 부위 운동했으면 다른 부위\n' +
+    '3. **컨디션 반영** (3회 이상 데이터가 있으면 우선): 평균 RPE ≥ 8.5 또는 컨디션 ≤ 2 → intensity:"light" + caution에 회복 권유\n' +
+    '4. **사이클 단계 고려**: 적응기 light, 구축기 moderate, 강화기 challenging\n' +
+    '5. **수면/회복 신호**: 데이터 부족하면 moderate 안전 권장\n\n' +
+    
     '## 응답 형식\n' +
     '{\n' +
     '  "session": "push" | "pull" | "legs" | "free",\n' +
     '  "title": "추천 한 줄 (예: 오늘은 PULL이 적절합니다)",\n' +
-    '  "reason": "왜 이 부위인지 (사용자 데이터 인용, 2~3문장)",\n' +
+    '  "reason": "왜 이 부위인지 - 사용자 부족 부위 데이터 인용 필수 (2~3문장)",\n' +
     '  "caution": "주의사항 (1문장, 없으면 빈 문자열)",\n' +
-    '  "suggestion": "메인 종목 무게/횟수 제안 (1문장, 사용자의 최근 무게 기반)",\n' +
+    '  "suggestion": "메인 종목 무게/횟수 제안 (1문장, 사용자의 1RM 기반)",\n' +
     '  "intensity": "light" | "moderate" | "challenging"\n' +
     '}\n\n' +
+    
     '## 사용자 데이터\n' + context;
   
   try {
@@ -7514,6 +8390,9 @@ async function fetchAIRecommendation() {
     }
     
     var data = await response.json();
+    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+      return null;
+    }
     var content = data.content[0].text;
     
     // JSON 추출
@@ -7565,7 +8444,8 @@ async function fetchAIRecommendation() {
 async function generateFullRoutine(bodyPart) {
   if (!state.apiKey) return null;
   
-  var context = buildUserContext();
+  // FREE 모드는 전체 컨텍스트, PUSH/PULL/LEGS는 해당 부위만 (토큰 절약)
+  var context = buildUserContext(bodyPart !== 'free' ? { focusBodyPart: bodyPart } : {});
   
   // 부위별 영문 매핑
   var partInfo = {
@@ -7576,69 +8456,118 @@ async function generateFullRoutine(bodyPart) {
   };
   var info = partInfo[bodyPart];
   
-  var systemPrompt = '당신은 사용자의 피트니스 코치입니다. 사용자가 ' + info.name + ' (' + info.kor + ') 부위를 선택했습니다. ' +
-    '사용자 데이터를 분석해 6~7개 종목으로 구성된 완전한 루틴을 생성하세요. JSON으로만 응답.\n\n' +
+  // 종목 풀 동적 생성 (EXERCISE_BODY_PART_MAP에서 자동 추출)
+  function getExercisePoolFor(bp) {
+    // shoulders_rear은 PULL 전용 (PUSH 종목 풀에서 제외) - 의도된 분류
+    // 가슴/어깨/삼두 = PUSH / 등/후면어깨/이두 = PULL / 하체/코어 = LEGS
+    var partKeysByGroup = {
+      push: ['chest', 'chest_upper', 'chest_lower', 'shoulders_front', 'shoulders_side', 'triceps'],
+      pull: ['lats', 'upper_back', 'traps', 'shoulders_rear', 'biceps'],
+      legs: ['quads', 'hamstrings', 'glutes', 'glutes_med', 'calves', 'adductors', 'abs', 'obliques']
+    };
+    var targetParts = partKeysByGroup[bp] || [];
+    var byPart = {};
+    var addedNames = {};
+    var oneRMData = storage.get(KEYS.ONE_RM_DATA, {});
     
-    '## 루틴 생성 원칙\n' +
-    '1. **사용자 1RM 기반**: 작업 무게는 1RM의 70~80% (메인), 60~75% (보조)\n' +
-    '2. **종목 순서**: 복합 운동 먼저 → 고립 운동 → 마무리\n' +
-    '3. **볼륨**: 총 16~22세트 (사이클 단계 고려)\n' +
-    '4. **휴식**: 복합 2~3분, 고립 1~2분\n' +
-    '5. **신장 강조**: 가능하면 신장 위치 강조 종목 포함\n' +
-    '6. **머신 우선**: 사용자 환경상 머신/덤벨 위주 추천\n\n' +
+    // 1. EXERCISE_BODY_PART_MAP 종목들
+    Object.keys(EXERCISE_BODY_PART_MAP).forEach(function(name) {
+      var info = EXERCISE_BODY_PART_MAP[name];
+      if (targetParts.indexOf(info.primary) === -1) return;
+      var partKr = BODY_PART_KR[info.primary] || info.primary;
+      if (!byPart[partKr]) byPart[partKr] = [];
+      var tags = [];
+      if (info.compound) tags.push('복합');
+      else tags.push('고립');
+      if (info.stretched) tags.push('신장강조');
+      if (info.angle) tags.push(info.angle);
+      
+      // 1RM 정보 추가 (직접 또는 추정)
+      // confidence 'medium' 이상만 표시 (low/very_low는 표본 부족으로 신뢰 X)
+      var rmInfo = '';
+      if (oneRMData[name]) {
+        rmInfo = ', 1RM ' + Math.round(oneRMData[name]) + 'kg';
+      } else {
+        var est = estimate1RMFromPart(name);
+        if (est && est.source === 'estimated_from_part' && est.confidence === 'medium') {
+          rmInfo = ', 추정 1RM ~' + est.weight + 'kg (' + est.basedOn + ')';
+        }
+      }
+      
+      byPart[partKr].push(name + ' [' + tags.join('/') + rmInfo + ']');
+      addedNames[name] = true;
+    });
     
-    '## 부위별 권장 종목 풀\n' +
-    (bodyPart === 'push' ? 
-      '- 메인 복합: 머신 체스트 프레스, 스미스 인클라인 벤치 프레스, 덤벨 인클라인 벤치 프레스\n' +
-      '- 어깨 메인: 머신 시티드 숄더 프레스, 덤벨 숄더 프레스, 덤벨 아놀드 프레스\n' +
-      '- 가슴 고립: 머신 펙 덱 플라이, 케이블 플라이\n' +
-      '- 어깨 고립: 덤벨 사이드 레터럴 레이즈, 케이블 원 암 레터럴 레이즈\n' +
-      '- 삼두: 케이블 푸시 다운, 케이블 오버헤드 트라이셉스 익스텐션, 케이블 트라이셉스 킥백, 어시스트 딥스\n'
-    : bodyPart === 'pull' ?
-      '- 메인 복합: 머신 시티드 로우, 케이블 시티드 로우, T 바 로우\n' +
-      '- 광배 풀다운: 랫 풀 다운, 클로즈 그립 랫 풀 다운, 리버스 그립 랫 풀 다운, 케이블 암 풀 다운\n' +
-      '- 후면 어깨/등 상부: 리버스 펙 덱 플라이, 페이스 풀, 케이블 슈러그\n' +
-      '- 이두 메인: 바벨 컬, 이지 바 프리처 컬, 인클라인 덤벨 컬\n' +
-      '- 이두 보조: 덤벨 해머 컬, 덤벨 프리처 컬, 덤벨 얼터네이트 컬\n'
-    : 
-      '- 메인 복합: 레그 프레스, 핵 스쿼트, 리버스 브이 스쿼트\n' +
-      '- 대퇴 고립: 머신 레그 익스텐션\n' +
-      '- 햄스트링: 머신 라잉 레그 컬, 바벨 루마니안 데드리프트, 덤벨 싱글 레그 데드리프트\n' +
-      '- 둔근/힙: 머신 힙 쓰러스트, 머신 힙 어브덕션\n' +
-      '- 보조: 덤벨 불가리안 스플릿 스쿼트\n' +
-      '- 코어: 머신 시티드 크런치, 케이블 닐링 사이드 크런치\n'
-    ) + '\n' +
+    // 2. 사용자가 1RM 등록한 종목 중 매핑 외 (퍼지 매칭)
+    Object.keys(oneRMData).forEach(function(name) {
+      if (addedNames[name]) return;
+      var info = getExercisePart(name);
+      if (!info) return;
+      if (targetParts.indexOf(info.primary) === -1) return;
+      var partKr = BODY_PART_KR[info.primary] || info.primary;
+      if (!byPart[partKr]) byPart[partKr] = [];
+      var tags = ['사용자종목'];
+      if (info.compound) tags.push('복합');
+      else tags.push('고립');
+      byPart[partKr].push(name + ' [' + tags.join('/') + ', 1RM ' + Math.round(oneRMData[name]) + 'kg]');
+      addedNames[name] = true;
+    });
     
-    '## 응답 형식\n' +
+    var lines = [];
+    Object.keys(byPart).forEach(function(p) {
+      lines.push('- ' + p + ': ' + byPart[p].join(', '));
+    });
+    return lines.join('\n');
+  }
+  
+  var systemPrompt = '당신은 과학적 근거 기반 피트니스 코치다. ' +
+    info.name + ' (' + info.kor + ') 루틴 5~7개 종목 생성. JSON으로만 응답.\n' +
+    
+    '═════════════════════════════════════\n' +
+    '📋 [데이터] 사용자 컨텍스트\n' +
+    '═════════════════════════════════════\n' +
+    context + '\n' +
+    
+    '═════════════════════════════════════\n' +
+    '🏋️ [데이터] ' + info.name + ' 사용 가능 종목 풀\n' +
+    '═════════════════════════════════════\n' +
+    getExercisePoolFor(bodyPart) + '\n\n' +
+    
+    '═════════════════════════════════════\n' +
+    '⚖️ [규칙] 루틴 구성 원칙\n' +
+    '═════════════════════════════════════\n' +
+    
+    '## 핵심 원칙 (사용자 데이터 + 과학 근거)\n' +
+    '1. **부족 부위 우선 보충** — 컨텍스트 "부족 부위" 리스트의 부위를 메인/고립으로 1~2개 포함\n' +
+    '2. **부위별 1~3개** (4개 이상 = 과잉) / 동일 부위·각도 중복 금지\n' +
+    '3. **메인 1~2개** (isMain: true, 복합, 첫 1~2번째) + **신장 강조 최소 1개**\n' +
+    '4. **순서**: 메인 복합 → 보조 복합 → 고립 → 신장 강조 → 펌프\n' +
+    '5. **무게**: 위 "추천 작업 무게" 표 그대로 사용 (메인=메인값, 보조=보조값, 고립=고립값)\n' +
+    '6. 1RM 없는 종목 → weight: null (사용자가 측정)\n' +
+    '7. 정체기(🔥) 표시된 종목은 무게 +2.5kg 도전 또는 종목 교체 제안\n' +
+    '8. **컨디션 반영**: 컨텍스트 "컨디션 추이"가 있으면 강도 조절 (buildUserContext 분류와 동일)\n' +
+    '   - 평균 RPE ≥ 8.5 또는 컨디션 ≤ 2 = 회복 모드 (RIR 3~4, 볼륨 -20%, intensity:"light")\n' +
+    '   - 평균 RPE 7~8.4 또는 컨디션 3 = 평상시 (intensity:"moderate")\n' +
+    '   - 평균 RPE < 7 + 컨디션 4~5 = 도전 가능 (intensity:"challenging")\n' +
+    '   - 컨디션 데이터 3회 미만은 표본 부족, 평상시 처리\n\n' +
+    
+    '## 🧬 과학 근거\n' +
+    '부위당 주 10~20세트 (Pelland 2024) / RIR 1~3 (Refalo) / 5~30회 모두 유효 (IUSCA 2021) / 신장강조 우월 (Maeo 2023) / 머신=프리웨이트 (Schwanbeck) / 휴식 복합 2~3분\n\n' +
+    
+    '## ❌ 절대 금지\n' +
+    '- 한 부위 4개 이상 / 동일 부위·각도 2개 이상 / 메인 0개 / 신장 강조 0개\n' +
+    '- 사용자 부족 부위 무시 / 풀에 없는 종목 사용\n\n' +
+    
+    '## 응답 형식 (JSON만)\n' +
     '{\n' +
-    '  "headline": "오늘 루틴 한 줄 (예: 오늘은 LEGS 메인 + 햄스트링 균형 루틴)",\n' +
-    '  "reason": "왜 이렇게 구성했는지 (사용자 데이터 인용, 2~3문장)",\n' +
-    '  "duration": 60,\n' +
-    '  "totalSets": 18,\n' +
-    '  "intensity": "light" | "moderate" | "challenging",\n' +
-    '  "caution": "주의사항 (1문장, 없으면 빈 문자열)",\n' +
-    '  "exercises": [\n' +
-    '    {\n' +
-    '      "name": "정확한 종목명 (위 풀에서 선택)",\n' +
-    '      "type": "복합" | "고립" | "보조",\n' +
-    '      "isMain": true | false,\n' +
-    '      "sets": 3,\n' +
-    '      "reps": "8-10",\n' +
-    '      "weight": 150,\n' +
-    '      "rir": 2,\n' +
-    '      "note": "이 종목 한 줄 노트 (예: 메인. 1RM 216kg의 70%)"\n' +
-    '    }\n' +
-    '  ]\n' +
+    '  "headline": "한 줄 (예: PUSH 어깨 측면 보충)",\n' +
+    '  "reason": "왜 (부족 부위 인용 필수, 2~3문장)",\n' +
+    '  "duration": 60, "totalSets": 18, "intensity": "moderate", "caution": "",\n' +
+    '  "exercises": [{"name":"종목","type":"복합|고립|보조","isMain":bool,"sets":3,"reps":"8-10","weight":150,"rir":2,"note":"이유+근거"}]\n' +
     '}\n\n' +
     
-    '## 종목 선택 규칙 (필수)\n' +
-    '- 종목명은 위 "권장 종목 풀"에서만 선택할 것\n' +
-    '- 사용자 1RM 데이터가 있는 종목 우선 선택\n' +
-    '- 무게는 항상 2.5kg 단위로 반올림\n' +
-    '- 메인 종목 1~2개 (isMain: true)\n' +
-    '- 총 6~7개 종목\n\n' +
-    
-    '## 사용자 데이터\n' + context;
+    '## 응답 전 체크\n' +
+    '☐ 부족 부위 포함? ☐ 한 부위 4개 미만? ☐ 메인 1~2개? ☐ 신장 강조 1개+? ☐ 무게는 위 표 그대로?';
   
   try {
     var response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -7665,6 +8594,9 @@ async function generateFullRoutine(bodyPart) {
     }
     
     var data = await response.json();
+    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+      return { error: 'AI 응답이 비어있어요. 다시 시도해주세요.' };
+    }
     var content = data.content[0].text;
     
     var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -7877,23 +8809,85 @@ async function generateWeeklyReview(forceRefresh) {
     });
   }
   
+  // 부위별 볼륨 분석 (이번 주만)
+  var weeklyVolByPart = {};
+  if (weekData.workouts) {
+    weekData.workouts.forEach(function(w) {
+      if (!w.exercises || !Array.isArray(w.exercises)) return;
+      w.exercises.forEach(function(ex) {
+        var info = getExercisePart(ex.name);
+        if (!info) return;
+        var setCount = 0;
+        if (typeof ex.setsCount === 'number') setCount = ex.setsCount;
+        else if (typeof ex.sets === 'number') setCount = ex.sets;
+        else if (Array.isArray(ex.setsDetail)) setCount = ex.setsDetail.filter(function(s) { return s.completed && !s.isWarmup; }).length;
+        else if (Array.isArray(ex.sets)) setCount = ex.sets.filter(function(s) { return s.completed && !s.isWarmup; }).length;
+        if (setCount === 0) return;
+        weeklyVolByPart[info.primary] = (weeklyVolByPart[info.primary] || 0) + setCount;
+        if (info.secondary) info.secondary.forEach(function(s) {
+          weeklyVolByPart[s] = (weeklyVolByPart[s] || 0) + setCount * 0.3;
+        });
+      });
+    });
+  }
+  
+  // 부위 볼륨 텍스트 추가 (그룹 합산 적용)
+  var volKeys = Object.keys(weeklyVolByPart);
+  if (volKeys.length > 0) {
+    var weekGrouped = groupVolumeBy(weeklyVolByPart);
+    weekSummary += '\n### 부위별 볼륨 (이번 주, 세트, 그룹 합산)\n';
+    var groupKeys = Object.keys(weekGrouped).sort(function(a, b) { return weekGrouped[b] - weekGrouped[a]; });
+    groupKeys.forEach(function(g) {
+      var vol = weekGrouped[g];
+      var status = vol < 4 ? '🔴 부족' : (vol < 10 ? '🟡 MEV' : (vol <= 20 ? '🟢 적정' : '🔥 과잉'));
+      weekSummary += '- ' + BODY_PART_GROUPS[g].kr + ': ' + vol.toFixed(1) + '세트 (' + status + ')\n';
+    });
+  }
+  
+  // 이번 주 컨디션 추이
+  var weekStart = new Date(weekData.monday + 'T00:00:00');
+  var weekConditions = (state.data.conditionLog || []).filter(function(c) {
+    return new Date(c.date) >= weekStart;
+  });
+  if (weekConditions.length > 0) {
+    var avgRpe = 0, avgCond = 0, rpeCnt = 0, condCnt = 0;
+    weekConditions.forEach(function(c) {
+      if (c.rpe) { avgRpe += c.rpe; rpeCnt++; }
+      if (c.condition) { avgCond += c.condition; condCnt++; }
+    });
+    weekSummary += '\n### 컨디션 (' + weekConditions.length + '회 기록)\n';
+    if (rpeCnt > 0) weekSummary += '- 강도 체감(RPE) 평균: ' + (avgRpe / rpeCnt).toFixed(1) + '/10\n';
+    if (condCnt > 0) weekSummary += '- 전반 컨디션 평균: ' + (avgCond / condCnt).toFixed(1) + '/5\n';
+  }
+  
   var systemPrompt = '당신은 사용자의 피트니스 코치입니다. 이번 주 운동/영양/체중 데이터를 분석해 주간 리뷰를 작성하세요. ' +
     '반드시 JSON으로만 응답하세요.\n\n' +
+    
+    '## 🧬 평가 기준 (과학 근거)\n' +
+    '- **운동 빈도**: 부위당 주 2회 자극 우월 (Schoenfeld 2016)\n' +
+    '- **부위 볼륨**: 주 10~20세트 최적 (Pelland 2024). 4세트 미만 = 부족, 20초과 = 과잉\n' +
+    '- **부위 균형**: PUSH/PULL/LEGS 골고루. 한 부위만 과잉 X.\n' +
+    '- **단백질**: 목표 달성률 (1.6~2.2g/kg 권장)\n' +
+    '- **체중 변화**: 리컴포지션 목표 시 ±0.3kg/주 적정\n' +
+    '- **PR 갱신**: 점진적 과부하 성과 지표\n\n' +
+    
+    '## 등급 기준\n' +
+    '- S: 운동 빈도 달성 + 부위 균형 + 단백질 90%+ + PR 갱신 있음\n' +
+    '- A: 운동 빈도 달성 + 단백질 80%+\n' +
+    '- B: 운동 빈도 70%+ 또는 단백질 70%+\n' +
+    '- C: 부분 달성 (40~60%)\n' +
+    '- D: 거의 미실행 (40% 미만)\n\n' +
+    
     '## 응답 형식\n' +
     '{\n' +
-    '  "headline": "이번 주 핵심 한 줄 (예: 운동 빈도 좋았으나 LEGS 부족)",\n' +
+    '  "headline": "이번 주 핵심 한 줄 (예: 운동 빈도 좋았으나 어깨 측면 부족)",\n' +
     '  "grade": "S" | "A" | "B" | "C" | "D",\n' +
-    '  "wins": ["잘한 점 1", "잘한 점 2", "잘한 점 3"],\n' +
-    '  "improvements": ["개선점 1", "개선점 2"],\n' +
-    '  "nextWeek": ["다음 주 조정 1", "다음 주 조정 2", "다음 주 조정 3"],\n' +
-    '  "coachNote": "마지막 격려/지적 한 문단"\n' +
+    '  "wins": ["잘한 점 1 (구체적 수치 인용)", "잘한 점 2", "잘한 점 3"],\n' +
+    '  "improvements": ["개선점 1 (구체적 부위/수치)", "개선점 2"],\n' +
+    '  "nextWeek": ["다음 주 조정 1 (예: 어깨 측면 주 +4세트 추가)", "다음 주 조정 2", "다음 주 조정 3"],\n' +
+    '  "coachNote": "마지막 격려/지적 한 문단 (사용자 데이터 직접 인용)"\n' +
     '}\n\n' +
-    '## 평가 기준\n' +
-    '- 운동 빈도 (목표 대비)\n' +
-    '- 부위 균형 (PUSH/PULL/LEGS 비슷한 횟수?)\n' +
-    '- 단백질 달성률\n' +
-    '- 체중 변화 (목표 방향)\n' +
-    '- PR 갱신 여부\n\n' +
+    
     '## 사용자 프로필\n' +
     '- ' + profile.age + '세, ' + profile.height + 'cm, 목표: 린매스\n' +
     '- 목표: 주 ' + profile.workoutFreq + '회 운동, 단백질 ' + profile.proteinTarget + 'g/일\n' +
@@ -7925,6 +8919,9 @@ async function generateWeeklyReview(forceRefresh) {
     }
     
     var data = await response.json();
+    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+      return null;
+    }
     var content = data.content[0].text;
     
     var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -8161,6 +9158,9 @@ async function analyzePlateauWithAI(signals) {
     if (!response.ok) return null;
     
     var data = await response.json();
+    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+      return null;
+    }
     var content = data.content[0].text;
     
     var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -9510,7 +10510,8 @@ function init() {
     workoutLog: storage.get(KEYS.WORKOUT_LOG, []),
     nutritionLog: storage.get(KEYS.NUTRITION_LOG, []),
     personalRecords: storage.get(KEYS.PERSONAL_RECORDS, []),
-    bodyLog: storage.get(KEYS.BODY_LOG, [])
+    bodyLog: storage.get(KEYS.BODY_LOG, []),
+    conditionLog: storage.get(KEYS.CONDITION_LOG, [])
   };
   
   // API 키 + 설정 로드
