@@ -2895,7 +2895,8 @@ var KEYS = {
   ONE_RM_INITIALIZED: 'fitness_one_rm_initialized',
   CONDITION_LOG: 'fitness_condition_log',
   ACTIVE_SESSION: 'fitness_active_session',
-  REST_TIMER: 'fitness_rest_timer'
+  REST_TIMER: 'fitness_rest_timer',
+  WORKOUT_WIZARD: 'fitness_workout_wizard'
 };
 
 var storage = {
@@ -2924,6 +2925,19 @@ function saveActiveSession() {
 }
 function saveRestTimer() {
   storage.set(KEYS.REST_TIMER, state.restTimer);
+}
+function saveWizard() {
+  storage.set(KEYS.WORKOUT_WIZARD, {
+    workoutWizardStep: state.workoutWizardStep,
+    selectedBodyPart: state.selectedBodyPart,
+    generatedRoutine: state.generatedRoutine,
+    routineChatHistory: state.routineChatHistory,
+    routineChatInput: state.routineChatInput,
+    routinePreviewExpanded: state.routinePreviewExpanded
+  });
+}
+function clearWizard() {
+  storage.set(KEYS.WORKOUT_WIZARD, null);
 }
 
 // ═══════════════════════════════════════════════
@@ -4200,7 +4214,8 @@ window.selectBodyPart = async function(part) {
         content: '오늘 어떤 운동을 하고 싶으세요? 자유롭게 말씀해주세요.\n\n예를 들어:\n· "어깨 위주로 30분만"\n· "가슴 + 이두 같이"\n· "오늘은 가볍게 풀바디"\n· "1RM의 70% 정도로 6종목"\n\n원하는 부위, 시간, 강도를 알려주시면 루틴을 제안할게요. [✓ 적용하기] 버튼으로 반영됩니다.'
       }
     ];
-    
+
+    saveWizard();
     render();
     setTimeout(function() {
       var input = document.getElementById('rc-input');
@@ -4212,6 +4227,7 @@ window.selectBodyPart = async function(part) {
   // 정형 (PUSH/PULL/LEGS): STEP 2 → AI 루틴 생성
   state.workoutWizardStep = 2;
   state.routineLoading = true;
+  saveWizard();
   render();
   
   if (!state.apiKey) {
@@ -4240,23 +4256,25 @@ window.selectBodyPart = async function(part) {
       isFallback: true
     };
     state.routineLoading = false;
+    saveWizard();
     render();
     return;
   }
-  
+
   // AI 루틴 생성
   var routine = await generateFullRoutine(part);
-  
+
   if (routine && !routine.error) {
     state.generatedRoutine = routine;
   } else {
-    state.generatedRoutine = { 
+    state.generatedRoutine = {
       error: routine ? routine.error : '루틴 생성 실패',
-      bodyPart: part 
+      bodyPart: part
     };
   }
-  
+
   state.routineLoading = false;
+  saveWizard();
   render();
 };
 
@@ -4265,6 +4283,7 @@ window.backToStep1 = function() {
   state.selectedBodyPart = null;
   state.generatedRoutine = null;
   state.routineLoading = false;
+  saveWizard();
   render();
 };
 
@@ -4272,32 +4291,34 @@ window.regenerateRoutine = async function() {
   if (!state.selectedBodyPart) return;
   state.routineLoading = true;
   state.generatedRoutine = null;
+  saveWizard();
   render();
-  
+
   var routine = await generateFullRoutine(state.selectedBodyPart);
   if (routine && !routine.error) {
     state.generatedRoutine = routine;
   } else {
-    state.generatedRoutine = { 
+    state.generatedRoutine = {
       error: routine ? routine.error : '루틴 생성 실패',
-      bodyPart: state.selectedBodyPart 
+      bodyPart: state.selectedBodyPart
     };
   }
   state.routineLoading = false;
+  saveWizard();
   render();
 };
 
 window.goToStep3 = function() {
   if (!state.generatedRoutine) return;
-  
+
   state.workoutWizardStep = 3;
   state.routinePreviewExpanded = false;
-  
+
   // 첫 진입 시 첫 봇 메시지
   if (state.routineChatHistory.length === 0) {
     var partKor = { push: '가슴/어깨/삼두', pull: '등/이두', legs: '하체/코어', free: '자유' };
     var part = state.selectedBodyPart;
-    
+
     state.routineChatHistory = [
       {
         role: 'assistant',
@@ -4305,7 +4326,8 @@ window.goToStep3 = function() {
       }
     ];
   }
-  
+
+  saveWizard();
   render();
   setTimeout(function() {
     var input = document.getElementById('rc-input');
@@ -4323,15 +4345,18 @@ window.backToStep2 = function() {
     state.routineChatHistory = [];
     state.routineChatInput = '';
     state.routinePreviewExpanded = false;
+    saveWizard();
     render();
     return;
   }
   state.workoutWizardStep = 2;
+  saveWizard();
   render();
 };
 
 window.toggleRoutinePreview = function() {
   state.routinePreviewExpanded = !state.routinePreviewExpanded;
+  saveWizard();
   render();
 };
 
@@ -4351,6 +4376,7 @@ window.applyRoutineQuickChip = function(text) {
 window.clearRoutineChat = function() {
   if (!confirm('대화를 초기화하시겠어요?')) return;
   state.routineChatHistory = [];
+  saveWizard();
   goToStep3();
 };
 
@@ -4548,6 +4574,7 @@ window.sendRoutineModification = async function() {
   state.routineChatHistory.push({ role: 'user', content: text });
   state.routineChatInput = '';
   state.routineChatThinking = true;
+  saveWizard();
   render();
   scrollRoutineChatToBottom();
   
@@ -4596,7 +4623,8 @@ window.sendRoutineModification = async function() {
     });
     // 루틴은 자동 업데이트 X - 사용자가 [적용] 눌러야 반영
   }
-  
+
+  saveWizard();
   render();
   scrollRoutineChatToBottom();
 };
@@ -4625,6 +4653,7 @@ window.approveRoutineChange = function(msgIdx) {
   });
   
   msg.approvalStatus = 'applied';
+  saveWizard();
   render();
 };
 
@@ -4633,6 +4662,7 @@ window.cancelRoutineChange = function(msgIdx) {
   var msg = state.routineChatHistory[msgIdx];
   if (!msg) return;
   msg.approvalStatus = 'cancelled';
+  saveWizard();
   render();
 };
 
@@ -4893,14 +4923,15 @@ window.startGeneratedRoutine = function() {
   };
   saveActiveSession();
 
-  // 마법사 상태 리셋
+  // 마법사 상태 리셋 (운동이 시작됐으니 마법사는 비움)
   state.workoutWizardStep = 1;
   state.generatedRoutine = null;
   state.selectedBodyPart = null;
   state.routineChatHistory = [];
   state.routineChatInput = '';
   state.routinePreviewExpanded = false;
-  
+  clearWizard();
+
   render();
 };
 
@@ -10514,16 +10545,8 @@ window.setTab = function(tabId) {
   state.data.bodyLog = storage.get(KEYS.BODY_LOG) || [];
   state.data.personalRecords = storage.get(KEYS.PERSONAL_RECORDS) || [];
   console.log('[setTab] ' + tabId + ' - 운동:' + state.data.workoutLog.length + ' 영양:' + state.data.nutritionLog.length);
-  
-  // 운동 탭 진입 시 마법사 STEP 1로 리셋
-  if (tabId === 'workout') {
-    state.workoutWizardStep = 1;
-    state.selectedBodyPart = null;
-    state.generatedRoutine = null;
-    state.routineChatHistory = [];
-    state.routineChatInput = '';
-    state.routinePreviewExpanded = false;
-  }
+
+  // 운동 탭 진입 시 마법사는 이전 진행 단계를 그대로 유지 (저장된 state 복원됨)
   state.currentTab = tabId;
   render();
 };
@@ -10585,6 +10608,17 @@ function init() {
   var savedSession = storage.get(KEYS.ACTIVE_SESSION);
   if (savedSession && savedSession.exercises && savedSession.startTime) {
     state.activeSession = savedSession;
+  }
+
+  // 진행 중이던 운동 마법사 상태 복원 (운동 짜는 단계가 백그라운드 후에도 유지되도록)
+  var savedWizard = storage.get(KEYS.WORKOUT_WIZARD);
+  if (savedWizard) {
+    if (savedWizard.workoutWizardStep) state.workoutWizardStep = savedWizard.workoutWizardStep;
+    if (savedWizard.selectedBodyPart) state.selectedBodyPart = savedWizard.selectedBodyPart;
+    if (savedWizard.generatedRoutine) state.generatedRoutine = savedWizard.generatedRoutine;
+    if (Array.isArray(savedWizard.routineChatHistory)) state.routineChatHistory = savedWizard.routineChatHistory;
+    if (typeof savedWizard.routineChatInput === 'string') state.routineChatInput = savedWizard.routineChatInput;
+    if (typeof savedWizard.routinePreviewExpanded === 'boolean') state.routinePreviewExpanded = savedWizard.routinePreviewExpanded;
   }
   var savedRest = storage.get(KEYS.REST_TIMER);
   if (savedRest && savedRest.startTime && savedRest.duration) {
