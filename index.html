@@ -777,6 +777,24 @@ button {
   font-size: 52px;
   letter-spacing: 0.05em;
 }
+.number-display .number-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: inherit;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 52px;
+  letter-spacing: 0.05em;
+  text-align: center;
+  padding: 0;
+  -moz-appearance: textfield;
+}
+.number-display .number-input::-webkit-outer-spin-button,
+.number-display .number-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
 
 /* 조정 버튼 */
 .adj-grid {
@@ -5713,11 +5731,16 @@ function updateEditSheetDisplay() {
   var ex = state.activeSession.exercises[s.exerciseIdx];
   var set = ex.sets[s.setIdx];
 
+  var weightVal = set.weight !== null ? set.weight : 0;
   var w = document.getElementById('sheet-weight-value');
-  if (w) w.textContent = set.weight !== null ? set.weight : 0;
+  if (w) w.textContent = weightVal;
+  var wInput = document.getElementById('sheet-weight-input');
+  if (wInput && wInput.style.display === 'none') wInput.value = weightVal;
 
   var r = document.getElementById('sheet-reps-value');
   if (r) r.textContent = set.reps;
+  var rInput = document.getElementById('sheet-reps-input');
+  if (rInput && rInput.style.display === 'none') rInput.value = set.reps;
 
   var t = document.getElementById('sheet-warmup-toggle');
   if (t) {
@@ -5734,6 +5757,49 @@ function updateEditSheetDisplay() {
     label.textContent = (set.isWarmup ? '워밍업' : '세트 ' + setNum) + ' 편집';
   }
 }
+
+// 숫자 영역 탭 → input 모드 (키패드로 직접 입력)
+window.enterEditMode = function(field) {
+  if (!state.editingSet) return;
+  var p = document.getElementById('sheet-' + field + '-value');
+  var input = document.getElementById('sheet-' + field + '-input');
+  if (!p || !input) return;
+  if (input.style.display !== 'none') return; // 이미 input 모드
+
+  input.value = p.textContent;
+  p.style.display = 'none';
+  input.style.display = 'block';
+  // iOS Safari 호환을 위해 약간 지연 후 focus/select
+  setTimeout(function() {
+    input.focus();
+    try { input.select(); } catch (e) {}
+  }, 0);
+};
+
+// input blur/Enter → 값 커밋 후 p로 복원
+window.commitEdit = function(field) {
+  if (!state.editingSet) return;
+  var s = state.editingSet;
+  var set = state.activeSession.exercises[s.exerciseIdx].sets[s.setIdx];
+  var input = document.getElementById('sheet-' + field + '-input');
+  var p = document.getElementById('sheet-' + field + '-value');
+  if (!input || !p) return;
+
+  var n = parseFloat(input.value);
+  if (!isNaN(n) && n >= 0) {
+    if (field === 'reps') {
+      set.reps = Math.floor(n);
+    } else {
+      // 무게는 0.5kg 단위로 반올림
+      set.weight = Math.round(n * 2) / 2;
+    }
+    saveActiveSession();
+  }
+
+  p.textContent = (field === 'weight' ? (set.weight !== null ? set.weight : 0) : set.reps);
+  input.style.display = 'none';
+  p.style.display = '';
+};
 
 // 무게/횟수 조정
 window.adjustWeight = function(delta) {
@@ -6015,8 +6081,9 @@ function renderWorkoutSession() {
               '<p>무게</p>' +
               '<p>kg</p>' +
             '</div>' +
-            '<div class="number-display">' +
+            '<div class="number-display" onclick="enterEditMode(\'weight\')">' +
               '<p id="sheet-weight-value">' + (set.weight !== null ? set.weight : 0) + '</p>' +
+              '<input id="sheet-weight-input" class="number-input" type="number" inputmode="decimal" step="0.5" min="0" style="display:none;" onclick="event.stopPropagation()" onblur="commitEdit(\'weight\')" onkeydown="if(event.key===\'Enter\')this.blur()" />' +
             '</div>' +
             '<div class="adj-grid">' +
               '<button class="adj-btn" onclick="adjustWeight(-5)">−5</button>' +
@@ -6032,8 +6099,9 @@ function renderWorkoutSession() {
               '<p>횟수</p>' +
               '<p>목표: ' + ex.targetReps + '</p>' +
             '</div>' +
-            '<div class="number-display">' +
+            '<div class="number-display" onclick="enterEditMode(\'reps\')">' +
               '<p id="sheet-reps-value">' + set.reps + '</p>' +
+              '<input id="sheet-reps-input" class="number-input" type="number" inputmode="numeric" step="1" min="0" style="display:none;" onclick="event.stopPropagation()" onblur="commitEdit(\'reps\')" onkeydown="if(event.key===\'Enter\')this.blur()" />' +
             '</div>' +
             '<div class="adj-grid">' +
               '<button class="adj-btn" onclick="adjustReps(-5)">−5</button>' +
