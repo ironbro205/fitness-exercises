@@ -3571,18 +3571,21 @@ function normalizeFood(name) {
 }
 
 // DB에서 음식 찾기
-function findFoodInDB(name) {
+// strict=true: 정확/별칭 매칭만 신뢰 (부분 매칭은 오작동 위험 → AI로 보낼 것)
+function findFoodInDB(name, strict) {
   var norm = normalizeFood(name);
-  
+
   // 1차: 직접 매칭
   if (FOOD_DB[norm]) return { key: norm, data: FOOD_DB[norm] };
-  
+
   // 2차: 별칭 매칭
   if (FOOD_ALIASES[norm]) {
     var aliasKey = FOOD_ALIASES[norm];
     if (FOOD_DB[aliasKey]) return { key: aliasKey, data: FOOD_DB[aliasKey] };
   }
-  
+
+  if (strict) return null;
+
   // 3차: 부분 매칭 (포함 관계)
   var dbKeys = Object.keys(FOOD_DB);
   for (var i = 0; i < dbKeys.length; i++) {
@@ -3590,7 +3593,7 @@ function findFoodInDB(name) {
       return { key: dbKeys[i], data: FOOD_DB[dbKeys[i]] };
     }
   }
-  
+
   // 4차: 별칭 부분 매칭
   var aliasKeys = Object.keys(FOOD_ALIASES);
   for (var i = 0; i < aliasKeys.length; i++) {
@@ -3599,7 +3602,7 @@ function findFoodInDB(name) {
       if (FOOD_DB[aliasKey]) return { key: aliasKey, data: FOOD_DB[aliasKey] };
     }
   }
-  
+
   return null;
 }
 
@@ -3622,9 +3625,9 @@ function extractAmount(text, defaultData) {
 }
 
 // 음식 분석 (자연어 → 영양소)
-function analyzeFood(text) {
+function analyzeFood(text, strict) {
   // 음식 이름 찾기
-  var found = findFoodInDB(text);
+  var found = findFoodInDB(text, strict);
   if (!found) return null;
   
   // 양 추출
@@ -3669,23 +3672,23 @@ function analyzeFood(text) {
 }
 
 // 여러 음식 입력 처리 ("닭가슴살 100g + 밥 한 공기")
-function analyzeFoodInput(text) {
+function analyzeFoodInput(text, strict) {
   // 분리자: 와, 랑, +, 하고, 그리고
   var parts = text.split(/\s*(?:와|랑|이랑|\+|하고|그리고|,)\s*/);
-  
+
   var results = [];
   var unmatched = [];
-  
+
   parts.forEach(function(part) {
     if (!part.trim()) return;
-    var result = analyzeFood(part.trim());
+    var result = analyzeFood(part.trim(), strict);
     if (result) {
       results.push(result);
     } else {
       unmatched.push(part.trim());
     }
   });
-  
+
   return { matched: results, unmatched: unmatched };
 }
 
@@ -6704,9 +6707,11 @@ window.sendFoodMessage = async function() {
   // 사용자 메시지 추가
   state.foodChatHistory.push({ type: 'user', text: text });
   state.foodInputText = '';
-  
-  // 1차: DB 매칭
-  var analysis = analyzeFoodInput(text);
+
+  // API 키 있으면 DB 부분 매칭 비활성 → 정확/별칭 매칭만 신뢰, 나머지는 AI로
+  // (API 키 없으면 기존대로 부분 매칭까지 사용)
+  var strict = !!state.apiKey;
+  var analysis = analyzeFoodInput(text, strict);
   
   // DB로 모두 매칭 성공
   if (analysis.matched.length > 0 && analysis.unmatched.length === 0) {
