@@ -3019,7 +3019,16 @@ function generateDemoData() {
 // 유틸
 // ═══════════════════════════════════════════════
 function getTodayStr() {
-  return new Date().toISOString().split('T')[0];
+  return getDateStr(new Date());
+}
+
+// KST(UTC+9) 기준 YYYY-MM-DD 문자열 — 한국 자정 기준으로 날짜 갱신.
+// UTC 기준 toISOString()을 그대로 쓰면 한국 자정~오전 9시 사이 작업이
+// 전날로 기록되는 버그가 발생하므로 모든 date 필드는 이 함수 사용.
+function getDateStr(d) {
+  if (!d) d = new Date();
+  var kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().split('T')[0];
 }
 
 function fmtDate(d) {
@@ -4141,7 +4150,7 @@ function renderWorkout() {
   for (var d = 0; d < 7; d++) {
     var dayDate = new Date(monday);
     dayDate.setDate(monday.getDate() + d);
-    var dayStr = dayDate.toISOString().split('T')[0];
+    var dayStr = getDateStr(dayDate);
     var todayStr = getTodayStr();
     var isToday = dayStr === todayStr;
     var isFuture = dayDate > today;
@@ -5582,7 +5591,7 @@ function finalizeSession() {
           weight: maxWeight,
           reps: reps[weights.indexOf(maxWeight)],
           previousWeight: ex.lastWeight,
-          date: new Date().toISOString().split('T')[0]
+          date: getTodayStr()
         });
       }
       // 체중 운동 (풀업 등)
@@ -5592,7 +5601,7 @@ function finalizeSession() {
           exerciseName: ex.name,
           reps: reps[0],
           previousReps: ex.lastReps,
-          date: new Date().toISOString().split('T')[0]
+          date: getTodayStr()
         });
       }
     }
@@ -5602,7 +5611,7 @@ function finalizeSession() {
   var newWorkout = {
     id: 'w_' + Date.now(),
     startTime: Date.now(),  // 식별자로 사용
-    date: new Date().toISOString().split('T')[0],
+    date: getTodayStr(),
     session: session.sessionType,
     sessionType: session.sessionType,
     sessionName: session.sessionName,
@@ -5702,7 +5711,7 @@ function saveCompletionCondition() {
   
   var entry = {
     id: 'cd_' + Date.now(),
-    date: new Date().toISOString().split('T')[0],
+    date: getTodayStr(),
     workoutId: cs.workoutId || null,
     sessionName: cs.sessionName,
     rpe: cs.rpe || null,           // 1~10 (Rate of Perceived Exertion)
@@ -8971,8 +8980,8 @@ function collectWeekData() {
   var weightChange = (endWeight - startWeight).toFixed(2);
   
   return {
-    monday: monday.toISOString().split('T')[0],
-    sunday: sunday.toISOString().split('T')[0],
+    monday: getDateStr(monday),
+    sunday: getDateStr(sunday),
     workouts: weekWorkouts,
     workoutCount: weekWorkouts.length,
     pushCount: weekWorkouts.filter(function(w) { return w.sessionKr === 'PUSH'; }).length,
@@ -10300,7 +10309,7 @@ function renderStats() {
   for (var i = 6; i >= 0; i--) {
     var d = new Date(today);
     d.setDate(today.getDate() - i);
-    var dStr = d.toISOString().split('T')[0];
+    var dStr = getDateStr(d);
     var dayProtein = state.data.nutritionLog
       .filter(function(m) { return m.date === dStr; })
       .reduce(function(s, m) { return s + (m.protein || 0); }, 0);
