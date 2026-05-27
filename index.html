@@ -3181,10 +3181,10 @@ function renderHome() {
   var monday = new Date(today);
   monday.setDate(today.getDate() - (dayOfWeek - 1));
   monday.setHours(0,0,0,0);
-  
+
+  var mondayStr = getDateStr(monday);
   var thisWeekWorkouts = data.workoutLog.filter(function(w) {
-    var wd = new Date(w.date);
-    return wd >= monday && wd <= today;
+    return w.date >= mondayStr && w.date <= tdStr;
   });
   
   var weekDays = ['월','화','수','목','금','토','일'];
@@ -3445,10 +3445,11 @@ function getRecommendedSession() {
   var monday = new Date(today);
   monday.setDate(today.getDate() - (dayOfWeek - 1));
   monday.setHours(0,0,0,0);
-  
+
+  var mondayStr = getDateStr(monday);
+  var tdStr = getTodayStr();
   var thisWeek = state.data.workoutLog.filter(function(w) {
-    var wd = new Date(w.date);
-    return wd >= monday && wd <= today;
+    return w.date >= mondayStr && w.date <= tdStr;
   });
   
   var done = thisWeek.map(function(w) { return w.session || w.sessionKr.toLowerCase(); });
@@ -8045,8 +8046,9 @@ function getRecentVolumeByPart(weeks) {
   var since = new Date(today);
   since.setDate(today.getDate() - (weeks * 7));
   
+  var sinceStr = getDateStr(since);
   var workouts = state.data.workoutLog.filter(function(w) {
-    return new Date(w.date) >= since;
+    return w.date >= sinceStr;
   });
   
   var volumeByPart = {};
@@ -8143,8 +8145,9 @@ function buildUserContext(options) {
   var monday = new Date(today);
   monday.setDate(today.getDate() - (dayOfWeek - 1));
   monday.setHours(0, 0, 0, 0);
+  var mondayStr = getDateStr(monday);
   var thisWeekWorkouts = state.data.workoutLog.filter(function(w) {
-    return new Date(w.date) >= monday;
+    return w.date >= mondayStr;
   });
   
   // 부위별 카운트 (최근 4주)
@@ -8161,7 +8164,8 @@ function buildUserContext(options) {
   // 최근 7일 단백질 평균
   var sevenDaysAgo = new Date(today);
   sevenDaysAgo.setDate(today.getDate() - 7);
-  var recentMeals = state.data.nutritionLog.filter(function(m) { return new Date(m.date) >= sevenDaysAgo; });
+  var sevenDaysAgoStr = getDateStr(sevenDaysAgo);
+  var recentMeals = state.data.nutritionLog.filter(function(m) { return m.date >= sevenDaysAgoStr; });
   var dailyP = {};
   recentMeals.forEach(function(m) {
     if (!dailyP[m.date]) dailyP[m.date] = 0;
@@ -9310,16 +9314,17 @@ function detectPlateauSignals() {
   // 3. 운동 빈도 감소
   var oneWeekAgo = new Date(today);
   oneWeekAgo.setDate(today.getDate() - 7);
+  var oneWeekAgoStr = getDateStr(oneWeekAgo);
   var thisWeekCount = state.data.workoutLog.filter(function(w) {
-    return new Date(w.date) >= oneWeekAgo;
+    return w.date >= oneWeekAgoStr;
   }).length;
   if (thisWeekCount < state.profile.workoutFreq - 1) {
     signals.push('frequency_drop');
   }
-  
+
   // 4. 단백질 평균 부족
   var recentMeals = state.data.nutritionLog.filter(function(m) {
-    return new Date(m.date) >= oneWeekAgo;
+    return m.date >= oneWeekAgoStr;
   });
   var dailyP = {};
   recentMeals.forEach(function(m) {
