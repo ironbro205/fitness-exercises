@@ -8,6 +8,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The app is **plain static files, no build step** — a thin `index.html` shell plus `css/styles.css` and five `js/*.js` files. No framework, no package manager, no backend in this repo. Logic is guarded by a small zero-dependency test harness (see Running & testing).
 
+## 개발 원칙 — 근성장(근비대) 근거 기반 (최우선)
+
+이 앱의 **모든 개발 방향 제시·기능 추천·기본값 설정은 반드시 근성장(근비대) 연구 결과를 근거로 한다.** 운동 로직(1RM 추적, 진행/과부하, 사이클·주기화, 디로드, 볼륨/세트 권장, AI 코치·추천 프롬프트 등)에 관한 결정을 내릴 때:
+
+- 추측이나 일반 상식으로 정하지 말고, **근비대 과학(메타분석·리뷰: Schoenfeld, Helms, Israetel 등, Stronger By Science/MASS, Renaissance Periodization, NSCA)을 근거로** 제시한다.
+- **지식이 부족하거나 불확실하면 먼저 웹 조사(WebSearch/WebFetch, 가능하면 다중 소스 교차검증)를 한 뒤** 제시한다. 근거 없는 단정 금지.
+- 사용자에게 안을 제시할 때 **"왜 이게 근성장에 좋은지(근거)"를 함께** 설명한다. 출처를 남긴다.
+- 단순함과 근거가 충돌하면, **근거가 뒷받침하는 가장 단순한 안**을 우선한다(1인 비선수 사용자 기준).
+
 ## Repository layout
 
 - `index.html` — thin HTML shell: `<head>`, a `<link>` to the stylesheet, `<div id="app">`, and 5 `<script src>` tags loaded in order.
