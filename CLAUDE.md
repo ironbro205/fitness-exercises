@@ -76,3 +76,37 @@ The five canonical triage roles use their default label strings (`needs-triage`,
 ### Domain docs
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root (not created yet — produced lazily by `/grill-with-docs`). See `docs/agents/domain.md`.
+
+## Planned file structure (split target — NOT done yet)
+
+`index.html` will be split into plain static files (no build step), loaded in order. **Until that refactor lands, these names refer to sections _inside_ `index.html`**; the `healthapp-feature` skill maps work to them.
+
+```
+index.html        → HTML shell: <head>, css/js links, <div id="app">, <script> tags in load order
+css/styles.css    → all styles (was the <style> block)
+js/data.js        → static tables: ICONS, DEFAULT_PROFILE, FOOD_DB, FOOD_ALIASES, AMOUNT_PATTERNS, EXERCISE_GIFS, SESSIONS, body-part maps
+js/core.js        → KEYS, storage, state, save*/clearWizard, generateDemoData, KST date utils, helpers (icon/showToast/renderMarkdown), init()
+js/domain.js      → pure logic: food parsing, 1RM / progressive overload, exercise GIF lookup, volume & balance analysis
+js/ai.js          → buildUserContext, prompts, all Anthropic API calls
+js/screens.js     → all renderX() builders + render() + workout-session logic + swipe/touch init
+```
+
+Load order: data → core → domain → ai → screens (`screens` runs `init()` last). When splitting: add the new files to `service-worker.js` `CORE_ASSETS` and bump `CACHE_VERSION`.
+
+## 하네스: 헬스앱
+
+**목표:** 비개발자가 헬스앱(개인용 피트니스 PWA)에 기능을 안전하게 계속 추가·배포하도록 돕는 작업 체계.
+
+**트리거 (요청 → 스킬):**
+- 새 기능·화면 추가, 기능 큰 변경, 리메이크 → `healthapp-feature`
+- AI 동작(코치 말투·음식 분석·루틴·리뷰·정체기) 프롬프트 수정 → `healthapp-ai-prompt`
+- 배포·출시·"폰에 반영"·캐시 버전 올리기 → `healthapp-deploy`
+- 모든 코드 작업의 완료 조건 → `.claude/QA_CHECKLIST.md`
+- 단순 질문·설명·사소한 한 줄 수정은 스킬 없이 직접 응답.
+
+**실행 원칙 (전역 규칙 우선):** 구현은 **메인 Claude가 직접** 한다(executor/팀 위임 금지). 외부 리뷰는 Codex가 담당. 읽기전용 탐색·분석만 기존 에이전트(`Explore`, `code-reviewer` 등)를 활용. 새 기능·다중 파일 수정·배포는 **dev-pipeline** 게이트를 거친다. 이 하네스는 구현을 위임하는 오케스트레이터를 두지 않는다.
+
+**변경 이력:**
+| 날짜 | 변경 내용 | 대상 | 사유 |
+|------|----------|------|------|
+| 2026-06-13 | 초기 구성 (스킬 3 + QA 체크리스트 + 분리 목표 구조) | `.claude/skills/healthapp-*`, `.claude/QA_CHECKLIST.md`, `CLAUDE.md` | 비개발자용 헬스앱 작업 하네스 |
