@@ -6,14 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 헬스앱 ("Health App") — a Korean-language, mobile-first **AI fitness coach PWA**. It tracks workouts, nutrition, and body metrics, and uses the Anthropic API for food analysis, routine generation, a coach chat, weekly reviews, and plateau detection.
 
-The entire application is **one file**: `index.html` (~11k lines). There is no build step, no framework, no package manager, no automated tests, and no backend in this repo.
+The app is **plain static files, no build step** — a thin `index.html` shell plus `css/styles.css` and five `js/*.js` files. No framework, no package manager, no backend in this repo. Logic is guarded by a small zero-dependency test harness (see Running & testing).
 
 ## Repository layout
 
-- `index.html` — the whole app. The `<style>` block (~lines 25–2886) holds all CSS; a single `<script>` block (~lines 2891–11152) holds all JS (plain ES5-style `var`/function declarations, no modules/imports).
+- `index.html` — thin HTML shell: `<head>`, a `<link>` to the stylesheet, `<div id="app">`, and 5 `<script src>` tags loaded in order.
+- `css/styles.css` — all styles.
+- `js/*.js` — app logic as plain (non-module) scripts sharing one global scope, loaded `data → core → domain → ai → screens` (see **Code map**). ES5-style `var`/function declarations; each file starts with `'use strict'`.
 - `service-worker.js` — offline caching (Network-First).
-- `manifest.json` — PWA manifest (standalone, portrait, Korean).
-- `icon-*.png` — PWA icons.
+- `manifest.json` — PWA manifest (standalone, portrait, Korean); `icon-*.png` — PWA icons.
+- `tests/` — zero-dependency characterization tests (see Running & testing).
 
 ## Running & testing
 
@@ -35,19 +37,19 @@ Visual/behavioral QA still needs a real browser — **hard-reload** (or enable D
 
 ## Shipping changes — bump the service-worker cache
 
-`service-worker.js` caches assets under `CACHE_VERSION` (currently `health-app-v12`). Because it caches `index.html` itself, **clients keep running the old code until the cache name changes.** Whenever you change `index.html`, bump `CACHE_VERSION` in `service-worker.js` (established step — see commit #1, "bump SW cache").
+`service-worker.js` caches the app shell under `CACHE_VERSION` (currently `health-app-v14`). Because it caches `index.html`/`css`/`js`, **clients keep running the old code until the cache name changes.** Whenever you change any app file (`index.html`, `css/styles.css`, `js/*.js`), bump `CACHE_VERSION`. If you add a new static file, also add it to `CORE_ASSETS`.
 
 ## Architecture
 
-**Single global `state` object + full re-render.** All UI state lives in one `state` object (~line 3097). `render()` (~line 10854) is the only thing that paints the screen: it builds an HTML string and assigns it to `#app`'s `innerHTML` — no virtual DOM, no diffing, the whole screen is replaced. After mutating `state`, call `render()`.
+**Single global `state` object + full re-render.** All UI state lives in one `state` object (`js/core.js`). `render()` (`js/screens.js`) is the only thing that paints the screen: it builds an HTML string and assigns it to `#app`'s `innerHTML` — no virtual DOM, no diffing, the whole screen is replaced. After mutating `state`, call `render()`.
 
 `render()` routing is **priority-ordered**: full-screen overlays are checked first (1RM list → weekly review → plateau → coach chat → food input → completed session → active workout session); only if none are open does it switch on `state.currentTab` (`home`/`workout`/`fuel`/`stats`/`more`) and append the tab bar. Each screen has a `renderX()` function returning an HTML string. Event handlers are wired through inline `onclick="..."` attributes that call global functions.
 
-**Persistence: `localStorage` via the `storage` wrapper.** `storage.get/set` (~line 2920) JSON-serialize to keys defined in the `KEYS` map (all prefixed `fitness_`). `init()` (~line 10965) loads everything into `state` on startup and seeds demo data (`generateDemoData`) on first run. The active workout session, rest timer, and routine-builder wizard are persisted separately (`saveActiveSession`, `saveRestTimer`, `saveWizard`) so they survive backgrounding/refresh.
+**Persistence: `localStorage` via the `storage` wrapper.** `storage.get/set` (`js/core.js`) JSON-serialize to keys defined in the `KEYS` map (all prefixed `fitness_`). `init()` (defined in `js/core.js`, called at the tail of `js/screens.js`) loads everything into `state` on startup and seeds demo data (`generateDemoData`) on first run. The active workout session, rest timer, and routine-builder wizard are persisted separately (`saveActiveSession`, `saveRestTimer`, `saveWizard`) so they survive backgrounding/refresh.
 
 The user's tracked data lives in `state.data`: `workoutLog`, `nutritionLog`, `personalRecords`, `bodyLog`, `conditionLog`.
 
-**Static data tables (in-file constants):**
+**Static data tables (`js/data.js`):**
 - Food parsing: `FOOD_DB`, `FOOD_ALIASES`, `AMOUNT_PATTERNS` → `analyzeFoodInput` / `normalizeFood` / `extractAmount`. Ambiguous input falls through to the AI (see commit #8).
 - Exercise media: `EXERCISE_GIFS` (Korean exercise name → external GIF URL). `findExerciseGif` does exact match, then **fuzzy token matching** so AI-generated name variants still resolve (#4).
 - Workout templates & body-part analysis: `SESSIONS`, `EXERCISE_BODY_PART_MAP`, `BODY_PART_GROUPS`, `WEAK_PART_EXERCISE_MAP`, `BODY_PART_KR`.
@@ -85,21 +87,26 @@ The five canonical triage roles use their default label strings (`needs-triage`,
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root (not created yet — produced lazily by `/grill-with-docs`). See `docs/agents/domain.md`.
 
-## Planned file structure (split target — NOT done yet)
+## Code map (post-split)
 
-`index.html` will be split into plain static files (no build step), loaded in order. **Until that refactor lands, these names refer to sections _inside_ `index.html`**; the `healthapp-feature` skill maps work to them.
+Plain scripts loaded in this order (later files may call earlier ones; the tail of `screens.js` runs `init()`):
 
 ```
-index.html        → HTML shell: <head>, css/js links, <div id="app">, <script> tags in load order
-css/styles.css    → all styles (was the <style> block)
-js/data.js        → static tables: ICONS, DEFAULT_PROFILE, FOOD_DB, FOOD_ALIASES, AMOUNT_PATTERNS, EXERCISE_GIFS, SESSIONS, body-part maps
-js/core.js        → KEYS, storage, state, save*/clearWizard, generateDemoData, KST date utils, helpers (icon/showToast/renderMarkdown), init()
-js/domain.js      → pure logic: food parsing, 1RM / progressive overload, exercise GIF lookup, volume & balance analysis
-js/ai.js          → buildUserContext, prompts, all Anthropic API calls
-js/screens.js     → all renderX() builders + render() + workout-session logic + swipe/touch init
+index.html      → HTML shell + <link> + 5 <script src> tags
+css/styles.css  → all styles
+js/data.js      → static tables: ICONS, DEFAULT_PROFILE, FOOD_DB, FOOD_ALIASES, AMOUNT_PATTERNS,
+                  EXERCISE_GIFS, INITIAL_1RM, EXERCISE_ALIASES_1RM, SESSIONS,
+                  EXERCISE_BODY_PART_MAP, EXERCISES_BY_PRIMARY, BODY_PART_* maps
+js/core.js      → KEYS, storage, state, save*/clearWizard, generateDemoData, KST date utils,
+                  helpers (icon/showToast/renderMarkdown), init()
+js/domain.js    → pure logic: food parsing, 1RM / progressive overload, exercise GIF lookup,
+                  volume & balance analysis
+js/ai.js        → buildUserContext, prompts, all Anthropic API calls + load…IfNeeded gates
+js/screens.js   → renderX() builders + render() + window.* onclick handlers +
+                  workout-session logic + swipe/touch init + the init() call (load tail)
 ```
 
-Load order: data → core → domain → ai → screens (`screens` runs `init()` last). When splitting: add the new files to `service-worker.js` `CORE_ASSETS` and bump `CACHE_VERSION`.
+Each `js/*.js` begins with `'use strict'` (the original was one strict script — preserve this). When adding a new static file, add it to `service-worker.js` `CORE_ASSETS` and bump `CACHE_VERSION`. The split was pure code movement (line-for-line identical, just regrouped); classification is for navigation only.
 
 ## 하네스: 헬스앱
 
@@ -118,3 +125,4 @@ Load order: data → core → domain → ai → screens (`screens` runs `init()`
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |------|----------|------|------|
 | 2026-06-13 | 초기 구성 (스킬 3 + QA 체크리스트 + 분리 목표 구조) | `.claude/skills/healthapp-*`, `.claude/QA_CHECKLIST.md`, `CLAUDE.md` | 비개발자용 헬스앱 작업 하네스 |
+| 2026-06-13 | index.html 분리 완료 (CSS + JS 5파일, 빌드 없음) | `index.html`, `css/`, `js/`, `service-worker.js`, `tests/` | 단일 11k줄 → 탐색·수정 쉬운 구조 |
