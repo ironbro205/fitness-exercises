@@ -1,5 +1,5 @@
 // 헬스앱 Service Worker - 오프라인 캐싱
-const CACHE_VERSION = 'health-app-v13';
+const CACHE_VERSION = 'health-app-v14';
 const CACHE_NAME = `health-app-${CACHE_VERSION}`;
 
 // 캐싱할 핵심 자원
@@ -7,6 +7,11 @@ const CORE_ASSETS = [
   '/',
   '/index.html',
   '/css/styles.css',
+  '/js/data.js',
+  '/js/core.js',
+  '/js/domain.js',
+  '/js/ai.js',
+  '/js/screens.js',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png'
