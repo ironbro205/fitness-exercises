@@ -17,13 +17,21 @@ The entire application is **one file**: `index.html` (~11k lines). There is no b
 
 ## Running & testing
 
-No build, no test runner. The app needs a real HTTP origin (service worker + PWA do not work from `file://`):
+No build step. The app needs a real HTTP origin (service worker + PWA do not work from `file://`):
 
 ```
 python3 -m http.server 8000   # then open http://localhost:8000
 ```
 
-Manual QA in a mobile-sized browser viewport is the only verification path. When iterating, **hard-reload** (or enable DevTools "Update on reload") so the service worker doesn't keep serving a stale cached `index.html`.
+Logic regression is guarded by **zero-dependency characterization tests** — run with:
+
+```
+node --test tests/characterization.test.mjs
+```
+
+(the bare-directory `node --test tests/` form is unreliable in this environment — name the file). The harness (`tests/_harness.mjs`) loads the app's JS in a Node `vm` with a stub DOM, then golden-master-checks the pure functions (1RM, food parsing, GIF fuzzy-match) and asserts no global function/data table went missing (`tests/golden-symbols.json`). It auto-loads `js/*.js` if present, else the inline `<script>` in `index.html`, so the same tests run before and after the split.
+
+Visual/behavioral QA still needs a real browser — **hard-reload** (or enable DevTools "Update on reload") so the service worker doesn't keep serving a stale cached `index.html`.
 
 ## Shipping changes — bump the service-worker cache
 
