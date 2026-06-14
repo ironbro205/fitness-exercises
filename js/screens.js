@@ -117,10 +117,6 @@ function renderHome() {
     '<div class="px-5 pt-12 pb-5">' +
       '<div class="flex items-center justify-between mb-3">' +
         '<p class="text-xs uppercase font-mono text-stone-500" style="letter-spacing: 0.3em;">' + fmtDate(today) + ' · ' + dayNames[today.getDay()] + '</p>' +
-        '<div class="flex items-center gap-2">' +
-          '<span class="status-dot animate-pulse"></span>' +
-          '<p class="text-xs font-mono accent">CYCLE ' + profile.currentCycle + ' · WK ' + profile.currentWeek + '/' + CYCLE_LENGTH + '</p>' +
-        '</div>' +
       '</div>' +
       '<h1 class="font-bebas text-4xl">홈</h1>' +
     '</div>' +
@@ -159,13 +155,9 @@ function renderHome() {
             '<p class="font-bebas text-2xl accent">' + proteinRemaining + 'g</p>' +
           '</div>' +
         '</div>' +
-        '<div class="progress-bg mb-4"><div class="progress-fill" style="width: ' + Math.min(100, proteinPercent) + '%"></div></div>' +
-        '<div class="border-t pt-4">' +
-          '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-3">끼니 분배 · 임계점 ' + thresholdPassed + '/4</p>' +
-          '<div class="grid grid-cols-4 gap-2">' + meals + '</div>' +
-        '</div>' +
+        '<div class="progress-bg"><div class="progress-fill" style="width: ' + Math.min(100, proteinPercent) + '%"></div></div>' +
       '</div>' +
-      
+
       // 이번 주 운동
       '<div class="card mb-4">' +
         '<div class="flex items-baseline justify-between mb-4">' +
@@ -245,53 +237,7 @@ function renderHome() {
         '</div>'
       : '') +
       
-      // 코치 메시지
-      '<div class="card-coach mb-4" onclick="openCoachChat()" style="cursor: pointer;">' +
-        '<div class="flex items-start gap-3">' +
-          '<div class="coach-icon accent">' + icon('msg', 18) + '</div>' +
-          '<div class="flex-1">' +
-            '<div class="flex items-baseline justify-between mb-1\\.5">' +
-              '<p class="text-xs font-mono accent uppercase tracking-widest">COACH</p>' +
-              '<p class="text-[10px] font-mono accent">대화하기 →</p>' +
-            '</div>' +
-            '<p class="text-sm text-stone-200 leading-relaxed">' +
-              (proteinRemaining > 0
-                ? (isDeloadWeek ? '이번 주는 디로드예요. 가볍게 회복하며 폼에 집중하세요.' : '빌드 ' + profile.currentWeek + '주차 — 지난주보다 조금씩 무게나 횟수를 늘려보세요.') + ' 단백질 ' + proteinRemaining + 'g 더 채우면 오늘 목표 달성입니다.'
-                : '오늘 단백질 목표 달성! 회복에 집중하세요.') +
-            '</p>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-      
-      // PR
-      (recentPRs.length > 0 ? (
-        '<div class="card mb-4">' +
-          '<div class="flex items-center justify-between mb-3">' +
-            '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono">최근 PR</p>' +
-            '<p class="text-xs font-mono accent">이번 달 ' + data.personalRecords.length + '개</p>' +
-          '</div>' +
-          '<div style="display: flex; flex-direction: column; gap: 8px;">' + prCards + '</div>' +
-        '</div>'
-      ) : '') +
-      
-      // 빠른 입력
-      '<div>' +
-        '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-3 px-1">빠른 입력</p>' +
-        '<div class="grid grid-cols-3 gap-2">' +
-          '<button class="quick-btn" onclick="setTab(\'workout\')">' +
-            '<div class="quick-btn-icon">' + icon('dumbbell', 20) + '</div>' +
-            '<p class="text-xs font-display font-bold">운동</p>' +
-          '</button>' +
-          '<button class="quick-btn" onclick="setTab(\'fuel\')">' +
-            '<div class="quick-btn-icon">' + icon('apple', 20) + '</div>' +
-            '<p class="text-xs font-display font-bold">영양</p>' +
-          '</button>' +
-          '<button class="quick-btn" onclick="setTab(\'stats\')">' +
-            '<div class="quick-btn-icon">' + icon('scale', 20) + '</div>' +
-            '<p class="text-xs font-display font-bold">체중</p>' +
-          '</button>' +
-        '</div>' +
-      '</div>' +
+      // 정체기 경고 카드 끝 → 바로 컨테이너 닫힘 (코치/최근PR/빠른입력 제거: 묶음5)
       
     '</div>';
 }
@@ -420,12 +366,6 @@ function renderWorkout() {
           '</div>' +
         '</div>' +
         '<div class="weekly-bars-grid">' + dayBarsHtml + '</div>' +
-        '<div class="weekly-legend">' +
-          '<div class="legend-item"><div class="legend-dot" style="background: #00d4ff;"></div>PUSH</div>' +
-          '<div class="legend-item"><div class="legend-dot" style="background: #a78bfa;"></div>PULL</div>' +
-          '<div class="legend-item"><div class="legend-dot" style="background: #fbbf24;"></div>LEGS</div>' +
-          '<div class="legend-item"><div class="legend-dot" style="background: #6b7a99;"></div>FREE</div>' +
-        '</div>' +
       '</div>' +
       
       // 부위 선택
@@ -1042,25 +982,6 @@ function renderWorkoutStep2() {
         '<p class="font-bebas text-3xl mb-1" style="color: #00d4ff;">' + partNames[part] + '</p>' +
         '<p class="text-xs text-stone-400 mb-1">' + partKor[part] + '</p>' +
         '<p class="text-sm text-stone-300 mt-4">AI가 맞춤 루틴 분석 중...</p>' +
-        
-        '<div class="routine-loading-steps">' +
-          '<div class="routine-loading-step done">' +
-            '<div class="routine-loading-step-dot"></div>' +
-            '<span>사용자 1RM 데이터 분석</span>' +
-          '</div>' +
-          '<div class="routine-loading-step done">' +
-            '<div class="routine-loading-step-dot"></div>' +
-            '<span>최근 4주 패턴 검토</span>' +
-          '</div>' +
-          '<div class="routine-loading-step active">' +
-            '<div class="routine-loading-step-dot"></div>' +
-            '<span>최적 종목 6~7개 선정 중</span>' +
-          '</div>' +
-          '<div class="routine-loading-step">' +
-            '<div class="routine-loading-step-dot"></div>' +
-            '<span>작업 무게 계산</span>' +
-          '</div>' +
-        '</div>' +
       '</div>' +
       '</div>';
   }
@@ -1130,7 +1051,7 @@ function renderWorkoutStep2() {
       '<div class="flex items-center justify-between mb-2 relative">' +
         '<div class="flex items-center gap-2">' +
           '<span class="ai-badge">✨ AI 분석 완료</span>' +
-          (routine.isFallback ? '' : '<span class="api-status-badge" style="background: rgba(0,212,255,0.1); color: #00d4ff; border-color: rgba(0,212,255,0.3); font-size: 9px; padding: 3px 7px;">Sonnet 4.6</span>') +
+          '' +
         '</div>' +
         '<button onclick="regenerateRoutine()" style="color: #00d4ff; opacity: 0.6;" title="다시 분석">' + icon('refresh', 14) + '</button>' +
       '</div>' +
@@ -2432,7 +2353,7 @@ function renderWorkoutComplete() {
   
   // 종목별 요약
   var exerciseSummary = '';
-  var displayCount = Math.min(cs.exercises.length, 4);
+  var displayCount = cs.exercises.length;
   for (var i = 0; i < displayCount; i++) {
     var ex = cs.exercises[i];
     var hasPR = cs.newPRs.some(function(pr) { return pr.exerciseName === ex.name; });
@@ -2452,21 +2373,6 @@ function renderWorkoutComplete() {
         (hasPR ? '<span class="pr-tag">PR</span>' : '') +
       '</div>';
   }
-  if (cs.exercises.length > 4) {
-    exerciseSummary += '<div class="text-center pt-2"><button class="text-xs font-mono accent uppercase tracking-widest">+ ' + (cs.exercises.length - 4) + '개 더 보기</button></div>';
-  }
-  
-  // 코치 메시지
-  var coachMsg;
-  if (cs.newPRs.length > 0) {
-    var prNames = cs.newPRs.map(function(p) { return p.exerciseName; }).slice(0, 2).join(', ');
-    coachMsg = prNames + ' PR 갱신 잘 했어요! 단백질 30~40g 보충 잊지 마세요. 다음 세션엔 다른 종목도 +2.5kg 도전해봐도 좋겠어요.';
-  } else if (cs.duration < 30) {
-    coachMsg = '오늘은 짧은 세션이었네요. 충분한 휴식 취하시고, 단백질 보충 잊지 마세요.';
-  } else {
-    coachMsg = '오늘 운동 잘 했어요. 단백질 30~40g 보충하고 충분한 수면 취하세요. 다음 세션도 화이팅!';
-  }
-  
   return '' +
     // 축하 헤더
     '<div class="px-5 pt-12 pb-5 text-center">' +
@@ -2539,17 +2445,6 @@ function renderWorkoutComplete() {
               })() +
             '</div>' +
             '<p class="condition-hint">1: 매우 나쁨 / 5: 매우 좋음</p>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-      
-      // 코치 메시지
-      '<div class="card-coach mb-4">' +
-        '<div class="flex items-start gap-3">' +
-          '<div class="coach-icon accent">' + icon('msg', 18) + '</div>' +
-          '<div class="flex-1">' +
-            '<p class="text-xs font-mono accent uppercase tracking-widest mb-1\\.5">COACH</p>' +
-            '<p class="text-sm text-stone-200 leading-relaxed">' + coachMsg + '</p>' +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -2666,25 +2561,10 @@ function renderFuel() {
               '<div class="dot dot-pending"></div>' +
               '<p class="font-display font-bold text-sm text-stone-500">' + name + '</p>' +
             '</div>' +
-            '<button class="text-[10px] font-mono accent uppercase tracking-widest">+ 추가</button>' +
           '</div>' +
         '</div>';
     }
   });
-  
-  // 코치 메시지
-  var coachMsg;
-  if (proteinRemaining > 0) {
-    var dinnerMeal = todayMeals.find(function(m) { return m.meal === 'dinner'; });
-    if (dinnerMeal && !dinnerMeal.thresholdPassed) {
-      var needed = 30 - dinnerMeal.protein;
-      coachMsg = '저녁 단백질이 ' + needed + 'g 부족해요. 그릭요거트 100g (10g) 또는 단백질 셰이크 반 스쿱이면 임계점 통과합니다.';
-    } else {
-      coachMsg = '오늘 단백질 ' + proteinRemaining + 'g 더 필요해요. 끼니마다 30g 이상 분배하면 근단백질합성(MPS) 최대 자극.';
-    }
-  } else {
-    coachMsg = '오늘 단백질 목표 달성! 매크로 균형도 잘 맞췄어요. 회복에 집중하세요.';
-  }
   
   return '' +
     // 헤더
@@ -2741,13 +2621,6 @@ function renderFuel() {
           '</div>' +
           '<div>' +
             '<div class="flex items-center justify-between mb-1\\.5">' +
-              '<p class="text-[10px] font-mono text-stone-400 uppercase">단백질</p>' +
-              '<p class="text-[10px] font-mono text-stone-300">' + totalProtein + ' / ' + profile.proteinTarget + 'g</p>' +
-            '</div>' +
-            '<div class="macro-bg"><div class="macro-fill" style="width: ' + proteinPercent + '%; background: #00d4ff;"></div></div>' +
-          '</div>' +
-          '<div>' +
-            '<div class="flex items-center justify-between mb-1\\.5">' +
               '<p class="text-[10px] font-mono text-stone-400 uppercase">지방</p>' +
               '<p class="text-[10px] font-mono text-stone-300">' + totalFat + ' / ' + profile.fatTarget + 'g</p>' +
             '</div>' +
@@ -2763,17 +2636,6 @@ function renderFuel() {
           '<p class="text-xs font-mono text-stone-500">' + todayMeals.length + ' / 4</p>' +
         '</div>' +
         '<div style="display: flex; flex-direction: column; gap: 10px;">' + mealCardsHtml + '</div>' +
-      '</div>' +
-      
-      // 코치 메시지
-      '<div class="card-coach">' +
-        '<div class="flex items-start gap-3">' +
-          '<div class="coach-icon accent">' + icon('msg', 18) + '</div>' +
-          '<div class="flex-1">' +
-            '<p class="text-xs font-mono accent uppercase tracking-widest mb-1\\.5">COACH</p>' +
-            '<p class="text-sm text-stone-200 leading-relaxed">' + coachMsg + '</p>' +
-          '</div>' +
-        '</div>' +
       '</div>' +
       
     '</div>' +
@@ -3677,7 +3539,7 @@ function renderMore() {
           '<div class="flex-1 text-left">' +
             '<p class="font-display font-bold text-base">코치와 대화</p>' +
             '<p class="text-[11px] font-mono text-stone-400 mt-0\\.5">' + 
-              (apiKey ? '운동·식단·컨디션 질문하기 · Sonnet 4.6' : 'API 키 설정 후 사용 가능') +
+              (apiKey ? '운동·식단·컨디션 질문하기' : 'API 키 설정 후 사용 가능') +
             '</p>' +
           '</div>' +
           '<div style="color: #00d4ff;">' + icon('chevron', 18) + '</div>' +
@@ -3747,23 +3609,6 @@ function renderMore() {
               '<p class="text-sm font-display font-bold">현재 사이클</p>' +
               '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">Cycle ' + profile.currentCycle + ' · ' + profile.cyclePhase + ' · ' + profile.currentWeek + '/' + CYCLE_LENGTH + '주</p>' +
             '</div>' +
-            '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
-          '</div>' +
-          '<div class="menu-row">' +
-            '<div class="menu-icon-sm">' + icon('calendar', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">사이클 히스토리</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">지난 사이클 기록</p>' +
-            '</div>' +
-            '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
-          '</div>' +
-          '<div class="menu-row">' +
-            '<div class="menu-icon-sm">' + icon('plus', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">새 사이클 시작</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + CYCLE_LENGTH + '주 프로그램 (빌드 4 + 디로드 1)</p>' +
-            '</div>' +
-            '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -4269,7 +4114,7 @@ function renderCoachChat() {
           '<div class="coach-avatar">' + icon('msg', 18) + '</div>' +
           '<div>' +
             '<p class="text-sm font-display font-bold">코치</p>' +
-            '<p class="text-[10px] font-mono text-stone-500"><span class="coach-online-dot"></span> ' + (hasApiKey ? 'Sonnet 4.6' : 'API 키 필요') + '</p>' +
+            '<p class="text-[10px] font-mono text-stone-500"><span class="coach-online-dot"></span> ' + (hasApiKey ? '온라인' : 'API 키 필요') + '</p>' +
           '</div>' +
         '</div>' +
         '<button class="session-header-btn" onclick="clearCoachHistory()" title="대화 초기화">' + icon('refresh', 16) + '</button>' +
@@ -4914,25 +4759,8 @@ function renderStats() {
       // 체중/체지방 차트
       '<div class="card mb-4">' +
         '<div class="flex items-center justify-between mb-4">' +
-          '<div class="flex items-center gap-2">' +
-            '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono">변화</p>' +
-            '<div class="chart-toggle">' +
-              '<button class="chart-toggle-btn ' + (state.chartView === 'weight' ? 'active' : '') + '" onclick="toggleChartView(\'weight\')">체중</button>' +
-              '<button class="chart-toggle-btn ' + (state.chartView === 'bodyFat' ? 'active' : '') + '" onclick="toggleChartView(\'bodyFat\')">체지방</button>' +
-            '</div>' +
-          '</div>' +
+          '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono">체중 변화</p>' +
           '<button class="text-[10px] font-mono accent uppercase tracking-wider" onclick="addBodyRecord()">+ 기록</button>' +
-        '</div>' +
-        
-        '<div class="flex items-baseline justify-between mb-4">' +
-          '<div>' +
-            '<p class="font-bebas text-4xl">' + currentWeight.toFixed(1) + '<span class="text-base text-stone-500">kg</span></p>' +
-            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">오늘</p>' +
-          '</div>' +
-          '<div class="text-right">' +
-            '<p class="text-xs font-mono ' + (weightChange < 0 ? 'accent' : 'text-stone-500') + '">' + weightChangeSign + weightChange + 'kg</p>' +
-            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">시작 ' + startWeight.toFixed(1) + 'kg</p>' +
-          '</div>' +
         '</div>' +
         
         chartHtml +
@@ -4942,7 +4770,6 @@ function renderStats() {
       '<div class="card mb-4">' +
         '<div class="flex items-center justify-between mb-4">' +
           '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono">주간 운동</p>' +
-          '<p class="text-xs font-mono accent">' + workoutLog.length + ' 세션</p>' +
         '</div>' +
         
         '<div class="bar-chart" style="height: 140px;">' + weekBarsHtml + '</div>' +
@@ -4957,23 +4784,14 @@ function renderStats() {
       '<div class="card mb-4">' +
         '<div class="flex items-center justify-between mb-4">' +
           '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono">단백질 (지난 7일)</p>' +
-          '<p class="text-xs font-mono accent">평균 ' + avgProtein + 'g</p>' +
         '</div>' +
         
         '<div class="bar-chart" style="height: 100px;">' + proteinBarsHtml + '</div>' +
         
-        '<div class="grid grid-cols-3 gap-2 mt-4 pt-4 border-t">' +
-          '<div>' +
-            '<p class="text-[10px] font-mono text-stone-500 uppercase mb-1">평균</p>' +
-            '<p class="font-bebas text-xl">' + avgProtein + '<span class="text-[10px] text-stone-500">g</span></p>' +
-          '</div>' +
-          '<div>' +
-            '<p class="text-[10px] font-mono text-stone-500 uppercase mb-1">최고</p>' +
+        '<div class="mt-4 pt-4 border-t">' +
+          '<div class="flex items-baseline justify-between">' +
+            '<p class="text-[10px] font-mono text-stone-500 uppercase">기간 내 최고</p>' +
             '<p class="font-bebas text-xl">' + (proteinDays.length > 0 ? Math.max.apply(null, proteinDays.map(function(p) { return p.protein; })) : 0) + '<span class="text-[10px] text-stone-500">g</span></p>' +
-          '</div>' +
-          '<div>' +
-            '<p class="text-[10px] font-mono text-stone-500 uppercase mb-1">달성</p>' +
-            '<p class="font-bebas text-xl accent">' + proteinDays.filter(function(p) { return p.protein >= profile.proteinTarget; }).length + '<span class="text-[10px] text-stone-500">/7</span></p>' +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -4982,7 +4800,6 @@ function renderStats() {
       '<div class="card mb-4">' +
         '<div class="flex items-center justify-between mb-3">' +
           '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono">PR 히스토리</p>' +
-          '<p class="text-xs font-mono accent">' + personalRecords.length + '개</p>' +
         '</div>' +
         '<div>' + prListHtml + '</div>' +
       '</div>' +
