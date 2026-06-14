@@ -215,7 +215,11 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
         max_tokens: 2048,
-        system: systemPrompt,
+        // 지식 베이스는 고정 블록(cache_control)으로, 루틴 분석·사용자데이터(systemPrompt)는 분기점 뒤
+        system: [
+          { type: 'text', text: '## 🧬 운동과학 지식 베이스 (루틴·코칭 결정에 활용)\n' + COACH_KNOWLEDGE, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: systemPrompt }
+        ],
         messages: messages
       })
     });
@@ -1013,7 +1017,11 @@ async function generateFullRoutine(bodyPart) {
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
         max_tokens: 2048,
-        system: systemPrompt,
+        // 지식 베이스는 고정 블록(cache_control)으로, 부위·종목풀·사용자데이터(systemPrompt)는 분기점 뒤
+        system: [
+          { type: 'text', text: '## 🧬 운동과학 지식 베이스 (루틴·코칭 결정에 활용)\n' + COACH_KNOWLEDGE, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: systemPrompt }
+        ],
         messages: [
           { role: 'user', content: info.name + ' 루틴을 만들어주세요. JSON으로만 답하세요.' }
         ]
@@ -1307,7 +1315,8 @@ async function generateWeeklyReview(forceRefresh) {
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
         max_tokens: 1500,
-        system: systemPrompt,
+        // 주간 리뷰는 주 1회 호출이라 캐싱 효과 없음 → 지식 주입만(품질↑), cache_control 미적용
+        system: '## 🧬 운동과학 지식 베이스 (주간 리뷰 평가에 활용)\n' + COACH_KNOWLEDGE + '\n\n' + systemPrompt,
         messages: [
           { role: 'user', content: '이번 주 데이터를 분석해서 리뷰를 JSON으로 작성하세요.' }
         ]
