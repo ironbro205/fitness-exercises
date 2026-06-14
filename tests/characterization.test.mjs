@@ -406,3 +406,83 @@ test('묶음6-B 코치 온라인점 — 점/규칙은 유지하되 발광(box-sh
   assert.ok(screens.includes('coach-online-dot'), '온라인점 마크업 유지');
   assert.ok(screens.includes('온라인'), '상태 텍스트(온라인) 유지');
 });
+
+// ── 묶음6-C① : 진입/피드백 애니메이션 (화면 떠오르기·세트완료 pop·완료축하 컨페티 + reduced-motion) ──
+// CSS는 render 하네스가 실행하지 않으므로 파일 텍스트로 특성화. (#app.innerHTML은 스텁이라 검사 불가 → CSS 규칙으로 가드)
+test('묶음6-C① 애니메이션 CSS — 진입/팝/축하/컨페티 keyframes·규칙 정의', () => {
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
+  assert.match(css, /@keyframes\s+screenRise\b/, '화면 진입 keyframe');
+  assert.match(css, /\.screen-enter\s*>\s*\*/, '화면 진입은 자식 요소에만 적용(고정요소 보호)');
+  assert.match(css, /@keyframes\s+popBounce\b/, '세트완료 pop keyframe');
+  assert.match(css, /\.set-row\.just-completed\b/, '세트완료 pop 적용 규칙');
+  assert.match(css, /@keyframes\s+popIn\b/, '완료 아이콘 등장 keyframe');
+  assert.match(css, /\.complete-icon\.pop-in\b/, '완료 아이콘 pop-in 규칙');
+  assert.match(css, /@keyframes\s+cardRise\b/, '완료 카드 스태거 keyframe');
+  assert.match(css, /\.complete-celebrate-list\s*>\s*\*/, '완료 카드 스태거 규칙');
+  assert.match(css, /@keyframes\s+confettiFall\b/, '컨페티 낙하 keyframe');
+  assert.match(css, /\.confetti-piece\b/, '컨페티 조각 규칙');
+});
+
+test('묶음6-C① 접근성 — prefers-reduced-motion에서 동작 끔 + 컨페티 숨김', () => {
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
+  const m = css.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?\n\})/);
+  assert.ok(m, 'prefers-reduced-motion 미디어 블록 존재');
+  assert.match(m[1], /animation-duration:\s*0\.0*1m?s\s*!important/i, '애니메이션 사실상 제거');
+  assert.match(m[1], /confetti-layer[\s\S]*display:\s*none/i, '컨페티는 reduced-motion에서 숨김');
+});
+
+test('묶음6-C① renderWorkoutComplete — 축하 연출은 첫 진입 1회만(평점 재렌더 시 반복 안 함)', () => {
+  const fresh = loadApp();
+  fresh.state.completedSession = {
+    date: new Date('2026-06-14T09:00:00'),
+    newPRs: [],
+    exercises: Array.from({ length: 5 }, (_, i) => ({ name: '종목' + (i + 1), reps: [8, 8], maxWeight: 50 + i })),
+    duration: 40, sessionName: 'PUSH', exerciseCount: 5, setCount: 12, rpe: 0, condition: 0,
+  };
+  // 완료 첫 진입(축하 대기 플래그 ON)
+  fresh.state._celebratePending = true;
+  const first = fresh.renderWorkoutComplete();
+  assert.ok(first.includes('complete-icon pop-in'), '첫 진입: 아이콘 pop-in');
+  assert.ok(first.includes('complete-celebrate-list'), '첫 진입: 카드 스태거');
+  assert.ok(first.includes('confetti-layer') && first.includes('confetti-piece'), '첫 진입: 컨페티');
+  // 평점 탭 등으로 재렌더 → 축하 연출 빠짐(반복 방지)
+  const second = fresh.renderWorkoutComplete();
+  assert.ok(!second.includes('confetti-piece'), '재렌더: 컨페티 없음');
+  assert.ok(!second.includes('pop-in'), '재렌더: 아이콘 pop-in 없음');
+  assert.ok(!second.includes('complete-celebrate-list'), '재렌더: 카드 스태거 없음');
+});
+
+// ── 묶음6-C② : 핵심 시트 닫기 슬라이드 + 휴식 타이머 원형 링 + 종목 스와이프 방향 슬라이드 ──
+test('묶음6-C② 닫기 슬라이드 CSS — slideDown/fadeOut keyframes + .closing 규칙', () => {
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
+  assert.match(css, /@keyframes\s+slideDown\b/, '닫기 슬라이드 keyframe');
+  assert.match(css, /@keyframes\s+fadeOut\b/, '오버레이 페이드아웃 keyframe');
+  assert.match(css, /\.sheet\.closing\b/, '시트 닫기 규칙');
+  assert.match(css, /\.manual-input-sheet\.closing\b/, '입력 시트 닫기 규칙');
+  assert.match(css, /\.sheet-overlay\.closing\b/, '오버레이 닫기 규칙');
+  // 닫히는 동안: 시트 버튼은 비활성(취소 후 재실행 사고 방지)
+  const sheetClosing = css.match(/\.sheet\.closing[^}]*\}/);
+  assert.ok(sheetClosing && /pointer-events:\s*none/.test(sheetClosing[0]), '닫기 중 시트 버튼 차단(pointer-events:none)');
+  // 오버레이는 계속 뒤 화면을 막아야 함 → none이면 탭이 통과되므로 금지
+  const overlayClosing = css.match(/\.sheet-overlay\.closing[^}]*\}/);
+  assert.ok(overlayClosing && !/pointer-events:\s*none/.test(overlayClosing[0]), '닫기 중 오버레이는 통과 방지(pointer-events:none 금지)');
+});
+
+test('묶음6-C② 닫기 슬라이드 — 핵심 시트 4종 dismiss가 공용 헬퍼 경유', () => {
+  const app = loadApp();
+  assert.equal(typeof app.animateSheetCloseThen, 'function', 'animateSheetCloseThen 전역 헬퍼 존재');
+  const screens = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
+  const calls = (screens.match(/animateSheetCloseThen\(function/g) || []).length;
+  assert.ok(calls >= 4, '닫기 4종(상세시트·프로필·API키·초기화확인)이 헬퍼 사용 (현재 ' + calls + ')');
+});
+
+test('묶음6-C② 휴식 원형 링 + 종목 스와이프 슬라이드 — CSS/마크업 마커', () => {
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
+  assert.match(css, /\.rest-ring-fg\b/, '휴식 progress 링 클래스');
+  assert.match(css, /@keyframes\s+exSlide(Next|Prev)\b/, '종목 슬라이드 keyframe');
+  assert.match(css, /\.ex-slide-(next|prev)\b/, '종목 슬라이드 클래스');
+  const screens = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
+  assert.ok(screens.includes('rest-ring-fg'), '휴식 링 SVG 마크업');
+  assert.ok(screens.includes("getElementById('rest-ring-fg')"), '휴식 링이 부분 갱신 경로(시트 열림 중)에서도 갱신됨');
+  assert.ok(screens.includes('ex-slide-') || screens.includes("'ex-slide-'"), '종목 슬라이드 클래스 적용');
+});

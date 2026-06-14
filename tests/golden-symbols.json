@@ -1,5 +1,5 @@
 {
-  "functionCount": 191,
+  "functionCount": 192,
   "objectCount": 21,
   "functions": [
     "addBodyRecord",
@@ -14,6 +14,7 @@
     "analyzeFoodWithAI",
     "analyzePlateauWithAI",
     "analyzeRoutineBalance",
+    "animateSheetCloseThen",
     "applyCoachQuickQuestion",
     "applyPreset",
     "applyRoutineQuickChip",

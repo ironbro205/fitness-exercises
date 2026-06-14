@@ -1138,10 +1138,23 @@ window.openItemDetail = function(type, identifier) {
   render();
 };
 
+// 6-C② 핵심 시트 닫기 슬라이드: 살아있는 시트 DOM에 closing 클래스를 직접 달아 애니메이션 재생 후 실제 닫기 실행
+// (full re-render 구조라 exit 애니가 어려운데, 닫기 직전 잠깐 지연시켜 슬라이드를 보여줌)
+function animateSheetCloseThen(closeFn) {
+  var sheet = (typeof document !== 'undefined' && document.querySelector) ? document.querySelector('.sheet, .manual-input-sheet') : null;
+  if (!sheet || !sheet.classList || !sheet.classList.add) { closeFn(); return; }
+  var overlay = document.querySelector('.sheet-overlay, .manual-input-overlay');
+  sheet.classList.add('closing');
+  if (overlay && overlay.classList && overlay.classList.add) overlay.classList.add('closing');
+  setTimeout(closeFn, 240);
+}
+
 window.closeItemDetail = function() {
-  state.itemDetailSheet = null;
-  state.itemDeleteConfirming = false;
-  render();
+  animateSheetCloseThen(function() {
+    state.itemDetailSheet = null;
+    state.itemDeleteConfirming = false;
+    render();
+  });
 };
 
 // 1단계: 삭제 의도 확인 (버튼이 "정말 삭제?"로 변함)
@@ -1588,6 +1601,7 @@ function finalizeSession() {
   advanceCycleIfWeekComplete();
 
   // 완료 화면용 데이터 저장
+  state._celebratePending = true; // 6-C① 축하 연출은 완료 첫 진입 1회만(평점 탭 재렌더 시 반복 방지)
   state.completedSession = {
     workoutId: newWorkout.id,
     sessionName: session.sessionName,
@@ -1789,7 +1803,7 @@ window.completeSet = function() {
   var exercise = state.activeSession.exercises[s.exerciseIdx];
   var set = exercise.sets[s.setIdx];
   set.completed = true;
-  
+
   // 1RM 자동 갱신 (워밍업 세트 제외)
   if (!set.isWarmup && set.weight && set.reps) {
     var updated = update1RM(exercise.name, set.weight, set.reps);
@@ -1814,8 +1828,12 @@ window.completeSet = function() {
   saveActiveSession();
   saveRestTimer();
 
+  // 6-C① 세트완료 pop: 영구 저장 안 되는 임시 state에만 표시(새로고침/복원 시 잔류·무한 반복 방지)
+  state._justCompletedSet = { ex: s.exerciseIdx, set: s.setIdx };
   render();
   startRestTimerTick();
+  // pop은 1회만: 잠시 후 임시 플래그 해제(다음 tick 재렌더에서 반복 안 되도록)
+  setTimeout(function() { state._justCompletedSet = null; }, 600);
 };
 
 // 휴식 스킵
@@ -1858,12 +1876,18 @@ function startRestTimerTick() {
     }
     // 시트(편집/종목변경)가 열려 있으면 시트가 깜빡이지 않도록 타이머만 부분 갱신
     if (state.editingSet || state.exerciseSwapOpen) {
+      var remaining = state.restTimer.duration - elapsed;
       var el = document.getElementById('rest-time-text');
       if (el) {
-        var remaining = state.restTimer.duration - elapsed;
         var mins = Math.floor(remaining / 60);
         var secs = remaining % 60;
         el.textContent = mins + ':' + String(secs).padStart(2, '0');
+      }
+      // 6-C② 원형 링도 부분 갱신(전체 렌더 없이) — 시트 열린 동안 링이 멈추지 않도록
+      var ringEl = document.getElementById('rest-ring-fg');
+      if (ringEl && ringEl.setAttribute) {
+        var ringProg = state.restTimer.duration > 0 ? (remaining / state.restTimer.duration) : 0;
+        ringEl.setAttribute('stroke-dashoffset', (113.1 * (1 - ringProg)).toFixed(1));
       }
       return;
     }
@@ -1874,9 +1898,12 @@ function startRestTimerTick() {
 // 종목 변경 (이동)
 window.goToExercise = function(idx) {
   if (state.activeSession) {
+    var cur = state.activeSession.currentExerciseIdx;
+    state._exSwipeDir = (idx === cur) ? null : (idx > cur ? 'next' : 'prev'); // 6-C② 들어오는 카드 방향
     state.activeSession.currentExerciseIdx = idx;
     saveActiveSession();
     render();
+    state._exSwipeDir = null; // 1회만(다음 tick 재렌더에서 반복 안 되도록)
   }
 };
 
@@ -1991,7 +2018,8 @@ function renderWorkoutSession() {
     } else {
       valueClass += ' pending';
     }
-    
+    if (state._justCompletedSet && state._justCompletedSet.ex === session.currentExerciseIdx && state._justCompletedSet.set === idx) setClass += ' just-completed'; // 6-C① 세트완료 pop (임시 state 기반)
+
     var labelText = set.isWarmup ? 'W' : String(idx - (exercise.sets.findIndex(function(s) { return !s.isWarmup; }) >= 0 ? exercise.sets.findIndex(function(s) { return !s.isWarmup; }) : 0));
     // 더 단순한 라벨링: warmup은 W, 본 세트는 1, 2, 3...
     var setNum = 0;
@@ -2030,12 +2058,23 @@ function renderWorkoutSession() {
     var restMins = Math.floor(restRemaining / 60);
     var restSecs = restRemaining % 60;
     var restStr = restMins + ':' + String(restSecs).padStart(2, '0');
-    
-    restTimerHtml = 
+
+    // 6-C② 원형 링: 남은 시간만큼 둘레가 차 있음 (r=18 → 둘레 ≈ 113.1, 1초 단위 갱신)
+    var ringCirc = 113.1;
+    var restProgress = state.restTimer.duration > 0 ? (restRemaining / state.restTimer.duration) : 0;
+    var ringOffset = (ringCirc * (1 - restProgress)).toFixed(1);
+
+    restTimerHtml =
       '<div class="rest-timer-wrap">' +
         '<div class="rest-timer">' +
           '<div class="flex items-center gap-3">' +
-            '<div class="rest-icon">' + icon('clock', 18) + '</div>' +
+            '<div class="rest-ring-wrap">' +
+              '<svg class="rest-ring" width="40" height="40" viewBox="0 0 40 40">' +
+                '<circle class="rest-ring-bg" cx="20" cy="20" r="18" fill="none" stroke-width="3"/>' +
+                '<circle id="rest-ring-fg" class="rest-ring-fg" cx="20" cy="20" r="18" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="' + ringCirc + '" stroke-dashoffset="' + ringOffset + '"/>' +
+              '</svg>' +
+              '<div class="rest-ring-icon">' + icon('clock', 16) + '</div>' +
+            '</div>' +
             '<div>' +
               '<p class="text-[10px] font-mono text-stone-500 uppercase">휴식 중</p>' +
               '<p id="rest-time-text" class="font-bebas text-2xl accent">' + restStr + '</p>' +
@@ -2226,8 +2265,8 @@ function renderWorkoutSession() {
       '<div class="flex items-center gap-1">' + exerciseDots + '</div>' +
     '</div>' +
     
-    '<div class="px-5" style="padding-bottom: ' + (state.restTimer ? '180px' : '120px') + ';">' +
-      
+    '<div class="px-5' + (state._exSwipeDir ? ' ex-slide-' + state._exSwipeDir : '') + '" style="padding-bottom: ' + (state.restTimer ? '180px' : '120px') + ';">' +
+
       // 현재 종목 정보
       '<div class="exercise-info-card">' +
         '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">현재 종목</p>' +
@@ -2373,17 +2412,38 @@ function renderWorkoutComplete() {
         (hasPR ? '<span class="pr-tag">PR</span>' : '') +
       '</div>';
   }
-  return '' +
+  // 6-C① 축하 연출은 완료 첫 진입 1회만 (평점 탭 등 재렌더 시 컨페티/팝 반복 방지)
+  var celebrate = !!state._celebratePending;
+  state._celebratePending = false;
+
+  // 컨페티(색종이) — reduced-motion에서는 CSS가 숨김
+  var confettiHtml = '';
+  if (celebrate) {
+    var confettiColors = ['#00d4ff', '#fbbf24', '#34d399', '#f472b6', '#a78bfa'];
+    confettiHtml = '<div class="confetti-layer" aria-hidden="true">';
+    for (var ci = 0; ci < 16; ci++) {
+      confettiHtml +=
+        '<span class="confetti-piece" style="left:' + Math.round(Math.random() * 100) + '%;' +
+        ' background:' + confettiColors[ci % confettiColors.length] + ';' +
+        ' animation-delay:' + (Math.random() * 0.5).toFixed(2) + 's;' +
+        ' animation-duration:' + (1.2 + Math.random() * 0.8).toFixed(2) + 's;"></span>';
+    }
+    confettiHtml += '</div>';
+  }
+  var completeIconClass = celebrate ? 'complete-icon pop-in' : 'complete-icon';
+  var completeListClass = celebrate ? 'px-5 pb-32 complete-celebrate-list' : 'px-5 pb-32';
+
+  return confettiHtml +
     // 축하 헤더
     '<div class="px-5 pt-12 pb-5 text-center">' +
-      '<div class="complete-icon">' + icon('check', 28) + '</div>' +
+      '<div class="' + completeIconClass + '">' + icon('check', 28) + '</div>' +
       '<p class="text-xs uppercase accent font-mono mb-2" style="letter-spacing: 0.3em;">WORKOUT COMPLETE</p>' +
       '<h1 class="font-bebas text-5xl">완료!</h1>' +
       '<p class="text-sm text-stone-400 mt-2">' + cs.sessionName + ' · ' + dateStr + '</p>' +
     '</div>' +
     
-    '<div class="px-5 pb-32">' +
-      
+    '<div class="' + completeListClass + '">' +
+
       // 핵심 수치
       '<div class="grid grid-cols-3 gap-2 mb-4">' +
         '<div class="stat-card">' +
@@ -3146,9 +3206,11 @@ window.openApiKeyModal = function() {
 
 // API 키 모달 닫기
 window.closeApiKeyModal = function() {
-  state.apiKeyModalOpen = false;
-  state.apiKeyInput = '';
-  render();
+  animateSheetCloseThen(function() {
+    state.apiKeyModalOpen = false;
+    state.apiKeyInput = '';
+    render();
+  });
 };
 
 // API 키 입력 업데이트
@@ -3201,9 +3263,11 @@ window.openProfileEditModal = function() {
 };
 
 window.closeProfileEditModal = function() {
-  state.profileEditModalOpen = false;
-  state.profileEdit = null;
-  render();
+  animateSheetCloseThen(function() {
+    state.profileEditModalOpen = false;
+    state.profileEdit = null;
+    render();
+  });
 };
 
 window.updateProfileEditField = function(field, value) {
@@ -3386,8 +3450,10 @@ window.resetAllData = function() {
 
 // 전체 초기화 취소
 window.cancelResetAll = function() {
-  state.resetConfirming = false;
-  render();
+  animateSheetCloseThen(function() {
+    state.resetConfirming = false;
+    render();
+  });
 };
 
 // 전체 초기화 실행
@@ -4973,7 +5039,11 @@ function render() {
   // 전체 초기화 확인 오버레이
   var resetOverlay = state.resetConfirming ? renderResetConfirm() : '';
   
-  document.getElementById('app').innerHTML = content + renderTabbar() + detailSheet + resetOverlay;
+  // 6-C① 탭이 바뀔 때만 진입 애니메이션 래퍼(같은 탭 내 재렌더는 그대로 — 반복 튐 방지)
+  var tabChanged = state._lastRenderedTab !== state.currentTab;
+  state._lastRenderedTab = state.currentTab;
+  var wrappedContent = tabChanged ? ('<div class="screen-enter">' + content + '</div>') : content;
+  document.getElementById('app').innerHTML = wrappedContent + renderTabbar() + detailSheet + resetOverlay;
   window.scrollTo(0, 0);
 }
 
