@@ -3519,12 +3519,10 @@ function renderMore() {
       // 프로필 카드 (탭하면 수정 모달)
       '<div class="more-profile-card" onclick="openProfileEditModal()" style="cursor: pointer;">' +
         '<div class="flex items-center gap-3">' +
-          '<div class="avatar-box">U</div>' +
           '<div class="flex-1">' +
             '<p class="font-display font-bold text-base">사용자</p>' +
             '<p class="text-[10px] font-mono text-stone-500 mt-1">' + profile.age + '세 · ' + profile.height + 'cm · ' + profile.weight + 'kg</p>' +
             '<div class="flex items-center gap-2 mt-1">' +
-              '<span class="api-status-badge active" style="font-size: 9px; padding: 3px 8px;">린매스</span>' +
               '<span class="text-[10px] font-mono text-stone-500">목표 ' + profile.proteinTarget + 'g/일 · 주 ' + (profile.workoutFreq || 4) + '회</span>' +
             '</div>' +
           '</div>' +
@@ -3682,7 +3680,6 @@ function renderMore() {
       '<div class="app-footer">' +
         '<p class="app-footer-brand">FITNESS</p>' +
         '<p class="text-[10px] font-mono text-stone-600 mt-1">Personal fitness tracker</p>' +
-        '<p class="text-[10px] font-mono text-stone-700 mt-1">Built with science</p>' +
       '</div>' +
       
     '</div>' +

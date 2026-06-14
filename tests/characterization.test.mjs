@@ -371,3 +371,38 @@ test('묶음6-A 한글폰트 — index.html에 Pretendard 로드, 본문 폰트 
   assert.ok(css.includes('var(--font-mono)'), '폰트도 토큰(var(--font-mono))으로 적용돼야 함');
   assert.ok(!/'Inter'/.test(css), '안 불러오던 Inter 선언이 제거돼야 함');
 });
+
+// ── 묶음6-B: 장식 선별 정리 (죽은 장식 CSS 삭제 + 무의미 라벨/아바타 제거 + 점류 발광만 제거) ──
+test('묶음6-B renderMore — U 아바타 + 린매스 배지 + Built with science 제거, 프로필 핵심/푸터 유지', () => {
+  const fresh = loadApp();
+  const more = fresh.renderMore();
+  // 제거
+  assert.ok(!more.includes('avatar-box'), "프로필 'U' 아바타 박스 제거");
+  assert.ok(!more.includes('린매스'), "무의미한 '린매스' 배지 제거");
+  assert.ok(!more.includes('Built with science'), "'Built with science' 푸터 줄 제거");
+  // 유지 (프로필 정보·목표·기존 푸터 브랜드는 남는다)
+  assert.ok(more.includes('사용자'), '프로필 이름 유지');
+  assert.ok(more.includes('목표'), '프로필 목표 요약(단백질/주 N회) 유지');
+  assert.ok(more.includes('app-footer'), '앱 푸터 블록 유지');
+  assert.ok(more.includes('Personal fitness tracker'), '푸터 기본 설명 유지');
+});
+
+// CSS/HTML은 render 하네스가 실행하지 않으므로 파일 텍스트로 특성화한다.
+test('묶음6-B 장식 CSS — 죽은 pulse/animate-pulse/status-dot/avatar-box 삭제', () => {
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
+  assert.ok(!/@keyframes\s+pulse\b/.test(css), '죽은 @keyframes pulse(중복 포함) 제거');
+  assert.ok(!/\.animate-pulse\b/.test(css), '안 쓰이는 .animate-pulse 제거');
+  assert.ok(!/\.status-dot\b/.test(css), '안 쓰이는 헤더 .status-dot 제거');
+  assert.ok(!/\.avatar-box\b/.test(css), '안 쓰이는 .avatar-box CSS 제거');
+});
+
+test('묶음6-B 코치 온라인점 — 점/규칙은 유지하되 발광(box-shadow)만 제거', () => {
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
+  const block = css.match(/\.coach-online-dot\s*\{([^}]*)\}/);
+  assert.ok(block, '.coach-online-dot 규칙 자체는 유지(점은 남김)');
+  assert.ok(!/box-shadow/.test(block[1]), '코치 온라인점 발광(box-shadow) 제거');
+  // 상태 텍스트('온라인')는 screens.js 렌더에 그대로 있어야 함
+  const screens = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
+  assert.ok(screens.includes('coach-online-dot'), '온라인점 마크업 유지');
+  assert.ok(screens.includes('온라인'), '상태 텍스트(온라인) 유지');
+});

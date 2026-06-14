@@ -400,15 +400,6 @@ button {
 }
 
 /* ═══════════════════════════════════════════════
-   ANIMATIONS
-   ═══════════════════════════════════════════════ */
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-.animate-pulse { animation: pulse 2s ease-in-out infinite; }
-
-/* ═══════════════════════════════════════════════
    COMPONENT: SESSION CARD (운동 메인)
    ═══════════════════════════════════════════════ */
 .session-card {
@@ -1549,22 +1540,6 @@ button {
   border-radius: 24px;
   padding: 20px;
 }
-.avatar-box {
-  width: 64px;
-  height: 64px;
-  border-radius: 18px;
-  background: rgba(var(--accent-rgb), 0.12);
-  border: 1px solid rgba(var(--accent-rgb), 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: var(--accent);
-  font-family: var(--font-bebas);
-  font-size: 26px;
-  letter-spacing: 0.05em;
-}
-
 .coach-chat-card {
   background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.18) 0%, rgba(var(--accent-rgb), 0.04) 100%);
   border: 1px solid rgba(var(--accent-rgb), 0.5);
@@ -1905,7 +1880,6 @@ button {
   height: 7px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 6px var(--accent);
   display: inline-block;
 }
 .coach-chat-area {
@@ -2531,10 +2505,6 @@ button {
   border-width: 2.5px;
   margin: 0 auto 16px;
 }
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(1.4); }
-}
 
 /* ═══════════════════════════════════════════════
    COMPONENT: STEP 3 - 대화 수정
@@ -2784,14 +2754,4 @@ button {
 }
 .chevron-icon.expanded {
   transform: rotate(180deg);
-}
-
-/* ═══════════════════════════════════════════════
-   HEADER STATUS
-   ═══════════════════════════════════════════════ */
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
 }
