@@ -107,3 +107,131 @@ test('analyzeFoodInput — 부분매칭과 strict 모드', () => {
     unmatched: [],
   });
 });
+
+// ═══════════════════════════════════════════════
+// 묶음2 — 엔진 수리 (1RM rolling max + 사이클/주차 진행)
+// ═══════════════════════════════════════════════
+
+// ── 1RM 자동 증감: 최근 N세션 윈도우 최고 e1RM (rolling max) ──
+test('calculateRollingMax1RM — 최근 N세션 윈도우 최고 e1RM', () => {
+  app.state.data.workoutLog = [
+    { date: '2026-06-01', completed: true, exercises: [{ name: '레그 프레스', setsDetail: [{ weight: 200, reps: 5, isWarmup: false }] }] },
+    { date: '2026-06-08', completed: true, exercises: [{ name: '레그 프레스', setsDetail: [{ weight: 180, reps: 5, isWarmup: false }] }] },
+    { date: '2026-06-15', completed: true, exercises: [{ name: '레그 프레스', setsDetail: [{ weight: 185, reps: 5, isWarmup: false }] }] },
+  ];
+  const all = app.calculateRollingMax1RM('레그 프레스', 4);
+  assert.equal(all.value, 233.3);  // 200*(1+5/30)=233.33 → 233.3
+  assert.equal(all.sessions, 3);
+  const win1 = app.calculateRollingMax1RM('레그 프레스', 1);
+  assert.equal(win1.value, 215.8); // 최근 1세션: 185*(1+5/30)=215.83 → 215.8
+  assert.equal(app.calculateRollingMax1RM('없는운동xyz', 4), null);
+});
+
+test('calculateRollingMax1RM — 고횟수(>12회) 세트는 추세에서 제외', () => {
+  app.state.data.workoutLog = [
+    { date: '2026-06-01', completed: true, exercises: [{ name: '랫풀다운', setsDetail: [
+      { weight: 60, reps: 20, isWarmup: false }, // 20회 → e1RM 신뢰 낮음 → 제외
+      { weight: 70, reps: 8, isWarmup: false },  // 70*(1+8/30)=88.67 → 88.7
+    ] }] },
+  ];
+  assert.equal(app.calculateRollingMax1RM('랫풀다운', 4).value, 88.7);
+});
+
+// ── 사이클: 주차 → 단계 (1~4 빌드, 5 디로드) ──
+test('getPhaseByWeek — 1~4 빌드, 5 디로드', () => {
+  assert.equal(app.getPhaseByWeek(1), '빌드');
+  assert.equal(app.getPhaseByWeek(4), '빌드');
+  assert.equal(app.getPhaseByWeek(5), '디로드');
+});
+
+// ── 사이클: 완료 기준 진행 (날짜 아님) ──
+test('advanceCycleOnSessionComplete — 목표 달성 시에만 다음 주차/사이클', () => {
+  // 미달 → 그대로
+  assert.deepEqual(plain(app.advanceCycleOnSessionComplete({ currentCycle: 1, currentWeek: 2, cyclePhase: '빌드', workoutFreq: 4 }, 3)),
+    { currentCycle: 1, currentWeek: 2, cyclePhase: '빌드' });
+  // 목표 달성 → 다음 주차
+  assert.deepEqual(plain(app.advanceCycleOnSessionComplete({ currentCycle: 1, currentWeek: 2, cyclePhase: '빌드', workoutFreq: 4 }, 4)),
+    { currentCycle: 1, currentWeek: 3, cyclePhase: '빌드' });
+  // 5주차(디로드) 완료 → 새 사이클 1주차
+  assert.deepEqual(plain(app.advanceCycleOnSessionComplete({ currentCycle: 1, currentWeek: 5, cyclePhase: '디로드', workoutFreq: 4 }, 4)),
+    { currentCycle: 2, currentWeek: 1, cyclePhase: '빌드' });
+});
+
+// ── 진행은 완료 "횟수" 기준(캘린더 아님): 부분 진행도가 유지된다 ──
+test('advanceCycleIfWeekComplete — 부분 진행도 누적 후 목표 도달 시 다음 주차', () => {
+  const fresh = loadApp();
+  fresh.state.profile = { workoutFreq: 4, currentCycle: 1, currentWeek: 1, cyclePhase: '빌드', weekSessionsDone: 0 };
+  fresh.state.data.cycleHistory = [];
+  fresh.advanceCycleIfWeekComplete(); fresh.advanceCycleIfWeekComplete(); fresh.advanceCycleIfWeekComplete(); // 3회
+  assert.equal(fresh.state.profile.weekSessionsDone, 3, '부분 진행도 유지');
+  assert.equal(fresh.state.profile.currentWeek, 1, '아직 같은 주차');
+  fresh.advanceCycleIfWeekComplete(); // 4회 → 목표 달성
+  assert.equal(fresh.state.profile.currentWeek, 2, '다음 주차로');
+  assert.equal(fresh.state.profile.weekSessionsDone, 0, '진행도 리셋');
+});
+
+// ── 휴식 감시자: 오래 쉬면 복귀 안내 ──
+test('getIdleComebackMessage — 10일 이상 쉬면 복귀 안내', () => {
+  assert.equal(app.getIdleComebackMessage([{ date: '2026-06-12', completed: true }], '2026-06-14'), null); // 2일 → 없음
+  const r = app.getIdleComebackMessage([{ date: '2026-06-01', completed: true }], '2026-06-14');           // 13일
+  assert.equal(r.days, 13);
+  assert.ok(r.message.length > 0);
+  assert.equal(app.getIdleComebackMessage([], '2026-06-14'), null); // 기록 없음 → 없음
+});
+
+// ═══════════════════════════════════════════════
+// 묶음1 — 백업/복원 (왕복 복원 + 민감키 제외)
+// ═══════════════════════════════════════════════
+test('buildBackupObject / restoreFromBackup — 왕복 복원, API키·대화 제외', () => {
+  app.localStorage.clear();
+  app.localStorage.setItem('fitness_profile', JSON.stringify({ age: 40, height: 175, weight: 80, workoutFreq: 5 }));
+  app.localStorage.setItem('fitness_workout_log', JSON.stringify([{ id: 'x', date: '2026-06-01', completed: true }]));
+  app.localStorage.setItem('fitness_body_log', JSON.stringify([{ date: '2026-06-01', weight: 80 }]));
+  app.localStorage.setItem('fitness_api_key', JSON.stringify('sk-secret'));
+  app.localStorage.setItem('fitness_coach_history', JSON.stringify([{ role: 'user', text: 'hi' }]));
+
+  const backup = app.buildBackupObject();
+  assert.equal(backup.data.fitness_api_key, undefined);       // 민감키 제외
+  assert.equal(backup.data.fitness_coach_history, undefined); // 대화 제외
+  assert.deepEqual(plain(backup.data.fitness_profile), { age: 40, height: 175, weight: 80, workoutFreq: 5 });
+  assert.equal(typeof backup.exportedAt, 'string');
+  assert.ok(backup.version);
+
+  app.localStorage.clear();
+  const res = app.restoreFromBackup(JSON.stringify(backup));
+  assert.equal(res.ok, true);
+  assert.deepEqual(plain(JSON.parse(app.localStorage.getItem('fitness_profile'))), { age: 40, height: 175, weight: 80, workoutFreq: 5 });
+  assert.equal(app.restoreFromBackup('쓰레기{').ok, false);   // 잘못된 입력 → throw 안 함
+
+  // 복원은 기존 임시 진행상태를 정리하고, 로컬 전용(API키)은 보존한다
+  app.localStorage.clear();
+  app.localStorage.setItem('fitness_active_session', JSON.stringify({ exercises: [], startTime: 1 }));
+  app.localStorage.setItem('fitness_api_key', JSON.stringify('sk-keep'));
+  const res2 = app.restoreFromBackup(JSON.stringify(backup));
+  assert.equal(res2.ok, true);
+  assert.equal(app.localStorage.getItem('fitness_active_session'), null);                 // 임시상태 정리됨
+  assert.equal(JSON.parse(app.localStorage.getItem('fitness_api_key')), 'sk-keep');       // API키 보존
+});
+
+// ═══════════════════════════════════════════════
+// 묶음1/2 UI 회귀 (fresh app — 격리)
+// ═══════════════════════════════════════════════
+test('renderMore — 껍데기 메뉴 7개 삭제 + 백업/프로필 반영', () => {
+  const fresh = loadApp();
+  const more = fresh.renderMore();
+  ['종목 라이브러리', '즐겨찾기 종목', '단위', '테마', '도움말', '앱 정보'].forEach((m) => {
+    assert.ok(!more.includes(m), '"' + m + '" 메뉴가 아직 남아있음');
+  });
+  assert.ok(more.includes('내 1RM'), '내 1RM 유지');
+  assert.ok(more.includes('openProfileEditModal'), '프로필 수정 진입');
+  assert.ok(more.includes('openBackupImport'), '가져오기 연결');
+  assert.ok(more.includes('.json'), 'JSON 백업 안내');
+});
+
+test('renderHome — 사이클 5주(빌드/디로드), 옛 4단계 라벨 제거', () => {
+  const fresh = loadApp();
+  const home = fresh.renderHome();
+  assert.ok(home.includes('빌드'), '빌드 단계 표시');
+  assert.ok(!home.includes('구축') && !home.includes('강화'), '옛 4단계 라벨(구축/강화) 제거');
+  assert.ok(home.includes('다 하면 다음 주차') || home.includes('목표 달성') || home.includes('쉬는 중'), '이번주 진행/복귀 안내');
+});
