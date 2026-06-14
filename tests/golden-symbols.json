@@ -1,5 +1,5 @@
 {
-  "functionCount": 194,
+  "functionCount": 195,
   "objectCount": 21,
   "functions": [
     "addBodyRecord",
@@ -22,6 +22,7 @@
     "backToStep1",
     "backToStep2",
     "buildBackupObject",
+    "buildCoachSystemParts",
     "buildUserContext",
     "calculate1RM",
     "calculateRollingMax1RM",
