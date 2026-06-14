@@ -174,28 +174,6 @@ var AMOUNT_PATTERNS = [
   { regex: /한\s*줌/, unit: 'g', multiplier: 20, fixed: true }
 ];
 
-// 세션별 종목 GIF URL 매핑 (Vercel 호스팅 데이터 활용)
-var EXERCISE_GIFS = {
-  '체스트 프레스 머신': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0577-T0yTjgW.gif',
-  '인클라인 덤벨 프레스': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0314-ns0SIbU.gif',
-  '숄더 프레스 머신': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0603-67n3r98.gif',
-  '사이드 레터럴 레이즈': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0178-goJ6ezq.gif',
-  '펙덱 플라이': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0596-v3xmPAR.gif',
-  '트라이셉스 푸시다운': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0201-3ZflifB.gif',
-  '풀업': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0017-kiJ4Z2K.gif',
-  '랫풀다운': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/2330-LEprlgG.gif',
-  '시티드 로우 머신': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0861-fUBheHs.gif',
-  '페이스 풀': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0203-wqNPGCg.gif',
-  '인클라인 덤벨 컬': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0318-ae9UoXQ.gif',
-  '해머 컬': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0165-HPlPoQA.gif',
-  '레그 프레스': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/1463-2Qh2J1e.gif',
-  '레그 익스텐션': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0585-my33uHU.gif',
-  '시티드 햄스트링 컬': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0599-Zg3XY7P.gif',
-  '힙 어덕션': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0168-hBGWILP.gif',
-  '핵 스쿼트': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0743-Qa55kX1.gif',
-  '카프 레이즈 머신': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0594-bOOdeyc.gif'
-};
-
 // 세션별 데이터
 // ═══════════════════════════════════════════════
 // 초기 1RM 데이터 (사용자가 기존 앱에서 가져온 값)

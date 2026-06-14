@@ -2312,15 +2312,6 @@ function renderWorkoutSession() {
         '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">현재 종목</p>' +
         '<h2 class="font-bebas text-2xl mb-1">' + exercise.name + '</h2>' +
         '<p class="text-xs font-mono text-stone-400">' + exercise.type + '</p>' +
-        '<div class="exercise-gif-wrap">' +
-          (function() {
-            var gifUrl = findExerciseGif(exercise.name);
-            return gifUrl
-              ? '<img src="' + gifUrl + '" alt="' + exercise.name + '" onerror="this.style.display=\'none\'; this.nextElementSibling.style.display=\'flex\'" />' +
-                '<div class="exercise-gif-placeholder" style="display: none;">이미지 로드 실패</div>'
-              : '<div class="exercise-gif-placeholder" style="display: flex;">동작 가이드 준비 중</div>';
-          })() +
-        '</div>' +
       '</div>' +
       
       // 이전 기록

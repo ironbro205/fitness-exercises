@@ -1014,31 +1014,6 @@ button {
   padding: 18px;
   margin-bottom: 12px;
 }
-.exercise-gif-wrap {
-  width: 100%;
-  aspect-ratio: 16 / 11;
-  background: #f4f4f5;
-  border-radius: 14px;
-  overflow: hidden;
-  margin-top: 12px;
-  position: relative;
-}
-.exercise-gif-wrap img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-.exercise-gif-placeholder {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #1a2540;
-  color: #6b7a99;
-  font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-}
 
 /* 1RM 카드 */
 .rm-card {
