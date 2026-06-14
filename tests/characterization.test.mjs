@@ -72,20 +72,6 @@ test('normalizeFood — 공백 제거', () => {
   assert.equal(app.normalizeFood('닭 가슴살'), '닭가슴살');
 });
 
-// ── 운동 GIF 매칭 (정확 + 토큰 퍼지 + 실패) ──
-test('findExerciseGif — 정확/퍼지/미스', () => {
-  assert.equal(
-    app.findExerciseGif('레그 프레스'),
-    'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/1463-2Qh2J1e.gif',
-  );
-  // "머신 시티드 숄더 프레스" → 키 "숄더 프레스 머신" 토큰 전부 포함 → 매칭
-  assert.equal(
-    app.findExerciseGif('머신 시티드 숄더 프레스'),
-    'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0603-67n3r98.gif',
-  );
-  assert.equal(app.findExerciseGif('없는운동xyz'), null);
-});
-
 // ── 1RM 조회 + 작업 무게 추천 (init()이 INITIAL_1RM을 시드함 → 저장소 경로까지 포함) ──
 test('get1RM / suggestWorkingWeight — 시드된 1RM 기반', () => {
   assert.equal(app.get1RM('레그 프레스'), 216);

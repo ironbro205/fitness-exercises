@@ -1,6 +1,6 @@
 {
-  "functionCount": 192,
-  "objectCount": 22,
+  "functionCount": 191,
+  "objectCount": 21,
   "functions": [
     "addBodyRecord",
     "addRestTime",
@@ -66,7 +66,6 @@
     "fetchAIRecommendation",
     "filterByPeriod",
     "finalizeSession",
-    "findExerciseGif",
     "findFoodInDB",
     "fmtDate",
     "formatBalanceAnalysis",
@@ -206,7 +205,6 @@
     "EXERCISES_BY_PRIMARY",
     "EXERCISE_ALIASES_1RM",
     "EXERCISE_BODY_PART_MAP",
-    "EXERCISE_GIFS",
     "FOOD_ALIASES",
     "FOOD_DB",
     "ICONS",

@@ -155,44 +155,6 @@ function analyzeFoodInput(text, strict) {
   return { matched: results, unmatched: unmatched };
 }
 
-// 운동 이름 → GIF URL 매칭 (정확 일치 실패 시 토큰 기반 fuzzy 매칭)
-// AI가 "머신 시티드 숄더 프레스" 같은 변형 이름을 만들어도 "숄더 프레스 머신" 키와 매칭되도록.
-function findExerciseGif(name) {
-  if (!name) return null;
-  if (EXERCISE_GIFS[name]) return EXERCISE_GIFS[name];
-
-  var stripSpace = function(s) { return s.replace(/\s+/g, ''); };
-  var nameNoSpace = stripSpace(name);
-  var keys = Object.keys(EXERCISE_GIFS);
-
-  // 1) 공백 무시 완전 일치
-  for (var i = 0; i < keys.length; i++) {
-    if (stripSpace(keys[i]) === nameNoSpace) return EXERCISE_GIFS[keys[i]];
-  }
-
-  // 2) 토큰 기반: 매핑 키의 모든 토큰이 운동 이름에 (순서 무관) 모두 존재
-  var nameTokens = name.split(/\s+/).filter(Boolean);
-  var best = null;
-  for (var j = 0; j < keys.length; j++) {
-    var keyTokens = keys[j].split(/\s+/).filter(Boolean);
-    var allFound = keyTokens.every(function(kt) {
-      return nameTokens.indexOf(kt) !== -1;
-    });
-    if (allFound) {
-      // 더 많은 토큰이 일치 = 더 구체적
-      if (!best || keyTokens.length > best.tokens) {
-        best = { key: keys[j], tokens: keyTokens.length };
-      }
-    }
-  }
-
-  if (!best) {
-    console.log('[GIF] 매칭 실패:', name);
-    return null;
-  }
-  return EXERCISE_GIFS[best.key];
-}
-
 // ═══════════════════════════════════════════════
 // 1RM 헬퍼 함수
 // ═══════════════════════════════════════════════
