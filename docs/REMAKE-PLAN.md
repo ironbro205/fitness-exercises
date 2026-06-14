@@ -10,7 +10,7 @@
 ## 작업 순서 — 6묶음 (확정)
 1. 빠른 정리 (삭제 + 프로필 고치기)        ← **구현 완료 (594c1be)**
 2. 엔진 수리 (1RM 자동 증감 + 사이클)       ← **구현 완료 (594c1be)**
-3. AI 두뇌 (코치 기억·PT화 + 주간리뷰/정체기 코치통합 + 추천 다양화)  ← **결정 완료, 구현 대기 (grill 2026-06-14)**
+3. AI 두뇌 (코치 기억·PT화 + 주간리뷰/정체기 코치통합 + 추천 다양화)  ← **구현 완료 (fc05290)**
 4. GIF 정합 (운동명 ↔ GIF 일치)            ← grill 예정
 5. 화면 정리 (홈·운동·영양·기록 탭)         ← grill 예정
 6. 디자인 (맨 마지막, 시안 보고 진행)        ← grill 예정
@@ -106,4 +106,4 @@
 - js/ai.js: buildUserContext(~273-596), getCoachSystemPrompt(~599-662), callCoachAPI(~665-708), fetchAIRecommendation(~714-826), generateFullRoutine(~832-1041), generateWeeklyReview(~1136), analyzePlateauWithAI(~1442).
 - js/data.js: DEFAULT_PROFILE(6-16), EXERCISE_GIFS(~166-186), EXERCISE_ALIASES_1RM(~256-272), SESSIONS(~275-329), EXERCISE_BODY_PART_MAP(~339-447), WEAK_PART_EXERCISE_MAP(~484-501).
 - js/core.js: KEYS(6-27), state(156-212), getTodayStr/getDateStr(~115-126), getWeekId(~256-266), init(~318-396).
-- 배포: service-worker.js CACHE_VERSION(현재 health-app-v15) — 파일 바꾸면 올리기. 새 정적파일은 CORE_ASSETS에 추가.
+- 배포: service-worker.js CACHE_VERSION(현재 health-app-v16) — 파일 바꾸면 올리기. 새 정적파일은 CORE_ASSETS에 추가.

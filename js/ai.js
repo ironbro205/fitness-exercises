@@ -591,7 +591,28 @@ function buildUserContext(options) {
     }
     ctx += '\n';
   }
-  
+
+  // ── 최신 AI 분석 요약 (묶음3: 코치가 주간리뷰·정체기를 중복 분석 없이 대화에서 인용) ──
+  var weeklyReview = storage.get(KEYS.WEEKLY_REVIEW);
+  if (weeklyReview && weeklyReview.weekId === getWeekId(new Date())) {
+    ctx += '## 📊 이번 주 리뷰 요약 (AI 자동 분석)\n';
+    ctx += '- 등급: ' + (weeklyReview.grade || '-') + (weeklyReview.headline ? ' · ' + weeklyReview.headline : '') + '\n';
+    if (weeklyReview.wins && weeklyReview.wins.length) ctx += '- 잘한 점: ' + weeklyReview.wins.slice(0, 2).join(', ') + '\n';
+    if (weeklyReview.improvements && weeklyReview.improvements.length) ctx += '- 개선점: ' + weeklyReview.improvements[0] + '\n';
+    ctx += '\n';
+  }
+  var plateauCheck = storage.get(KEYS.PLATEAU_CHECK);
+  if (plateauCheck && plateauCheck.signals && plateauCheck.signals.length && plateauCheck.detectedAt) {
+    var pDays = Math.floor((new Date() - new Date(plateauCheck.detectedAt)) / 86400000);
+    if (pDays < 3) {
+      ctx += '## 🔥 현재 정체기 신호 (' + pDays + '일 전 감지)\n';
+      if (plateauCheck.primary_cause) ctx += '- 주요 원인: ' + plateauCheck.primary_cause + '\n';
+      ctx += '- 심각도: ' + (plateauCheck.severity || '-') + ' (' + plateauCheck.signals.length + '개 신호)\n';
+      if (plateauCheck.recommendations && plateauCheck.recommendations.length) ctx += '- 권장: ' + plateauCheck.recommendations[0] + '\n';
+      ctx += '\n';
+    }
+  }
+
   return ctx;
 }
 
@@ -619,7 +640,7 @@ function getCoachSystemPrompt() {
     '- **머신 = 프리웨이트**: 근비대 효과 동등 (Schwanbeck).\n' +
     '- **휴식**: 복합 2~3분, 고립 1~2분. 짧은 휴식 = 볼륨 감소 (Schoenfeld 2016).\n' +
     '- **점진 과부하**: 더블 프로그레션 (목표 횟수 상단 2회 연속 → +2.5~5kg).\n' +
-    '- **주기화**: 5~6주 사이클 (적응→구축→강화→디로드).\n' +
+    '- **주기화**: 5주 사이클 (빌드 4주 + 디로드 1주). 주차는 날짜가 아니라 그 주 목표 운동을 완료해야 넘어감.\n' +
     '\n' +
     '### 영양\n' +
     '- **단백질 총량**: 1.6~2.2g/kg/일. 1.6g 이후 plateau (Morton 2018 메타).\n' +
@@ -656,7 +677,16 @@ function getCoachSystemPrompt() {
     '- **한 번에 1~2가지** 핵심만.\n' +
     '- 강조는 **굵게**, 운동명은 `백틱`.\n' +
     '- 묻지 않은 것 늘어놓지 말 것.\n\n' +
-    
+
+    '## 📌 기억 노트 (이 사용자에 대해 장기 기억 — 부상·선호·목표·일정)\n' +
+    formatCoachMemoryForPrompt(state.coachMemory) + '\n\n' +
+
+    '## 기억 규칙\n' +
+    '대화에서 앞으로도 기억할 가치가 있는 새 정보(부상·제약, 선호, 목표, 일정)를 알게 되면, ' +
+    '응답 맨 끝에 아래 형식의 숨김 블록을 덧붙여라(사용자에겐 표시되지 않음). 새 정보가 없으면 블록을 생략한다.\n' +
+    '```memory\n[{"category":"injury|preference|goal|schedule|other","text":"한 줄 요약"}]\n```\n' +
+    '위 기억 노트에 이미 있는 내용은 다시 쓰지 마라. 임시적인 잡담은 기억하지 마라.\n\n' +
+
     '## 사용자 현재 데이터\n' +
     context;
 }
@@ -722,7 +752,13 @@ async function fetchAIRecommendation() {
   }
   
   var context = buildUserContext();
-  
+
+  // 다양성용: 최근 추천 기록 (묶음3)
+  var recHistory = storage.get(KEYS.AI_RECOMMENDATION_HISTORY, []);
+  var recentRecsNote = recHistory.length
+    ? recHistory.slice(-5).map(function(r) { return r.date + ' ' + r.session; }).join(', ')
+    : '없음';
+
   var systemPrompt = '당신은 사용자의 피트니스 코치입니다. 사용자 데이터를 분석해서 오늘 어떤 부위를 운동해야 하는지 추천하세요. ' +
     '반드시 JSON 형식으로만 응답하세요. 추가 설명 없이 JSON만.\n\n' +
     
@@ -750,7 +786,11 @@ async function fetchAIRecommendation() {
     '  "suggestion": "메인 종목 무게/횟수 제안 (1문장, 사용자의 1RM 기반)",\n' +
     '  "intensity": "light" | "moderate" | "challenging"\n' +
     '}\n\n' +
-    
+
+    '## 🔄 다양성 (최근 추천 회피)\n' +
+    '- 최근 추천 기록: ' + recentRecsNote + '\n' +
+    '- 위 최근 추천과 같은 부위를 반복하지 마라. 단, 데이터상 부족 부위가 그것뿐이면 재추천 가능(reason에 이유 명시).\n\n' +
+
     '## 사용자 데이터\n' + context;
   
   try {
@@ -817,7 +857,12 @@ async function fetchAIRecommendation() {
     
     // 캐시 저장
     storage.set(KEYS.AI_RECOMMENDATION, result);
-    
+
+    // 추천 이력 갱신 (다양성용): 오늘 항목 교체, 최근 7개 유지
+    var hist = storage.get(KEYS.AI_RECOMMENDATION_HISTORY, []).filter(function(r) { return r.date !== todayStr; });
+    hist.push({ date: todayStr, session: result.session });
+    storage.set(KEYS.AI_RECOMMENDATION_HISTORY, hist.slice(-7));
+
     return result;
   } catch (error) {
     console.error('AI 추천 호출 실패:', error);
@@ -928,6 +973,7 @@ async function generateFullRoutine(bodyPart) {
     '## 핵심 원칙 (사용자 데이터 + 과학 근거)\n' +
     '1. **부족 부위 우선 보충** — 컨텍스트 "부족 부위" 리스트의 부위를 메인/고립으로 1~2개 포함\n' +
     '2. **부위별 1~3개** (4개 이상 = 과잉) / 동일 부위·각도 중복 금지\n' +
+    '   - **다양성**: "최근 종목별 실제 수행"에 있는 종목과는 가능하면 다른 종목·각도를 골라 매번 같은 루틴이 반복되지 않게 한다 (부족 부위 보충은 우선).\n' +
     '3. **메인 1~2개** (isMain: true, 복합, 첫 1~2번째) + **신장 강조 최소 1개**\n' +
     '4. **순서**: 메인 복합 → 보조 복합 → 고립 → 신장 강조 → 펌프\n' +
     '5. **무게 — 점진적 과부하 우선**\n' +

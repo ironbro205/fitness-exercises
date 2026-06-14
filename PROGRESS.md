@@ -1,6 +1,17 @@
 # PROGRESS — 헬스앱
 
-## 마지막 한 일 (2026-06-14 — 세션 3: 묶음1·2 구현)
+## 마지막 한 일 (2026-06-14 — 세션 4: 묶음3 grill + 구현)
+- **묶음3(AI 두뇌) grill 완료** → REMAKE-PLAN.md 기록. 결정: 코치 기억 노트(자동+수정/삭제) / 주간리뷰·정체기 코치 대화 통합(별도 화면 유지) / 추천 최근기억+다양성+풀확대 / 노트는 더보기 AI코칭 메뉴.
+- **묶음3 구현 (TDD)** → 브랜치 `feat/healthapp-remake-bundle-3`, 커밋 `fc05290` 푸시.
+  - 코치 기억 노트: 응답 끝 숨김 ```memory 블록 자동 추출(parseCoachMemoryBlock) → 중복제거 병합(mergeCoachMemory) → getCoachSystemPrompt 주입. 노트 화면(카테고리·추가/수정/삭제), 백업 포함, 데모 시드.
+  - 리뷰/정체기: buildUserContext에 최신 요약 주입 + 주간리뷰 "코치와 상담" 버튼.
+  - 추천 다양화: AI_RECOMMENDATION_HISTORY 최근 추천 회피 + 루틴 다양성 지시.
+  - 코치 프롬프트 "5~6주"→"5주(빌드4+디로드1)" 정정.
+- 검증: 특성화 테스트 **21/21**, 렌더 스모크 통과. 캐시 v15→v16.
+- 리뷰: **Codex approve (1라운드, 이슈 0)**.
+- 보류: 추천 카드 "최근 추천" 텍스트(현재 UI에 추천 카드 표출 지점 없음 — AI 레벨 다양성은 동작).
+
+### 이전 (2026-06-14 — 세션 3: 묶음1·2 구현)
 - **묶음1+2 동시 구현 (TDD)** → 브랜치 `feat/healthapp-remake-bundle-1-2`, 커밋 `594c1be` 푸시.
 - 묶음1: 껍데기 메뉴 7개 삭제 / 프로필 수정 모달 신규 / 백업·복원 JSON 전환(운동데이터만, API키·대화 제외, 복원 시 임시세션·캐시 정리).
 - 묶음2(근거 기반): 1RM rolling max(최근 4세션, >12회 제외, 상승즉시·하락느리게) / 사이클 5주(빌드4+디로드1) 화면 재설계 / 주차진행 = **완료 횟수(weekSessionsDone) 기준**(캘린더 무관) / 휴식 복귀 안내 / cycleHistory 신설.
@@ -30,10 +41,9 @@
   - Vercel 미리보기에서 사용자 시각·동작 QA 확인 완료
 
 ## 다음 할 일
-- [ ] **PR 머지** — `feat/healthapp-remake-bundle-1-2` → main (Vercel 미리보기 시각 QA 후)
-- [ ] **묶음3(AI) grill 이어가기** — 코치 기억 정책 / 주간리뷰·정체기 코치통합 방식 / 추천 반복 해결 (REMAKE-PLAN.md 참고)
-- [ ] 묶음4(GIF)·5(화면정리)·6(디자인) 순차 grill → 각 구현
-- [ ] 운영 앱에서 새 버전(`v15`) 최종 확인 — 강력 새로고침 후 5탭 + 운동/음식/코치 흐름 점검
+- [ ] **PR 머지** — `feat/healthapp-remake-bundle-1-2`(#16) + `feat/healthapp-remake-bundle-3`(스택) → main (Vercel 미리보기 시각 QA 후)
+- [ ] **묶음4(GIF) grill** — 운동명↔GIF 정합(GIF 18개 vs 운동 91개): 커버리지·퍼지매칭·정표 운동명. 이후 5(화면정리)·6(디자인)
+- [ ] 운영 앱에서 새 버전(`v16`) 최종 확인 — 강력 새로고침 후 5탭 + 기억 노트 + 코치 흐름 점검
 - [ ] (선택) `js/screens.js`(약 5,097줄)가 부담되면 화면별로 더 잘게 분리
 - [ ] (선택) 특성화 테스트 커버리지 보강 (화면 렌더 스냅샷 등)
 - [ ] 새 기능 추가 시 `healthapp-feature` 스킬로 진행 (dev-pipeline 게이트 준수)
@@ -47,7 +57,8 @@
 - 배경 워크플로우(근성장 조사)는 사용량 한도로 21:28 종료 → 종합 결과는 journal에서 추출해 REMAKE-PLAN.md에 반영 완료(현재 도는 프로세스 없음).
 
 ## 마지막 커밋
-- `594c1be` — feat: 묶음1·2 구현 (브랜치 `feat/healthapp-remake-bundle-1-2`, 푸시됨)
-- 미머지: PR 생성/머지는 미리보기 시각 QA 후.
+- `fc05290` — feat: 묶음3 구현 (브랜치 `feat/healthapp-remake-bundle-3`, 푸시됨)
+- `594c1be` — feat: 묶음1·2 구현 (브랜치 `feat/healthapp-remake-bundle-1-2`, PR #16)
+- 미머지: PR 머지는 미리보기 시각 QA 후. (3은 1·2 위에 스택)
 
-_다음 세션 재개: "REMAKE-PLAN.md 읽고 묶음3부터 이어서 grill 해줘"._
+_다음 세션 재개: "REMAKE-PLAN.md 읽고 묶음4(GIF)부터 grill 해줘"._
