@@ -1743,32 +1743,6 @@ button {
   gap: 4px;
 }
 
-/* 토글 (체중/체지방) */
-.chart-toggle {
-  display: inline-flex;
-  gap: 2px;
-  background: #050810;
-  padding: 2px;
-  border-radius: 8px;
-  border: 1px solid #1a2540;
-}
-.chart-toggle-btn {
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #6b7a99;
-  cursor: pointer;
-  background: transparent;
-  border: none;
-}
-.chart-toggle-btn.active {
-  background: rgba(0, 212, 255, 0.15);
-  color: #00d4ff;
-}
-
 /* 차트 컨테이너 */
 .chart-container {
   height: 140px;
@@ -2201,28 +2175,6 @@ button {
 }
 .day-bar-label.today { color: #00d4ff; font-weight: 700; }
 
-.weekly-legend {
-  display: flex;
-  justify-content: center;
-  gap: 14px;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid #1a2540;
-}
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #b0b8d0;
-}
-.legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-}
-
 /* 부위 선택 카드 (큰 버튼) */
 .body-part-card {
   background: #0f1525;
@@ -2540,34 +2492,6 @@ button {
   height: 28px;
   border-width: 2.5px;
   margin: 0 auto 16px;
-}
-.routine-loading-steps {
-  margin-top: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  text-align: left;
-}
-.routine-loading-step {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
-}
-.routine-loading-step.done { color: #00d4ff; }
-.routine-loading-step.active { color: white; }
-.routine-loading-step-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #1a2540;
-}
-.routine-loading-step.done .routine-loading-step-dot { background: #00d4ff; }
-.routine-loading-step.active .routine-loading-step-dot { 
-  background: #00d4ff;
-  animation: pulse 1.2s ease-in-out infinite;
 }
 @keyframes pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
