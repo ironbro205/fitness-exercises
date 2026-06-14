@@ -12,7 +12,8 @@ var DEFAULT_PROFILE = {
   workoutFreq: 4,
   currentCycle: 1,
   currentWeek: 1,
-  cyclePhase: '적응기'
+  cyclePhase: '빌드',
+  weekSessionsDone: 0
 };
 
 // ═══════════════════════════════════════════════

@@ -23,7 +23,8 @@ var KEYS = {
   CONDITION_LOG: 'fitness_condition_log',
   ACTIVE_SESSION: 'fitness_active_session',
   REST_TIMER: 'fitness_rest_timer',
-  WORKOUT_WIZARD: 'fitness_workout_wizard'
+  WORKOUT_WIZARD: 'fitness_workout_wizard',
+  CYCLE_HISTORY: 'fitness_cycle_history'
 };
 
 var storage = {
@@ -65,6 +66,71 @@ function saveWizard() {
 }
 function clearWizard() {
   storage.set(KEYS.WORKOUT_WIZARD, null);
+}
+
+// ═══════════════════════════════════════════════
+// 데이터 백업 / 복원 (묶음1)
+// "운동 데이터만" 백업: API 키·코치 대화·임시 진행상태·AI 캐시는 제외.
+// 새 폰에서 복원 가능한 JSON 포맷. REMAKE-PLAN.md 묶음1.
+// ═══════════════════════════════════════════════
+var BACKUP_VERSION = 1;
+// 백업에 담지 않는 키. 두 부류:
+// (1) 로컬 전용·민감 → 복원해도 그대로 보존 (API 키·코치 대화)
+// (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
+var BACKUP_LOCAL_ONLY_KEYS = [
+  KEYS.API_KEY,            // 민감 (새 폰에서 다시 입력) — 복원 시 기존 값 보존
+  KEYS.COACH_HISTORY       // 대화 기록 — 복원 시 기존 값 보존
+];
+var BACKUP_TRANSIENT_KEYS = [
+  KEYS.ACTIVE_SESSION,     // 진행 중 세션
+  KEYS.REST_TIMER,
+  KEYS.WORKOUT_WIZARD,
+  KEYS.EXERCISES_CACHE,    // 재생성 가능
+  KEYS.EXERCISES_VERSION,
+  KEYS.AI_RECOMMENDATION,  // AI 캐시 (새 데이터 기준으로 재생성)
+  KEYS.WEEKLY_REVIEW,
+  KEYS.PLATEAU_CHECK
+];
+var BACKUP_EXCLUDE_KEYS = BACKUP_LOCAL_ONLY_KEYS.concat(BACKUP_TRANSIENT_KEYS);
+
+// 현재 저장소를 복원 가능한 백업 객체로 직렬화
+function buildBackupObject() {
+  var data = {};
+  Object.keys(KEYS).forEach(function(k) {
+    var key = KEYS[k];
+    if (BACKUP_EXCLUDE_KEYS.indexOf(key) !== -1) return;
+    var val = storage.get(key, undefined);
+    if (val !== undefined && val !== null) data[key] = val;
+  });
+  return { app: 'fitness', version: BACKUP_VERSION, exportedAt: new Date().toISOString(), data: data };
+}
+
+// 백업 JSON(문자열 또는 객체)을 저장소로 복원. 알려진 키만, 민감키는 절대 복원 안 함.
+// 반환: { ok: true } 또는 { ok: false, error }. 절대 throw 하지 않음.
+function restoreFromBackup(input) {
+  try {
+    var parsed = typeof input === 'string' ? JSON.parse(input) : input;
+    if (!parsed || typeof parsed !== 'object' || !parsed.data || typeof parsed.data !== 'object') {
+      return { ok: false, error: '헬스앱 백업 파일이 아닙니다.' };
+    }
+    if (parsed.data[KEYS.PROFILE] === undefined && parsed.data[KEYS.WORKOUT_LOG] === undefined) {
+      return { ok: false, error: '복원할 운동 데이터가 없습니다.' };
+    }
+    var knownKeys = Object.keys(KEYS).map(function(k) { return KEYS[k]; });
+    Object.keys(parsed.data).forEach(function(key) {
+      if (knownKeys.indexOf(key) === -1) return;                 // 모르는 키 무시
+      if (BACKUP_EXCLUDE_KEYS.indexOf(key) !== -1) return;        // 민감키 복원 안 함
+      storage.set(key, parsed.data[key]);
+    });
+    // 기존 임시 진행상태·파생 캐시 정리 (옛 세션/캐시가 새 데이터와 충돌하지 않도록).
+    // API 키·코치 대화 같은 로컬 전용 값은 그대로 둔다.
+    BACKUP_TRANSIENT_KEYS.forEach(function(key) {
+      try { localStorage.removeItem(key); } catch (e) {}
+    });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: '파일을 읽을 수 없습니다.' };
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -156,7 +222,7 @@ function icon(name, size) {
 var state = {
   currentTab: 'home',
   profile: null,
-  data: { workoutLog: [], nutritionLog: [], personalRecords: [], bodyLog: [], conditionLog: [] },
+  data: { workoutLog: [], nutritionLog: [], personalRecords: [], bodyLog: [], conditionLog: [], cycleHistory: [] },
   // 운동 세션 진행 중 상태
   activeSession: null,
   editingSet: null,
@@ -173,6 +239,8 @@ var state = {
   // 더보기 화면 - 모달
   apiKeyModalOpen: false,
   apiKeyInput: '',
+  profileEditModalOpen: false,
+  profileEdit: null,
   settings: { notifications: true, theme: 'dark', unit: 'kg' },
   apiKey: null,
   // 기록 화면
@@ -334,9 +402,17 @@ function init() {
     nutritionLog: storage.get(KEYS.NUTRITION_LOG, []),
     personalRecords: storage.get(KEYS.PERSONAL_RECORDS, []),
     bodyLog: storage.get(KEYS.BODY_LOG, []),
-    conditionLog: storage.get(KEYS.CONDITION_LOG, [])
+    conditionLog: storage.get(KEYS.CONDITION_LOG, []),
+    cycleHistory: storage.get(KEYS.CYCLE_HISTORY, [])
   };
-  
+
+  // 사이클 필드 정규화 (구 7주/4단계 데이터 → 5주 빌드/디로드). cyclePhase는 주차에서 파생.
+  if (state.profile) {
+    if (!state.profile.currentCycle) state.profile.currentCycle = 1;
+    if (!state.profile.currentWeek || state.profile.currentWeek > CYCLE_LENGTH) state.profile.currentWeek = 1;
+    state.profile.cyclePhase = getPhaseByWeek(state.profile.currentWeek);
+  }
+
   // API 키 + 설정 로드
   state.apiKey = storage.get(KEYS.API_KEY, null);
   state.settings = storage.get(KEYS.SETTINGS, { notifications: true, theme: 'dark', unit: 'kg' });

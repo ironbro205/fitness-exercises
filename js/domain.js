@@ -308,10 +308,11 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
   };
 }
 
-// 1RM 갱신 (더 높으면)
+// 1RM 갱신 (더 높으면). 고횟수(>12회)는 e1RM 신뢰도가 낮아 제외 — rolling max 경로와 동일 규칙.
 function update1RM(exerciseName, weight, reps) {
   if (!weight || !reps) return false;
-  
+  if (reps > ROLLING_1RM_MAX_REPS) return false;
+
   var newRM = calculate1RM(weight, reps);
   var currentRM = get1RM(exerciseName);
   
@@ -325,6 +326,72 @@ function update1RM(exerciseName, weight, reps) {
   
   storage.set(KEYS.ONE_RM_DATA, data);
   return true; // 갱신됨
+}
+
+// ── 1RM 자동 증감 (rolling max) ──
+// tracked 1RM = "최근 N세션 중 최고 e1RM". 신기록이면 즉시↑, 옛 최고가 윈도우 밖으로
+// 빠지면 자연히↓ (한 번 못 든 날로 폭락하지 않음). 고횟수(>12회) 세트는 e1RM 신뢰도가
+// 낮아 추세 신호에서 제외한다. 근거: REMAKE-PLAN.md 묶음2 ①.
+var ROLLING_1RM_WINDOW = 4; // 기본 추적 윈도우 (세션 수)
+var ROLLING_1RM_MAX_REPS = 12; // 이 이상 반복은 e1RM 추정 부정확 → 제외
+
+function calculateRollingMax1RM(exerciseName, windowSessions) {
+  var n = windowSessions || ROLLING_1RM_WINDOW;
+  var log = (state.data && state.data.workoutLog) || [];
+  var canonical = EXERCISE_ALIASES_1RM[exerciseName] || exerciseName;
+
+  var byDate = []; // { date, e1rm } — 세션(날짜)별 최고 e1RM
+  for (var i = 0; i < log.length; i++) {
+    var w = log[i];
+    var exList = w.exercises || w.exercisesData;
+    if (!exList || !Array.isArray(exList)) continue;
+    var bestForDay = 0;
+    for (var j = 0; j < exList.length; j++) {
+      var ex = exList[j];
+      if (!ex.name) continue;
+      var exCanon = EXERCISE_ALIASES_1RM[ex.name] || ex.name;
+      if (exCanon !== canonical && ex.name !== exerciseName) continue;
+      if (!ex.setsDetail || !Array.isArray(ex.setsDetail)) continue;
+      for (var k = 0; k < ex.setsDetail.length; k++) {
+        var s = ex.setsDetail[k];
+        if (s.isWarmup) continue;
+        if (!s.weight || !s.reps) continue;
+        if (s.reps > ROLLING_1RM_MAX_REPS) continue; // 고횟수 제외
+        var e = calculate1RM(s.weight, s.reps);
+        if (e > bestForDay) bestForDay = e;
+      }
+    }
+    if (bestForDay > 0) byDate.push({ date: w.date, e1rm: bestForDay });
+  }
+  if (!byDate.length) return null;
+
+  byDate.sort(function(a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+  var recent = byDate.slice(-n);
+  var max = 0;
+  for (var m = 0; m < recent.length; m++) {
+    if (recent[m].e1rm > max) max = recent[m].e1rm;
+  }
+  return { value: Math.round(max * 10) / 10, sessions: recent.length };
+}
+
+// 세션 종료 후 호출: 로그 기반 rolling max로 추적 1RM 보정.
+// 상승은 즉시 반영, 하락은 윈도우에 2세션 이상 있을 때만 (느린 하락 = 안정성).
+function reconcile1RMFromLog(exerciseNames) {
+  if (!exerciseNames || !exerciseNames.length) return;
+  var data = storage.get(KEYS.ONE_RM_DATA, {});
+  var changed = false;
+  for (var i = 0; i < exerciseNames.length; i++) {
+    var name = exerciseNames[i];
+    var roll = calculateRollingMax1RM(name);
+    if (!roll) continue;
+    var key = EXERCISE_ALIASES_1RM[name] || name;
+    var cur = data[key];
+    if (cur === undefined || roll.value >= cur || roll.sessions >= 2) {
+      data[key] = roll.value;
+      changed = true;
+    }
+  }
+  if (changed) storage.set(KEYS.ONE_RM_DATA, data);
 }
 
 // 작업 무게 추천 (1RM의 N%) — 신규 종목 또는 기록 없는 종목용 백업
@@ -392,6 +459,52 @@ function initializeOneRMData() {
   
   storage.set(KEYS.ONE_RM_DATA, data);
   storage.set(KEYS.ONE_RM_INITIALIZED, true);
+}
+
+// ═══════════════════════════════════════════════
+// 사이클 / 주차 진행 (묶음2: 4주 빌드 + 1주 디로드 = 5주)
+// 주차는 "날짜"가 아니라 "그 주 목표 운동 완료"로 넘어간다. REMAKE-PLAN.md 묶음2 ②③.
+// ═══════════════════════════════════════════════
+var CYCLE_LENGTH = 5; // 빌드 4주 + 디로드 1주
+
+// 주차 → 단계 라벨 (1~4 빌드, 5 디로드)
+function getPhaseByWeek(week) {
+  return week >= CYCLE_LENGTH ? '디로드' : '빌드';
+}
+
+// 이번 주 완료 세션 수가 목표(workoutFreq) 이상이면 다음 주차로. 5주차(디로드) 완료 시 새 사이클.
+// 순수 함수: profile(+이번주 완료수)를 받아 갱신된 사이클 필드만 반환 (저장은 호출자 책임).
+function advanceCycleOnSessionComplete(profile, sessionsCompletedThisWeek) {
+  var wf = profile.workoutFreq || 4;
+  var out = {
+    currentCycle: profile.currentCycle || 1,
+    currentWeek: profile.currentWeek || 1,
+    cyclePhase: profile.cyclePhase || '빌드'
+  };
+  if (sessionsCompletedThisWeek >= wf) {
+    out.currentWeek += 1;
+    if (out.currentWeek > CYCLE_LENGTH) {
+      out.currentCycle += 1;
+      out.currentWeek = 1;
+    }
+    out.cyclePhase = getPhaseByWeek(out.currentWeek);
+  }
+  return out;
+}
+
+// 휴식 감시자: 마지막 운동이 10일 이상 지났으면 복귀 안내 메시지, 아니면 null.
+function getIdleComebackMessage(workoutLog, todayStr) {
+  var log = workoutLog || [];
+  var lastDate = null;
+  for (var i = 0; i < log.length; i++) {
+    if (log[i].completed && (!lastDate || log[i].date > lastDate)) lastDate = log[i].date;
+  }
+  if (!lastDate) return null;
+  var lastMs = new Date(lastDate + 'T00:00:00Z').getTime();
+  var todayMs = new Date(todayStr + 'T00:00:00Z').getTime();
+  var days = Math.round((todayMs - lastMs) / 86400000);
+  if (days < 10) return null;
+  return { days: days, message: days + '일째 쉬는 중이에요. 가볍게 다시 시작해볼까요?' };
 }
 
 // 통합 부위 코드 → 한국어 라벨 빠른 조회 (현재 직접 BODY_PART_GROUPS[g].kr 사용)

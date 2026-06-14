@@ -46,12 +46,26 @@ function renderHome() {
   var todayDayIdx = dayOfWeek === 7 ? 6 : dayOfWeek - 1;
   var recentPRs = data.personalRecords.slice(0, 2);
   
-  // 7주 도트
+  // 사이클 도트 (5주: 빌드 4 + 디로드 1). 마지막(디로드)은 빈 점으로 구분.
   var weekDots = '';
-  for (var i = 0; i < 7; i++) {
-    weekDots += '<div class="dot ' + (i === profile.currentWeek - 1 ? 'dot-ideal' : 'dot-pending') + '"></div>';
-    if (i < 6) weekDots += '<div class="flex-1 h-px bg-stone-800"></div>';
+  for (var i = 0; i < CYCLE_LENGTH; i++) {
+    var isCur = i === profile.currentWeek - 1;
+    var isDeloadDot = i === CYCLE_LENGTH - 1;
+    var dotStyle = (!isCur && isDeloadDot) ? ' style="border:1px solid #3a4663;background:transparent;"' : '';
+    weekDots += '<div class="dot ' + (isCur ? 'dot-ideal' : 'dot-pending') + '"' + dotStyle + '></div>';
+    if (i < CYCLE_LENGTH - 1) weekDots += '<div class="flex-1 h-px bg-stone-800"></div>';
   }
+  // 사이클 단계 안내 + 이번 주 진행
+  var isDeloadWeek = profile.currentWeek >= CYCLE_LENGTH;
+  var phaseHint = isDeloadWeek ? '가볍게 · 건너뛰기 가능' : '조금씩 늘리기';
+  var weekGoal = profile.workoutFreq || 4;
+  var doneTowardWeek = profile.weekSessionsDone || 0; // 이번 주차 완료 수(캘린더 아님)
+  var idleMsg = getIdleComebackMessage(data.workoutLog, getTodayStr());
+  var cycleStatusLine = idleMsg
+    ? idleMsg.message
+    : (doneTowardWeek >= weekGoal
+        ? '이번 주차 목표 달성 — 다음 운동이면 다음 주차로'
+        : '이번 주차 ' + weekGoal + '회 중 ' + doneTowardWeek + '회 · 다 하면 다음 주차로');
   
   // 끼니별
   var meals = '';
@@ -105,7 +119,7 @@ function renderHome() {
         '<p class="text-xs uppercase font-mono text-stone-500" style="letter-spacing: 0.3em;">' + fmtDate(today) + ' · ' + dayNames[today.getDay()] + '</p>' +
         '<div class="flex items-center gap-2">' +
           '<span class="status-dot animate-pulse"></span>' +
-          '<p class="text-xs font-mono accent">CYCLE ' + profile.currentCycle + ' · WK ' + profile.currentWeek + '/7</p>' +
+          '<p class="text-xs font-mono accent">CYCLE ' + profile.currentCycle + ' · WK ' + profile.currentWeek + '/' + CYCLE_LENGTH + '</p>' +
         '</div>' +
       '</div>' +
       '<h1 class="font-bebas text-4xl">홈</h1>' +
@@ -118,19 +132,18 @@ function renderHome() {
         '<div class="relative">' +
           '<div class="flex items-baseline justify-between mb-1">' +
             '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono">현재 단계</p>' +
-            '<p class="text-xs font-mono accent">' + profile.currentWeek + '주차 / 7</p>' +
+            '<p class="text-xs font-mono accent">' + profile.currentWeek + '주차 / ' + CYCLE_LENGTH + '</p>' +
           '</div>' +
           '<div class="flex items-end justify-between mb-4">' +
-            '<h2 class="font-bebas text-4xl">' + profile.cyclePhase + '</h2>' +
-            '<p class="text-xs text-stone-500 font-mono">가볍게 시작</p>' +
+            '<h2 class="font-bebas text-4xl">' + profile.cyclePhase + (isDeloadWeek ? '' : ' ' + profile.currentWeek + '주차') + '</h2>' +
+            '<p class="text-xs text-stone-500 font-mono">' + phaseHint + '</p>' +
           '</div>' +
           '<div class="flex items-center gap-1\\.5">' + weekDots + '</div>' +
           '<div class="flex items-center justify-between mt-2">' +
-            '<p class="text-[10px] text-stone-600 font-mono uppercase">적응</p>' +
-            '<p class="text-[10px] text-stone-600 font-mono uppercase">구축</p>' +
-            '<p class="text-[10px] text-stone-600 font-mono uppercase">강화</p>' +
+            '<p class="text-[10px] text-stone-600 font-mono uppercase">빌드 1~4주</p>' +
             '<p class="text-[10px] text-stone-600 font-mono uppercase">디로드</p>' +
           '</div>' +
+          '<p class="text-[11px] font-mono mt-3 ' + (idleMsg ? 'text-amber-400' : 'text-stone-400') + '">' + cycleStatusLine + '</p>' +
         '</div>' +
       '</div>' +
       
@@ -242,8 +255,8 @@ function renderHome() {
               '<p class="text-[10px] font-mono accent">대화하기 →</p>' +
             '</div>' +
             '<p class="text-sm text-stone-200 leading-relaxed">' +
-              (proteinRemaining > 0 
-                ? '이번 주는 적응 단계예요. 무게보다 폼에 집중하세요. 단백질 ' + proteinRemaining + 'g 더 채우면 오늘 목표 달성입니다.'
+              (proteinRemaining > 0
+                ? (isDeloadWeek ? '이번 주는 디로드예요. 가볍게 회복하며 폼에 집중하세요.' : '빌드 ' + profile.currentWeek + '주차 — 지난주보다 조금씩 무게나 횟수를 늘려보세요.') + ' 단백질 ' + proteinRemaining + 'g 더 채우면 오늘 목표 달성입니다.'
                 : '오늘 단백질 목표 달성! 회복에 집중하세요.') +
             '</p>' +
           '</div>' +
@@ -1518,6 +1531,37 @@ window.endSession = function() {
   finalizeSession();
 };
 
+// 사이클/주차 진행: "완료 세션 수" 기준(캘린더 아님). 며칠 쉬어도 진행도(weekSessionsDone)가
+// 유지되어 이어서 채울 수 있다 — 프로그램이 사용자를 기다린다(REMAKE-PLAN ③).
+// 이번 주차 완료 수가 목표(workoutFreq)에 도달하면 다음 주차로, 5주차(디로드) 완료 시 새 사이클.
+function advanceCycleIfWeekComplete() {
+  var profile = state.profile;
+  if (!profile) return;
+  var goal = profile.workoutFreq || 4;
+  var done = (profile.weekSessionsDone || 0) + 1; // 이번 세션 포함
+  if (done < goal) {
+    profile.weekSessionsDone = done; // 진행도 누적(주차 유지)
+    storage.set(KEYS.PROFILE, profile);
+    return;
+  }
+  // 목표 달성 → 다음 주차(또는 새 사이클), 진행도 리셋
+  var updated = advanceCycleOnSessionComplete(profile, done);
+  var newCycleStarted = updated.currentCycle > (profile.currentCycle || 1);
+  profile.currentCycle = updated.currentCycle;
+  profile.currentWeek = updated.currentWeek;
+  profile.cyclePhase = updated.cyclePhase;
+  profile.weekSessionsDone = 0;
+  storage.set(KEYS.PROFILE, profile);
+  if (newCycleStarted) {
+    state.data.cycleHistory = state.data.cycleHistory || [];
+    state.data.cycleHistory.unshift({ cycle: updated.currentCycle - 1, endedAt: getTodayStr() });
+    storage.set(KEYS.CYCLE_HISTORY, state.data.cycleHistory);
+    showToast('새 사이클 ' + updated.currentCycle + ' 시작!');
+  } else {
+    showToast(updated.currentWeek + '주차로 진행 · ' + updated.cyclePhase);
+  }
+}
+
 // 세션 마무리: 통계 계산 + 저장 + 완료 화면
 function finalizeSession() {
   var session = state.activeSession;
@@ -1615,7 +1659,13 @@ function finalizeSession() {
       storage.set(KEYS.PROFILE, state.profile);
     }
   }
-  
+
+  // ── 1RM rolling max 보정 (이번 세션 종목들; 상승 즉시·하락 느리게) ──
+  reconcile1RMFromLog(exercisesDone.map(function(e) { return e.name; }));
+
+  // ── 사이클/주차 자동 진행 (그 주 목표 운동 완료 기준, 날짜로 안 넘김) ──
+  advanceCycleIfWeekComplete();
+
   // 완료 화면용 데이터 저장
   state.completedSession = {
     workoutId: newWorkout.id,
@@ -3284,6 +3334,97 @@ window.deleteApiKey = function() {
 };
 
 // ═══════════════════════════════════════════════
+// 프로필 수정 모달 (묶음1): 기본(나이·키·체중) + 목표(단백질·칼로리·운동빈도)
+// ═══════════════════════════════════════════════
+window.openProfileEditModal = function() {
+  var p = state.profile || {};
+  state.profileEdit = {
+    age: p.age, height: p.height, weight: p.weight,
+    proteinTarget: p.proteinTarget, calorieTarget: p.calorieTarget,
+    workoutFreq: p.workoutFreq
+  };
+  state.profileEditModalOpen = true;
+  render();
+};
+
+window.closeProfileEditModal = function() {
+  state.profileEditModalOpen = false;
+  state.profileEdit = null;
+  render();
+};
+
+window.updateProfileEditField = function(field, value) {
+  if (!state.profileEdit) return;
+  state.profileEdit[field] = value;
+};
+
+window.saveProfileEdit = function() {
+  var e = state.profileEdit || {};
+  var fields = [
+    { k: 'age', label: '나이', min: 10, max: 120, int: true },
+    { k: 'height', label: '키(cm)', min: 100, max: 250 },
+    { k: 'weight', label: '체중(kg)', min: 25, max: 300 },
+    { k: 'proteinTarget', label: '목표 단백질(g)', min: 20, max: 500, int: true },
+    { k: 'calorieTarget', label: '목표 칼로리(kcal)', min: 800, max: 8000, int: true },
+    { k: 'workoutFreq', label: '주간 운동 횟수', min: 1, max: 14, int: true }
+  ];
+  for (var i = 0; i < fields.length; i++) {
+    var f = fields[i];
+    var v = parseFloat(e[f.k]);
+    if (isNaN(v) || v < f.min || v > f.max) {
+      alert(f.label + ' 값을 확인해주세요 (' + f.min + '~' + f.max + ').');
+      return;
+    }
+    e[f.k] = f.int ? Math.round(v) : v;
+  }
+  state.profile.age = e.age;
+  state.profile.height = e.height;
+  state.profile.weight = e.weight;
+  state.profile.proteinTarget = e.proteinTarget;
+  state.profile.calorieTarget = e.calorieTarget;
+  state.profile.workoutFreq = e.workoutFreq;
+  storage.set(KEYS.PROFILE, state.profile);
+  state.profileEditModalOpen = false;
+  state.profileEdit = null;
+  render();
+  showToast('프로필을 저장했어요');
+};
+
+function renderProfileEditModal() {
+  if (!state.profileEditModalOpen) return '';
+  var e = state.profileEdit || {};
+  function field(label, key, unit, step) {
+    return '<div class="input-group">' +
+      '<div class="input-label"><p>' + label + '</p>' + (unit ? '<p>' + unit + '</p>' : '') + '</div>' +
+      '<input type="number" inputmode="decimal" class="api-key-input"' +
+        (step ? ' step="' + step + '"' : '') +
+        ' value="' + (e[key] != null ? e[key] : '') + '"' +
+        ' oninput="updateProfileEditField(\'' + key + '\', this.value)" />' +
+    '</div>';
+  }
+  return '<div class="manual-input-overlay" onclick="closeProfileEditModal()">' +
+    '<div class="manual-input-sheet" onclick="event.stopPropagation()">' +
+      '<div class="sheet-handle"></div>' +
+      '<div class="flex items-center justify-between mb-5">' +
+        '<div>' +
+          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">내 정보</p>' +
+          '<p class="font-bebas text-2xl mt-1">프로필 수정</p>' +
+        '</div>' +
+        '<button class="session-header-btn" onclick="closeProfileEditModal()">' + icon('close', 18) + '</button>' +
+      '</div>' +
+      field('나이', 'age', '세', '1') +
+      field('키', 'height', 'cm', '0.1') +
+      field('체중', 'weight', 'kg', '0.1') +
+      field('목표 단백질', 'proteinTarget', 'g / 일', '1') +
+      field('목표 칼로리', 'calorieTarget', 'kcal / 일', '10') +
+      field('주간 운동 횟수', 'workoutFreq', '회 / 주', '1') +
+      '<button class="sheet-submit mt-2" onclick="saveProfileEdit()">저장</button>' +
+      '<button class="mt-2" onclick="closeProfileEditModal()" style="width:100%;padding:12px;border-radius:14px;background:transparent;border:1px solid #2a3550;color:#9aa7c0;font-family:Space Grotesk,sans-serif;font-weight:700;font-size:13px;">취소</button>' +
+    '</div>' +
+  '</div>';
+}
+
+// ═══════════════════════════════════════════════
 // 1RM 리스트 화면
 // ═══════════════════════════════════════════════
 window.openOneRMList = function() {
@@ -3366,7 +3507,7 @@ function renderOneRMList() {
             '<div style="color: #fbbf24; flex-shrink: 0;">🏆</div>' +
             '<div>' +
               '<p class="text-xs font-display font-bold" style="color: #fbbf24;">자동 갱신됨</p>' +
-              '<p class="text-[10px] font-mono text-stone-400 leading-relaxed mt-1">운동할 때마다 1RM이 자동 계산되어 갱신됩니다. 더 무거운 무게/더 많은 횟수를 들수록 증가해요. (Epley 공식 적용)</p>' +
+              '<p class="text-[10px] font-mono text-stone-400 leading-relaxed mt-1">최근 몇 번의 운동 중 최고 기록으로 추적해요. 신기록은 바로 반영, 한동안 못 들면 천천히 내려갑니다. 한 번의 컨디션 난조로 폭락하지 않아요. (Epley 공식)</p>' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -3419,42 +3560,43 @@ window.executeResetAll = function() {
   }, 1000);
 };
 
-// 백업/내보내기 (.md 파일)
+// 백업/내보내기 (복원 가능한 JSON 파일)
 window.exportData = function() {
-  var data = {
-    profile: state.profile,
-    workoutLog: state.data.workoutLog,
-    nutritionLog: state.data.nutritionLog,
-    personalRecords: state.data.personalRecords,
-    settings: state.settings,
-    exportedAt: new Date().toISOString()
-  };
-  
-  var md = '# 피트니스 데이터 백업\n\n';
-  md += '내보낸 시간: ' + new Date().toLocaleString('ko-KR') + '\n\n';
-  md += '## 프로필\n';
-  md += '- 체중: ' + state.profile.weight + 'kg\n';
-  md += '- 목표 단백질: ' + state.profile.proteinTarget + 'g\n';
-  md += '- 사이클: ' + state.profile.currentCycle + ' / 주차: ' + state.profile.currentWeek + '\n\n';
-  md += '## 운동 기록 (' + state.data.workoutLog.length + '회)\n';
-  state.data.workoutLog.forEach(function(w) {
-    md += '- ' + w.date + ' · ' + w.sessionKr + ' · ' + w.duration + '분\n';
-  });
-  md += '\n## PR (' + state.data.personalRecords.length + '개)\n';
-  state.data.personalRecords.forEach(function(pr) {
-    md += '- ' + pr.exerciseName + ': ' + (pr.weight ? pr.weight + 'kg' : pr.reps + '회') + ' (' + pr.date + ')\n';
-  });
-  md += '\n## 원본 데이터 (JSON)\n```json\n' + JSON.stringify(data, null, 2) + '\n```\n';
-  
-  var blob = new Blob([md], { type: 'text/markdown' });
+  var json = JSON.stringify(buildBackupObject(), null, 2);
+  var blob = new Blob([json], { type: 'application/json' });
   var url = URL.createObjectURL(blob);
   var a = document.createElement('a');
   a.href = url;
-  a.download = 'fitness-backup-' + new Date().toISOString().split('T')[0] + '.md';
+  a.download = 'fitness-backup-' + getTodayStr() + '.json';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  showToast('백업 파일을 저장했어요');
+};
+
+// 가져오기: 파일 선택 → 복원 → 새로고침. (운동 데이터만 복원; API키·대화는 미포함)
+window.openBackupImport = function() {
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json,.json';
+  input.onchange = function(e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      var res = restoreFromBackup(ev.target.result);
+      if (res.ok) {
+        showToast('복원 완료 — 새로고침합니다');
+        setTimeout(function() { location.reload(); }, 1000);
+      } else {
+        alert('복원 실패: ' + (res.error || '알 수 없는 오류'));
+      }
+    };
+    reader.onerror = function() { alert('파일을 읽지 못했습니다.'); };
+    reader.readAsText(file);
+  };
+  input.click();
 };
 
 // ═══════════════════════════════════════════════
@@ -3521,8 +3663,8 @@ function renderMore() {
     
     '<div class="px-5 pb-32" style="display: flex; flex-direction: column; gap: 20px;">' +
       
-      // 프로필 카드
-      '<div class="more-profile-card">' +
+      // 프로필 카드 (탭하면 수정 모달)
+      '<div class="more-profile-card" onclick="openProfileEditModal()" style="cursor: pointer;">' +
         '<div class="flex items-center gap-3">' +
           '<div class="avatar-box">U</div>' +
           '<div class="flex-1">' +
@@ -3530,7 +3672,7 @@ function renderMore() {
             '<p class="text-[10px] font-mono text-stone-500 mt-1">' + profile.age + '세 · ' + profile.height + 'cm · ' + profile.weight + 'kg</p>' +
             '<div class="flex items-center gap-2 mt-1">' +
               '<span class="api-status-badge active" style="font-size: 9px; padding: 3px 8px;">린매스</span>' +
-              '<span class="text-[10px] font-mono text-stone-500">목표 ' + profile.proteinTarget + 'g/일</span>' +
+              '<span class="text-[10px] font-mono text-stone-500">목표 ' + profile.proteinTarget + 'g/일 · 주 ' + (profile.workoutFreq || 4) + '회</span>' +
             '</div>' +
           '</div>' +
           '<div class="menu-arrow">' + icon('chevron', 18) + '</div>' +
@@ -3600,7 +3742,7 @@ function renderMore() {
             '<div class="menu-icon-sm accent-bg-soft">' + icon('refresh', 18) + '</div>' +
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold">현재 사이클</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">Cycle ' + profile.currentCycle + ' · ' + profile.cyclePhase + ' · ' + profile.currentWeek + '/7주</p>' +
+              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">Cycle ' + profile.currentCycle + ' · ' + profile.cyclePhase + ' · ' + profile.currentWeek + '/' + CYCLE_LENGTH + '주</p>' +
             '</div>' +
             '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
           '</div>' +
@@ -3616,7 +3758,7 @@ function renderMore() {
             '<div class="menu-icon-sm">' + icon('plus', 18) + '</div>' +
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold">새 사이클 시작</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">7주 프로그램 재설계</p>' +
+              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + CYCLE_LENGTH + '주 프로그램 (빌드 4 + 디로드 1)</p>' +
             '</div>' +
             '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
           '</div>' +
@@ -3635,28 +3777,9 @@ function renderMore() {
             '</div>' +
             '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
           '</div>' +
-          '<div class="menu-row">' +
-            '<div class="menu-icon-sm accent-bg-soft">' + icon('search', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">종목 라이브러리</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">940개 운동 검색·탐색</p>' +
-            '</div>' +
-            '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
-          '</div>' +
-          '<div class="menu-row">' +
-            '<div class="menu-icon-sm">' + icon('star', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">즐겨찾기 종목</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">자주 하는 운동 관리</p>' +
-            '</div>' +
-            '<div style="display: flex; align-items: center; gap: 8px;">' +
-              '<p class="text-[10px] font-mono accent">0개</p>' +
-              '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
-            '</div>' +
-          '</div>' +
         '</div>' +
       '</div>' +
-      
+
       // 앱
       '<div>' +
         '<p class="section-label">앱</p>' +
@@ -3684,15 +3807,15 @@ function renderMore() {
             '<div class="menu-icon-sm">' + icon('download', 18) + '</div>' +
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold">백업 / 내보내기</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">주간 리포트 .md 파일</p>' +
+              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">운동 데이터 백업 파일 (.json)</p>' +
             '</div>' +
             '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
           '</div>' +
-          '<div class="menu-row" onclick="alert(\'가져오기는 다음 단계에서 구현됩니다\')">' +
+          '<div class="menu-row" onclick="openBackupImport()">' +
             '<div class="menu-icon-sm">' + icon('upload', 18) + '</div>' +
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold">가져오기</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">백업 파일 복원</p>' +
+              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">백업 파일에서 복원</p>' +
             '</div>' +
             '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
           '</div>' +
@@ -3707,64 +3830,6 @@ function renderMore() {
         '</div>' +
       '</div>' +
       
-      // 설정
-      '<div>' +
-        '<p class="section-label">설정</p>' +
-        '<div class="section-group">' +
-          '<div class="menu-row">' +
-            '<div class="menu-icon-sm">' + icon('units', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">단위</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">무게 · 길이</p>' +
-            '</div>' +
-            '<p class="text-[11px] font-mono accent" style="margin-right: 8px;">KG · CM</p>' +
-            '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
-          '</div>' +
-          '<div class="menu-row" onclick="toggleSetting(\'notifications\')">' +
-            '<div class="menu-icon-sm">' + icon('bell', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">알림</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">단백질 · 운동 리마인더</p>' +
-            '</div>' +
-            '<div class="toggle-switch-sm ' + (settings.notifications ? 'on' : '') + '">' +
-              '<div class="toggle-knob-sm"></div>' +
-            '</div>' +
-          '</div>' +
-          '<div class="menu-row">' +
-            '<div class="menu-icon-sm">' + icon('sun', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">테마</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">화면 색상</p>' +
-            '</div>' +
-            '<p class="text-[11px] font-mono accent" style="margin-right: 8px;">DARK</p>' +
-            '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-      
-      // 정보
-      '<div>' +
-        '<p class="section-label">정보</p>' +
-        '<div class="section-group">' +
-          '<div class="menu-row">' +
-            '<div class="menu-icon-sm">' + icon('help', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">도움말</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">사용 가이드</p>' +
-            '</div>' +
-            '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
-          '</div>' +
-          '<div class="menu-row">' +
-            '<div class="menu-icon-sm">' + icon('info', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">앱 정보</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">v1.0.0 · Personal</p>' +
-            '</div>' +
-            '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-      
       // 푸터
       '<div class="app-footer">' +
         '<p class="app-footer-brand">FITNESS</p>' +
@@ -3773,8 +3838,9 @@ function renderMore() {
       '</div>' +
       
     '</div>' +
-    
-    apiModalHtml;
+
+    apiModalHtml +
+    renderProfileEditModal();
 }
 
 // AI 추천 새로고침
@@ -4832,10 +4898,10 @@ function renderStats() {
         '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-3">현재 사이클</p>' +
         '<div class="flex items-baseline justify-between mb-3">' +
           '<p class="font-bebas text-3xl">Cycle ' + profile.currentCycle + '</p>' +
-          '<p class="text-xs font-mono accent">' + profile.currentWeek + ' / 7 주</p>' +
+          '<p class="text-xs font-mono accent">' + profile.currentWeek + ' / ' + CYCLE_LENGTH + ' 주</p>' +
         '</div>' +
-        '<div class="progress-bg mb-2"><div class="progress-fill" style="width: ' + Math.round((profile.currentWeek / 7) * 100) + '%;"></div></div>' +
-        '<p class="text-[10px] font-mono text-stone-500">' + profile.cyclePhase + ' · ' + (7 - profile.currentWeek) + '주 후 디로드</p>' +
+        '<div class="progress-bg mb-2"><div class="progress-fill" style="width: ' + Math.round((profile.currentWeek / CYCLE_LENGTH) * 100) + '%;"></div></div>' +
+        '<p class="text-[10px] font-mono text-stone-500">' + profile.cyclePhase + ' · ' + (profile.currentWeek >= CYCLE_LENGTH ? '디로드 주간' : (CYCLE_LENGTH - profile.currentWeek) + '주 후 디로드') + '</p>' +
       '</div>' +
       
     '</div>';
