@@ -1630,6 +1630,7 @@ window.goHome = function() {
   saveCompletionCondition();
   state.completedSession = null;
   state.currentTab = 'home';
+  state._navTabStack = ['home'];           // 루트 정규화 (뒤로가기 6-D)
   render();
 };
 
@@ -1638,6 +1639,7 @@ window.goToWorkout = function() {
   saveCompletionCondition();
   state.completedSession = null;
   state.currentTab = 'workout';
+  state._navTabStack = ['home', 'workout']; // 운동 탭에서 뒤로 → 홈 (뒤로가기 6-D)
   render();
 };
 
@@ -2956,6 +2958,7 @@ window.addToMeal = function(mealKey, mealKr) {
   setTimeout(function() {
     closeFoodInput();
     state.currentTab = 'fuel';
+    state._navTabStack = ['home', 'fuel'];  // 탭 스택 정합(뒤로가기 6-D): 연료 탭에서 뒤로 → 홈
     render();
   }, 1500);
   
@@ -5079,7 +5082,7 @@ function renderResetConfirm() {
 // ═══════════════════════════════════════════════
 // 탭 전환
 // ═══════════════════════════════════════════════
-window.setTab = function(tabId) {
+window.setTab = function(tabId, fromNav) {
   // 모든 탭 진입 시 데이터 강제 재로드 (삭제 즉시 반영 보장)
   state.data.workoutLog = storage.get(KEYS.WORKOUT_LOG) || [];
   state.data.nutritionLog = storage.get(KEYS.NUTRITION_LOG) || [];
@@ -5089,6 +5092,15 @@ window.setTab = function(tabId) {
 
   // 운동 탭 진입 시 마법사는 이전 진행 단계를 그대로 유지 (저장된 state 복원됨)
   state.currentTab = tabId;
+  // 뒤로가기용 탭 방문 순서 기록 (fromNav=뒤로가기가 부른 경우는 기록 안 함)
+  if (!fromNav) {
+    if (!state._navTabStack) state._navTabStack = ['home'];
+    if (tabId === 'home') {
+      state._navTabStack = ['home'];                                  // 홈으로 가면 루트 정규화
+    } else if (state._navTabStack[state._navTabStack.length - 1] !== tabId) {
+      state._navTabStack.push(tabId);                                 // 같은 탭 연속은 중복 제외
+    }
+  }
   render();
 };
 
@@ -5111,6 +5123,107 @@ window.installPWA = function() {
 };
 
 init();
+
+// ═══════════════════════════════════════════════
+// 뒤로가기(자연스러운 단계 되돌리기) — 묶음6-D
+//   화면을 통째로 다시 그리는 구조라, history 깊이로 레이어를 흉내내지 않는다.
+//   대신 "트랩 1칸"만 깔아두고, 뒤로가기가 눌릴 때마다 현재 state에서
+//   "지금 떠 있는 가장 위 단계"를 계산(getTopLayer)해 그 한 겹만 닫고 트랩을 다시 깐다.
+//   → 열기/닫기 함수와 화면 안 X버튼을 건드리지 않아도 history 어긋남이 없다.
+// ═══════════════════════════════════════════════
+
+// 지금 화면에서 "가장 위에 떠 있는 단계"를 문자열로 판별 (render 우선순위와 정합)
+function getTopLayer() {
+  // 모달/시트 (다른 화면 위에 겹쳐 뜨는 가장 위 레이어)
+  if (state.manualInputMode) return 'manualInput';   // 음식입력 위 수동입력
+  if (state.itemDetailSheet) return 'itemDetail';     // 기록 상세 (탭 위)
+  if (state.editingSet) return 'setEditor';           // 세트 편집 (세션 위)
+  if (state.exerciseSwapOpen) return 'exerciseSwap';  // 종목 교체 (세션 위)
+  if (state.apiKeyModalOpen) return 'apiKey';         // (더보기 위)
+  if (state.profileEditModalOpen) return 'profileEdit';
+  if (state.resetConfirming) return 'resetConfirm';
+  // 전체화면 오버레이 (render 우선순위와 동일한 순서)
+  if (state.oneRMListOpen) return 'oneRMList';
+  if (state.coachMemoryOpen) return 'coachMemory';
+  if (state.weeklyReviewOpen) return 'weeklyReview';
+  if (state.plateauOpen) return 'plateau';
+  if (state.coachChatOpen) return 'coachChat';
+  if (state.foodInputOpen) return 'foodInput';
+  // 완료 화면 / 진행 중 세션
+  if (state.completedSession) return 'completed';
+  if (state.activeSession) return 'session';
+  // 루틴 만들기 마법사 (운동 탭 내부 단계). STEP1은 탭 자체라 'tab'으로 처리.
+  if (state.currentTab === 'workout' && state.workoutWizardStep === 3) return 'wizard3';
+  if (state.currentTab === 'workout' && state.workoutWizardStep === 2) return 'wizard2';
+  // 일반 탭 / 루트(홈)
+  if (state.currentTab !== 'home') return 'tab';
+  return 'root';
+}
+
+// 뒤로가기 한 번 처리. 반환값: true=흡수(트랩 다시 깔기), false=앱을 실제로 떠나도 됨(루트 2번째)
+function navBack() {
+  var top = getTopLayer();
+
+  if (top === 'root') {
+    // 홈에서 더 닫을 게 없음 → '한 번 더 누르면 종료'
+    if (state._navExitArmed) return false;          // 두 번째(2초 내) → 실제 종료 허용
+    state._navExitArmed = true;
+    showToast('한 번 더 누르면 닫혀요');
+    setTimeout(function() { state._navExitArmed = false; }, 2000);
+    return true;                                     // 첫 번째 → 흡수
+  }
+
+  switch (top) {
+    // 모달/시트 — 기존 닫기 함수 그대로 재사용(애니가 있는 4종은 그 안에서 처리)
+    case 'manualInput': closeManualInput(); break;
+    case 'itemDetail': closeItemDetail(); break;
+    case 'setEditor': closeSetEditor(); break;
+    case 'exerciseSwap': closeExerciseSwap(); break;
+    case 'apiKey': closeApiKeyModal(); break;
+    case 'profileEdit': closeProfileEditModal(); break;
+    case 'resetConfirm': cancelResetAll(); break;
+    // 전체화면 오버레이
+    case 'oneRMList': closeOneRMList(); break;
+    case 'coachMemory': closeCoachMemory(); break;
+    case 'weeklyReview': closeWeeklyReview(); break;
+    case 'plateau': closePlateauDetail(); break;
+    case 'coachChat': closeCoachChat(); break;
+    case 'foodInput': closeFoodInput(); break;
+    // 완료 화면 / 진행 세션
+    case 'completed': goHome(); break;
+    case 'session': endSession(); break;            // 완료 본세트 없으면 endSession이 확인창
+    // 마법사 단계
+    case 'wizard3': backToStep2(); break;           // FREE면 backToStep2가 STEP1로 직행
+    case 'wizard2': backToStep1(); break;
+    // 일반 탭 → 방문 순서상 직전 탭으로
+    case 'tab': {
+      var stack = state._navTabStack;
+      if (stack && stack.length > 1) {
+        stack.pop();                                 // 현재 탭 제거
+        setTab(stack[stack.length - 1], true);       // 직전 탭(fromNav=true → 스택 재조작 안 함)
+      } else {
+        setTab('home', true);
+      }
+      break;
+    }
+  }
+  return true;
+}
+
+// 부팅 시 트랩 1칸을 깔고 popstate(폰/브라우저 뒤로가기)를 듣는다.
+// 뒤로가기가 눌리면 트랩이 한 칸 빠지므로 navBack으로 한 겹 닫고 트랩을 다시 깐다.
+(function() {
+  if (typeof window === 'undefined' || !window.addEventListener || typeof history === 'undefined') return;
+  try { history.pushState({ nav: 'trap' }, ''); } catch (e) {}
+  window.addEventListener('popstate', function() {
+    var keep = navBack();
+    if (keep) {
+      try { history.pushState({ nav: 'trap' }, ''); } catch (e) {}  // 트랩 재설정(흡수)
+    } else {
+      try { history.back(); } catch (e) {}                          // 한 칸 더 뒤로 → 앱 떠남
+    }
+  });
+})();
 
 // ═══════════════════════════════════════════════
 // 운동 화면 좌우 스와이프 → 다음/이전 종목
