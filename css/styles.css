@@ -2819,6 +2819,28 @@ button {
   100% { opacity: 0; transform: translateY(105vh) rotate(540deg); }
 }
 
+/* ── 묶음6-C② : 닫기 슬라이드(핵심 시트) + 휴식 원형 링 + 종목 스와이프 슬라이드 ── */
+
+/* 핵심 시트 닫기: 살아있는 시트 DOM에 .closing을 달아 아래로 미끄러지며 사라짐 */
+@keyframes slideDown { from { transform: translateY(0); } to { transform: translateY(100%); } }
+@keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+/* 닫히는 동안(240ms): 시트 버튼은 비활성(취소 후 초기화/저장 오동작 방지), 오버레이는 계속 막음(뒤 화면 통과 클릭 방지) */
+.sheet.closing, .manual-input-sheet.closing { animation: slideDown 0.24s ease-in forwards; pointer-events: none; }
+.sheet-overlay.closing, .manual-input-overlay.closing { animation: fadeOut 0.22s ease forwards; }
+
+/* 휴식 타이머 원형 링(남은 시간만큼 둘레가 줄어듦) */
+.rest-ring-wrap { position: relative; width: 40px; height: 40px; flex-shrink: 0; }
+.rest-ring { position: absolute; inset: 0; transform: rotate(-90deg); }
+.rest-ring-bg { stroke: rgba(var(--accent-rgb), 0.18); }
+.rest-ring-fg { stroke: var(--accent); }
+.rest-ring-icon { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--accent); }
+
+/* 종목 스와이프/이동 — 들어오는 카드 방향 슬라이드 */
+@keyframes exSlideNext { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
+@keyframes exSlidePrev { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }
+.ex-slide-next { animation: exSlideNext 0.24s ease-out; }
+.ex-slide-prev { animation: exSlidePrev 0.24s ease-out; }
+
 /* 접근성: OS '동작 줄이기'가 켜지면 애니메이션/전환 사실상 제거 + 컨페티 숨김 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

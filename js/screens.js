@@ -1138,10 +1138,23 @@ window.openItemDetail = function(type, identifier) {
   render();
 };
 
+// 6-C② 핵심 시트 닫기 슬라이드: 살아있는 시트 DOM에 closing 클래스를 직접 달아 애니메이션 재생 후 실제 닫기 실행
+// (full re-render 구조라 exit 애니가 어려운데, 닫기 직전 잠깐 지연시켜 슬라이드를 보여줌)
+function animateSheetCloseThen(closeFn) {
+  var sheet = (typeof document !== 'undefined' && document.querySelector) ? document.querySelector('.sheet, .manual-input-sheet') : null;
+  if (!sheet || !sheet.classList || !sheet.classList.add) { closeFn(); return; }
+  var overlay = document.querySelector('.sheet-overlay, .manual-input-overlay');
+  sheet.classList.add('closing');
+  if (overlay && overlay.classList && overlay.classList.add) overlay.classList.add('closing');
+  setTimeout(closeFn, 240);
+}
+
 window.closeItemDetail = function() {
-  state.itemDetailSheet = null;
-  state.itemDeleteConfirming = false;
-  render();
+  animateSheetCloseThen(function() {
+    state.itemDetailSheet = null;
+    state.itemDeleteConfirming = false;
+    render();
+  });
 };
 
 // 1단계: 삭제 의도 확인 (버튼이 "정말 삭제?"로 변함)
@@ -1863,12 +1876,18 @@ function startRestTimerTick() {
     }
     // 시트(편집/종목변경)가 열려 있으면 시트가 깜빡이지 않도록 타이머만 부분 갱신
     if (state.editingSet || state.exerciseSwapOpen) {
+      var remaining = state.restTimer.duration - elapsed;
       var el = document.getElementById('rest-time-text');
       if (el) {
-        var remaining = state.restTimer.duration - elapsed;
         var mins = Math.floor(remaining / 60);
         var secs = remaining % 60;
         el.textContent = mins + ':' + String(secs).padStart(2, '0');
+      }
+      // 6-C② 원형 링도 부분 갱신(전체 렌더 없이) — 시트 열린 동안 링이 멈추지 않도록
+      var ringEl = document.getElementById('rest-ring-fg');
+      if (ringEl && ringEl.setAttribute) {
+        var ringProg = state.restTimer.duration > 0 ? (remaining / state.restTimer.duration) : 0;
+        ringEl.setAttribute('stroke-dashoffset', (113.1 * (1 - ringProg)).toFixed(1));
       }
       return;
     }
@@ -1879,9 +1898,12 @@ function startRestTimerTick() {
 // 종목 변경 (이동)
 window.goToExercise = function(idx) {
   if (state.activeSession) {
+    var cur = state.activeSession.currentExerciseIdx;
+    state._exSwipeDir = (idx === cur) ? null : (idx > cur ? 'next' : 'prev'); // 6-C② 들어오는 카드 방향
     state.activeSession.currentExerciseIdx = idx;
     saveActiveSession();
     render();
+    state._exSwipeDir = null; // 1회만(다음 tick 재렌더에서 반복 안 되도록)
   }
 };
 
@@ -2036,12 +2058,23 @@ function renderWorkoutSession() {
     var restMins = Math.floor(restRemaining / 60);
     var restSecs = restRemaining % 60;
     var restStr = restMins + ':' + String(restSecs).padStart(2, '0');
-    
-    restTimerHtml = 
+
+    // 6-C② 원형 링: 남은 시간만큼 둘레가 차 있음 (r=18 → 둘레 ≈ 113.1, 1초 단위 갱신)
+    var ringCirc = 113.1;
+    var restProgress = state.restTimer.duration > 0 ? (restRemaining / state.restTimer.duration) : 0;
+    var ringOffset = (ringCirc * (1 - restProgress)).toFixed(1);
+
+    restTimerHtml =
       '<div class="rest-timer-wrap">' +
         '<div class="rest-timer">' +
           '<div class="flex items-center gap-3">' +
-            '<div class="rest-icon">' + icon('clock', 18) + '</div>' +
+            '<div class="rest-ring-wrap">' +
+              '<svg class="rest-ring" width="40" height="40" viewBox="0 0 40 40">' +
+                '<circle class="rest-ring-bg" cx="20" cy="20" r="18" fill="none" stroke-width="3"/>' +
+                '<circle id="rest-ring-fg" class="rest-ring-fg" cx="20" cy="20" r="18" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="' + ringCirc + '" stroke-dashoffset="' + ringOffset + '"/>' +
+              '</svg>' +
+              '<div class="rest-ring-icon">' + icon('clock', 16) + '</div>' +
+            '</div>' +
             '<div>' +
               '<p class="text-[10px] font-mono text-stone-500 uppercase">휴식 중</p>' +
               '<p id="rest-time-text" class="font-bebas text-2xl accent">' + restStr + '</p>' +
@@ -2232,8 +2265,8 @@ function renderWorkoutSession() {
       '<div class="flex items-center gap-1">' + exerciseDots + '</div>' +
     '</div>' +
     
-    '<div class="px-5" style="padding-bottom: ' + (state.restTimer ? '180px' : '120px') + ';">' +
-      
+    '<div class="px-5' + (state._exSwipeDir ? ' ex-slide-' + state._exSwipeDir : '') + '" style="padding-bottom: ' + (state.restTimer ? '180px' : '120px') + ';">' +
+
       // 현재 종목 정보
       '<div class="exercise-info-card">' +
         '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">현재 종목</p>' +
@@ -3173,9 +3206,11 @@ window.openApiKeyModal = function() {
 
 // API 키 모달 닫기
 window.closeApiKeyModal = function() {
-  state.apiKeyModalOpen = false;
-  state.apiKeyInput = '';
-  render();
+  animateSheetCloseThen(function() {
+    state.apiKeyModalOpen = false;
+    state.apiKeyInput = '';
+    render();
+  });
 };
 
 // API 키 입력 업데이트
@@ -3228,9 +3263,11 @@ window.openProfileEditModal = function() {
 };
 
 window.closeProfileEditModal = function() {
-  state.profileEditModalOpen = false;
-  state.profileEdit = null;
-  render();
+  animateSheetCloseThen(function() {
+    state.profileEditModalOpen = false;
+    state.profileEdit = null;
+    render();
+  });
 };
 
 window.updateProfileEditField = function(field, value) {
@@ -3413,8 +3450,10 @@ window.resetAllData = function() {
 
 // 전체 초기화 취소
 window.cancelResetAll = function() {
-  state.resetConfirming = false;
-  render();
+  animateSheetCloseThen(function() {
+    state.resetConfirming = false;
+    render();
+  });
 };
 
 // 전체 초기화 실행

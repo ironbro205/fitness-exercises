@@ -451,3 +451,38 @@ test('묶음6-C① renderWorkoutComplete — 축하 연출은 첫 진입 1회만
   assert.ok(!second.includes('pop-in'), '재렌더: 아이콘 pop-in 없음');
   assert.ok(!second.includes('complete-celebrate-list'), '재렌더: 카드 스태거 없음');
 });
+
+// ── 묶음6-C② : 핵심 시트 닫기 슬라이드 + 휴식 타이머 원형 링 + 종목 스와이프 방향 슬라이드 ──
+test('묶음6-C② 닫기 슬라이드 CSS — slideDown/fadeOut keyframes + .closing 규칙', () => {
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
+  assert.match(css, /@keyframes\s+slideDown\b/, '닫기 슬라이드 keyframe');
+  assert.match(css, /@keyframes\s+fadeOut\b/, '오버레이 페이드아웃 keyframe');
+  assert.match(css, /\.sheet\.closing\b/, '시트 닫기 규칙');
+  assert.match(css, /\.manual-input-sheet\.closing\b/, '입력 시트 닫기 규칙');
+  assert.match(css, /\.sheet-overlay\.closing\b/, '오버레이 닫기 규칙');
+  // 닫히는 동안: 시트 버튼은 비활성(취소 후 재실행 사고 방지)
+  const sheetClosing = css.match(/\.sheet\.closing[^}]*\}/);
+  assert.ok(sheetClosing && /pointer-events:\s*none/.test(sheetClosing[0]), '닫기 중 시트 버튼 차단(pointer-events:none)');
+  // 오버레이는 계속 뒤 화면을 막아야 함 → none이면 탭이 통과되므로 금지
+  const overlayClosing = css.match(/\.sheet-overlay\.closing[^}]*\}/);
+  assert.ok(overlayClosing && !/pointer-events:\s*none/.test(overlayClosing[0]), '닫기 중 오버레이는 통과 방지(pointer-events:none 금지)');
+});
+
+test('묶음6-C② 닫기 슬라이드 — 핵심 시트 4종 dismiss가 공용 헬퍼 경유', () => {
+  const app = loadApp();
+  assert.equal(typeof app.animateSheetCloseThen, 'function', 'animateSheetCloseThen 전역 헬퍼 존재');
+  const screens = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
+  const calls = (screens.match(/animateSheetCloseThen\(function/g) || []).length;
+  assert.ok(calls >= 4, '닫기 4종(상세시트·프로필·API키·초기화확인)이 헬퍼 사용 (현재 ' + calls + ')');
+});
+
+test('묶음6-C② 휴식 원형 링 + 종목 스와이프 슬라이드 — CSS/마크업 마커', () => {
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
+  assert.match(css, /\.rest-ring-fg\b/, '휴식 progress 링 클래스');
+  assert.match(css, /@keyframes\s+exSlide(Next|Prev)\b/, '종목 슬라이드 keyframe');
+  assert.match(css, /\.ex-slide-(next|prev)\b/, '종목 슬라이드 클래스');
+  const screens = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
+  assert.ok(screens.includes('rest-ring-fg'), '휴식 링 SVG 마크업');
+  assert.ok(screens.includes("getElementById('rest-ring-fg')"), '휴식 링이 부분 갱신 경로(시트 열림 중)에서도 갱신됨');
+  assert.ok(screens.includes('ex-slide-') || screens.includes("'ex-slide-'"), '종목 슬라이드 클래스 적용');
+});
