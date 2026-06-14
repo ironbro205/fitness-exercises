@@ -1588,6 +1588,7 @@ function finalizeSession() {
   advanceCycleIfWeekComplete();
 
   // 완료 화면용 데이터 저장
+  state._celebratePending = true; // 6-C① 축하 연출은 완료 첫 진입 1회만(평점 탭 재렌더 시 반복 방지)
   state.completedSession = {
     workoutId: newWorkout.id,
     sessionName: session.sessionName,
@@ -1789,7 +1790,7 @@ window.completeSet = function() {
   var exercise = state.activeSession.exercises[s.exerciseIdx];
   var set = exercise.sets[s.setIdx];
   set.completed = true;
-  
+
   // 1RM 자동 갱신 (워밍업 세트 제외)
   if (!set.isWarmup && set.weight && set.reps) {
     var updated = update1RM(exercise.name, set.weight, set.reps);
@@ -1814,8 +1815,12 @@ window.completeSet = function() {
   saveActiveSession();
   saveRestTimer();
 
+  // 6-C① 세트완료 pop: 영구 저장 안 되는 임시 state에만 표시(새로고침/복원 시 잔류·무한 반복 방지)
+  state._justCompletedSet = { ex: s.exerciseIdx, set: s.setIdx };
   render();
   startRestTimerTick();
+  // pop은 1회만: 잠시 후 임시 플래그 해제(다음 tick 재렌더에서 반복 안 되도록)
+  setTimeout(function() { state._justCompletedSet = null; }, 600);
 };
 
 // 휴식 스킵
@@ -1991,7 +1996,8 @@ function renderWorkoutSession() {
     } else {
       valueClass += ' pending';
     }
-    
+    if (state._justCompletedSet && state._justCompletedSet.ex === session.currentExerciseIdx && state._justCompletedSet.set === idx) setClass += ' just-completed'; // 6-C① 세트완료 pop (임시 state 기반)
+
     var labelText = set.isWarmup ? 'W' : String(idx - (exercise.sets.findIndex(function(s) { return !s.isWarmup; }) >= 0 ? exercise.sets.findIndex(function(s) { return !s.isWarmup; }) : 0));
     // 더 단순한 라벨링: warmup은 W, 본 세트는 1, 2, 3...
     var setNum = 0;
@@ -2373,17 +2379,38 @@ function renderWorkoutComplete() {
         (hasPR ? '<span class="pr-tag">PR</span>' : '') +
       '</div>';
   }
-  return '' +
+  // 6-C① 축하 연출은 완료 첫 진입 1회만 (평점 탭 등 재렌더 시 컨페티/팝 반복 방지)
+  var celebrate = !!state._celebratePending;
+  state._celebratePending = false;
+
+  // 컨페티(색종이) — reduced-motion에서는 CSS가 숨김
+  var confettiHtml = '';
+  if (celebrate) {
+    var confettiColors = ['#00d4ff', '#fbbf24', '#34d399', '#f472b6', '#a78bfa'];
+    confettiHtml = '<div class="confetti-layer" aria-hidden="true">';
+    for (var ci = 0; ci < 16; ci++) {
+      confettiHtml +=
+        '<span class="confetti-piece" style="left:' + Math.round(Math.random() * 100) + '%;' +
+        ' background:' + confettiColors[ci % confettiColors.length] + ';' +
+        ' animation-delay:' + (Math.random() * 0.5).toFixed(2) + 's;' +
+        ' animation-duration:' + (1.2 + Math.random() * 0.8).toFixed(2) + 's;"></span>';
+    }
+    confettiHtml += '</div>';
+  }
+  var completeIconClass = celebrate ? 'complete-icon pop-in' : 'complete-icon';
+  var completeListClass = celebrate ? 'px-5 pb-32 complete-celebrate-list' : 'px-5 pb-32';
+
+  return confettiHtml +
     // 축하 헤더
     '<div class="px-5 pt-12 pb-5 text-center">' +
-      '<div class="complete-icon">' + icon('check', 28) + '</div>' +
+      '<div class="' + completeIconClass + '">' + icon('check', 28) + '</div>' +
       '<p class="text-xs uppercase accent font-mono mb-2" style="letter-spacing: 0.3em;">WORKOUT COMPLETE</p>' +
       '<h1 class="font-bebas text-5xl">완료!</h1>' +
       '<p class="text-sm text-stone-400 mt-2">' + cs.sessionName + ' · ' + dateStr + '</p>' +
     '</div>' +
     
-    '<div class="px-5 pb-32">' +
-      
+    '<div class="' + completeListClass + '">' +
+
       // 핵심 수치
       '<div class="grid grid-cols-3 gap-2 mb-4">' +
         '<div class="stat-card">' +
@@ -4973,7 +5000,11 @@ function render() {
   // 전체 초기화 확인 오버레이
   var resetOverlay = state.resetConfirming ? renderResetConfirm() : '';
   
-  document.getElementById('app').innerHTML = content + renderTabbar() + detailSheet + resetOverlay;
+  // 6-C① 탭이 바뀔 때만 진입 애니메이션 래퍼(같은 탭 내 재렌더는 그대로 — 반복 튐 방지)
+  var tabChanged = state._lastRenderedTab !== state.currentTab;
+  state._lastRenderedTab = state.currentTab;
+  var wrappedContent = tabChanged ? ('<div class="screen-enter">' + content + '</div>') : content;
+  document.getElementById('app').innerHTML = wrappedContent + renderTabbar() + detailSheet + resetOverlay;
   window.scrollTo(0, 0);
 }
 

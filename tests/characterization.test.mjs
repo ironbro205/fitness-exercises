@@ -406,3 +406,48 @@ test('묶음6-B 코치 온라인점 — 점/규칙은 유지하되 발광(box-sh
   assert.ok(screens.includes('coach-online-dot'), '온라인점 마크업 유지');
   assert.ok(screens.includes('온라인'), '상태 텍스트(온라인) 유지');
 });
+
+// ── 묶음6-C① : 진입/피드백 애니메이션 (화면 떠오르기·세트완료 pop·완료축하 컨페티 + reduced-motion) ──
+// CSS는 render 하네스가 실행하지 않으므로 파일 텍스트로 특성화. (#app.innerHTML은 스텁이라 검사 불가 → CSS 규칙으로 가드)
+test('묶음6-C① 애니메이션 CSS — 진입/팝/축하/컨페티 keyframes·규칙 정의', () => {
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
+  assert.match(css, /@keyframes\s+screenRise\b/, '화면 진입 keyframe');
+  assert.match(css, /\.screen-enter\s*>\s*\*/, '화면 진입은 자식 요소에만 적용(고정요소 보호)');
+  assert.match(css, /@keyframes\s+popBounce\b/, '세트완료 pop keyframe');
+  assert.match(css, /\.set-row\.just-completed\b/, '세트완료 pop 적용 규칙');
+  assert.match(css, /@keyframes\s+popIn\b/, '완료 아이콘 등장 keyframe');
+  assert.match(css, /\.complete-icon\.pop-in\b/, '완료 아이콘 pop-in 규칙');
+  assert.match(css, /@keyframes\s+cardRise\b/, '완료 카드 스태거 keyframe');
+  assert.match(css, /\.complete-celebrate-list\s*>\s*\*/, '완료 카드 스태거 규칙');
+  assert.match(css, /@keyframes\s+confettiFall\b/, '컨페티 낙하 keyframe');
+  assert.match(css, /\.confetti-piece\b/, '컨페티 조각 규칙');
+});
+
+test('묶음6-C① 접근성 — prefers-reduced-motion에서 동작 끔 + 컨페티 숨김', () => {
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
+  const m = css.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?\n\})/);
+  assert.ok(m, 'prefers-reduced-motion 미디어 블록 존재');
+  assert.match(m[1], /animation-duration:\s*0\.0*1m?s\s*!important/i, '애니메이션 사실상 제거');
+  assert.match(m[1], /confetti-layer[\s\S]*display:\s*none/i, '컨페티는 reduced-motion에서 숨김');
+});
+
+test('묶음6-C① renderWorkoutComplete — 축하 연출은 첫 진입 1회만(평점 재렌더 시 반복 안 함)', () => {
+  const fresh = loadApp();
+  fresh.state.completedSession = {
+    date: new Date('2026-06-14T09:00:00'),
+    newPRs: [],
+    exercises: Array.from({ length: 5 }, (_, i) => ({ name: '종목' + (i + 1), reps: [8, 8], maxWeight: 50 + i })),
+    duration: 40, sessionName: 'PUSH', exerciseCount: 5, setCount: 12, rpe: 0, condition: 0,
+  };
+  // 완료 첫 진입(축하 대기 플래그 ON)
+  fresh.state._celebratePending = true;
+  const first = fresh.renderWorkoutComplete();
+  assert.ok(first.includes('complete-icon pop-in'), '첫 진입: 아이콘 pop-in');
+  assert.ok(first.includes('complete-celebrate-list'), '첫 진입: 카드 스태거');
+  assert.ok(first.includes('confetti-layer') && first.includes('confetti-piece'), '첫 진입: 컨페티');
+  // 평점 탭 등으로 재렌더 → 축하 연출 빠짐(반복 방지)
+  const second = fresh.renderWorkoutComplete();
+  assert.ok(!second.includes('confetti-piece'), '재렌더: 컨페티 없음');
+  assert.ok(!second.includes('pop-in'), '재렌더: 아이콘 pop-in 없음');
+  assert.ok(!second.includes('complete-celebrate-list'), '재렌더: 카드 스태거 없음');
+});
