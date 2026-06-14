@@ -287,7 +287,10 @@ var state = {
   // 기록 항목 상세 시트 (삭제용)
   itemDetailSheet: null,
   itemDeleteConfirming: false,  // 2단계 삭제 확인
-  resetConfirming: false  // 전체 초기화 2단계 확인
+  resetConfirming: false,  // 전체 초기화 2단계 확인
+  // 뒤로가기 (묶음6-D) — 휘발(저장 안 함). 새로고침 시 history가 날아가므로 메모리에만 둔다.
+  _navTabStack: ['home'],  // 탭 방문 순서(직전 탭으로 되돌리기용)
+  _navExitArmed: false     // 루트에서 '한 번 더 누르면 종료' 준비 상태
 };
 
 function scrollRoutineChatToBottom() {

@@ -1,5 +1,5 @@
 {
-  "functionCount": 192,
+  "functionCount": 194,
   "objectCount": 21,
   "functions": [
     "addBodyRecord",
@@ -88,6 +88,7 @@
     "getRecentVolumeByPart",
     "getRecommendedSession",
     "getTodayStr",
+    "getTopLayer",
     "getVolumeDiagnosis",
     "getWeekId",
     "goHome",
@@ -105,6 +106,7 @@
     "maskApiKey",
     "mergeCoachMemory",
     "modifyRoutineWithAI",
+    "navBack",
     "normalizeFood",
     "normalizeMemoryKey",
     "openApiKeyModal",

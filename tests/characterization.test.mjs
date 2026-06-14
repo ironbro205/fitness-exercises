@@ -486,3 +486,157 @@ test('묶음6-C② 휴식 원형 링 + 종목 스와이프 슬라이드 — CSS/
   assert.ok(screens.includes("getElementById('rest-ring-fg')"), '휴식 링이 부분 갱신 경로(시트 열림 중)에서도 갱신됨');
   assert.ok(screens.includes('ex-slide-') || screens.includes("'ex-slide-'"), '종목 슬라이드 클래스 적용');
 });
+
+// ═══════════════════════════════════════════════
+// 묶음6-D — 뒤로가기(자연스러운 단계 되돌리기)
+//   폰/브라우저 뒤로가기로 "지금 떠 있는 가장 위 단계부터 한 겹씩" 닫는다.
+//   getTopLayer()는 현재 state에서 가장 위 레이어를 판별(순수 함수) → 테스트 핵심.
+// ═══════════════════════════════════════════════
+test('묶음6-D getTopLayer — 현재 떠 있는 가장 위 레이어를 판별(우선순위)', () => {
+  const a = loadApp();
+  const s = a.state;
+  assert.equal(typeof a.getTopLayer, 'function', 'getTopLayer 전역 함수 존재');
+
+  // 홈 + 아무것도 안 열림 → root
+  s.currentTab = 'home';
+  assert.equal(a.getTopLayer(), 'root');
+
+  // 비홈 탭 → tab
+  s.currentTab = 'stats';
+  assert.equal(a.getTopLayer(), 'tab');
+
+  // 운동 탭 + 마법사 단계 (STEP1=탭 레벨, 2/3=마법사 한 겹)
+  s.currentTab = 'workout'; s.workoutWizardStep = 1;
+  assert.equal(a.getTopLayer(), 'tab', 'STEP1은 운동 탭 자체(탭 레벨)');
+  s.workoutWizardStep = 2;
+  assert.equal(a.getTopLayer(), 'wizard2');
+  s.workoutWizardStep = 3;
+  assert.equal(a.getTopLayer(), 'wizard3');
+
+  // 진행 중 세션 (마법사보다 위)
+  s.workoutWizardStep = 1;
+  s.activeSession = { exercises: [], startTime: 1, currentExerciseIdx: 0 };
+  assert.equal(a.getTopLayer(), 'session');
+  // 세션 위 세트 편집 시트 → setEditor가 위
+  s.editingSet = { exerciseIdx: 0, setIdx: 0 };
+  assert.equal(a.getTopLayer(), 'setEditor');
+  s.editingSet = null;
+  // 세션 위 종목 교체 시트 → exerciseSwap이 위
+  s.exerciseSwapOpen = true;
+  assert.equal(a.getTopLayer(), 'exerciseSwap');
+  s.exerciseSwapOpen = false;
+  s.activeSession = null;
+
+  // 완료 화면
+  s.completedSession = { sessionName: 'PUSH' };
+  assert.equal(a.getTopLayer(), 'completed');
+  s.completedSession = null;
+
+  // 전체화면 오버레이 6종
+  s.foodInputOpen = true;
+  assert.equal(a.getTopLayer(), 'foodInput');
+  // 음식입력 위 수동입력 모달 → manualInput이 위
+  s.manualInputMode = true;
+  assert.equal(a.getTopLayer(), 'manualInput');
+  s.manualInputMode = false; s.foodInputOpen = false;
+  s.coachChatOpen = true;
+  assert.equal(a.getTopLayer(), 'coachChat');
+  s.coachChatOpen = false;
+  s.oneRMListOpen = true;
+  assert.equal(a.getTopLayer(), 'oneRMList');
+  s.oneRMListOpen = false;
+
+  // 탭 위 시트/모달 4종
+  s.currentTab = 'stats';
+  s.itemDetailSheet = { type: 'workout', data: {} };
+  assert.equal(a.getTopLayer(), 'itemDetail');
+  s.itemDetailSheet = null;
+  s.currentTab = 'more';
+  s.apiKeyModalOpen = true;
+  assert.equal(a.getTopLayer(), 'apiKey');
+  s.apiKeyModalOpen = false;
+  s.profileEditModalOpen = true;
+  assert.equal(a.getTopLayer(), 'profileEdit');
+  s.profileEditModalOpen = false;
+  s.resetConfirming = true;
+  assert.equal(a.getTopLayer(), 'resetConfirm');
+  s.resetConfirming = false;
+});
+
+test('묶음6-D navBack — 위 레이어부터 한 겹씩 닫음(오버레이·마법사·완료·세션)', () => {
+  const a = loadApp();
+  const s = a.state;
+  assert.equal(typeof a.navBack, 'function', 'navBack 전역 함수 존재');
+
+  // 오버레이(코치채팅) → 뒤로 → 닫힘, 뒤 화면 유지
+  s.coachChatOpen = true;
+  a.navBack();
+  assert.equal(s.coachChatOpen, false, '코치채팅 닫힘');
+
+  // 마법사 STEP3 → STEP2 → STEP1 (한 단계씩)
+  s.currentTab = 'workout';
+  s.workoutWizardStep = 3; s.selectedBodyPart = 'push'; s.generatedRoutine = { exercises: [] };
+  a.navBack();
+  assert.equal(s.workoutWizardStep, 2, 'STEP3→STEP2');
+  a.navBack();
+  assert.equal(s.workoutWizardStep, 1, 'STEP2→STEP1');
+
+  // 완료 화면 → 뒤로 → 홈으로 닫힘
+  s.completedSession = { sessionName: 'PUSH' };
+  a.navBack();
+  assert.equal(s.completedSession, null, '완료화면 닫힘');
+  assert.equal(s.currentTab, 'home', '홈으로');
+
+  // 진행 세션(완료 본세트 없음) → 뒤로 → 확인(stub=동의) → 세션 폐기
+  s.activeSession = { exercises: [{ sets: [{ completed: false, isWarmup: false }] }], startTime: 1, currentExerciseIdx: 0 };
+  a.navBack();
+  assert.equal(s.activeSession, null, '세션 종료(확인창 동의 시)');
+});
+
+test('묶음6-D 탭 방문순서 — setTab이 스택 기록, navBack은 직전 탭으로', () => {
+  const a = loadApp();
+  const s = a.state;
+  assert.deepEqual(plain(s._navTabStack), ['home'], '부팅 시 홈만');
+
+  a.setTab('stats');
+  assert.deepEqual(plain(s._navTabStack), ['home', 'stats']);
+  a.setTab('more');
+  assert.deepEqual(plain(s._navTabStack), ['home', 'stats', 'more']);
+  assert.equal(s.currentTab, 'more');
+
+  // 뒤로 → 직전 탭(stats)
+  a.navBack();
+  assert.equal(s.currentTab, 'stats');
+  assert.deepEqual(plain(s._navTabStack), ['home', 'stats']);
+  // 뒤로 → 홈
+  a.navBack();
+  assert.equal(s.currentTab, 'home');
+
+  // 같은 탭 연속 진입은 중복 push 안 함
+  a.setTab('fuel'); a.setTab('fuel');
+  assert.deepEqual(plain(s._navTabStack), ['home', 'fuel']);
+  // 홈으로 가면 스택 리셋(루트 정규화)
+  a.setTab('home');
+  assert.deepEqual(plain(s._navTabStack), ['home']);
+});
+
+test('묶음6-D 루트 종료 — 첫 뒤로는 흡수(토스트), 두 번째는 종료 허용', () => {
+  const a = loadApp();
+  const s = a.state;
+  s.currentTab = 'home';
+  assert.equal(a.getTopLayer(), 'root');
+
+  // 첫 뒤로: 흡수(true 반환) + 종료준비 플래그, 화면 안 바뀜
+  assert.equal(a.navBack(), true, '첫 뒤로는 흡수');
+  assert.equal(s._navExitArmed, true, '종료 준비');
+  assert.equal(s.currentTab, 'home', '화면 그대로');
+  // 두 번째 뒤로(2초 내): 실제 종료 허용(false 반환)
+  assert.equal(a.navBack(), false, '두 번째 뒤로는 종료 허용');
+});
+
+test('묶음6-D 뒤로가기 배선 — popstate 리스너 + 부팅 트랩 + 핵심 함수', () => {
+  const screens = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
+  assert.match(screens, /addEventListener\(\s*['"]popstate['"]/, 'popstate 리스너 등록');
+  assert.match(screens, /history\.pushState\(\s*\{\s*nav:\s*['"]trap['"]/, '부팅/재설정 트랩 pushState');
+  assert.ok(screens.includes('function getTopLayer') && screens.includes('function navBack'), '뒤로가기 핵심 함수 정의');
+});
