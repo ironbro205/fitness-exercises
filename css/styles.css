@@ -1,4 +1,42 @@
 /* ═══════════════════════════════════════════════
+   DESIGN TOKENS — 색·폰트를 여기 한 곳에서 제어
+   (값은 기존과 동일. 색 하나 바꾸려면 이 블록만 수정)
+   ═══════════════════════════════════════════════ */
+:root {
+  /* 액센트 (청록) */
+  --accent: #00d4ff;        --accent-rgb: 0, 212, 255;
+  /* 배경 4단계 (깊음→밝음) */
+  --bg-0: #050810;          --bg-0-rgb: 5, 8, 16;
+  --bg-1: #0a1530;
+  --bg-2: #0f1525;
+  --bg-3: #1a2540;
+  --bg-4: #2a3550;          --bg-4-rgb: 42, 53, 80;
+  /* 텍스트 */
+  --text-muted: #6b7a99;    --muted-rgb: 107, 122, 153;
+  --text-dim: #4a5568;
+  --text-soft: #b0b8d0;
+  --text-faint: #8a99b8;
+  /* 상태색 */
+  --danger: #ef4444;        --danger-rgb: 239, 68, 68;
+  --warn: #fbbf24;          --warn-rgb: 251, 191, 36;
+  --success: #22c55e;       --success-rgb: 34, 197, 94;
+  --purple: #a78bfa;        --purple-rgb: 167, 139, 250;
+  /* 중립(스톤) */
+  --stone-200: #e7e5e4;
+  --stone-300: #d6d3d1;
+  --stone-400: #a8a29e;
+  --stone-500: #6b6661;
+  /* 오버레이용 흑/백 */
+  --white-rgb: 255, 255, 255;
+  --black-rgb: 0, 0, 0;
+  /* 폰트 — 한글은 Pretendard, 라틴/숫자는 기존 폰트 우선 + 한글 폴백 */
+  --font-body: 'Pretendard Variable', 'Pretendard', 'Space Grotesk', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-sans: 'Space Grotesk', 'Pretendard Variable', 'Pretendard', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Pretendard Variable', 'Pretendard', ui-monospace, monospace;
+  --font-bebas: 'Bebas Neue', 'Pretendard Variable', 'Pretendard', sans-serif;
+}
+
+/* ═══════════════════════════════════════════════
    RESET & BASE
    ═══════════════════════════════════════════════ */
 *, *::before, *::after {
@@ -8,9 +46,9 @@
   -webkit-tap-highlight-color: transparent;
 }
 html, body {
-  background: #050810;
+  background: var(--bg-0);
   color: white;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-body);
   min-height: 100vh;
   overscroll-behavior: none;
   font-size: 14px;
@@ -29,9 +67,9 @@ button {
 /* ═══════════════════════════════════════════════
    TYPOGRAPHY HELPERS
    ═══════════════════════════════════════════════ */
-.font-display { font-family: 'Space Grotesk', sans-serif; }
-.font-mono { font-family: 'JetBrains Mono', monospace; }
-.font-bebas { font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.05em; }
+.font-display { font-family: var(--font-sans); }
+.font-mono { font-family: var(--font-mono); }
+.font-bebas { font-family: var(--font-bebas); letter-spacing: 0.05em; }
 
 /* ═══════════════════════════════════════════════
    LAYOUT HELPERS
@@ -105,14 +143,14 @@ button {
 /* ═══════════════════════════════════════════════
    COMPONENT: COLORS & BACKGROUNDS
    ═══════════════════════════════════════════════ */
-.accent { color: #00d4ff; }
-.accent-bg { background: #00d4ff; }
-.text-stone-200 { color: #e7e5e4; }
-.text-stone-300 { color: #d6d3d1; }
-.text-stone-400 { color: #a8a29e; }
-.text-stone-500 { color: #6b7a99; }
-.text-stone-600 { color: #4a5568; }
-.bg-stone-800 { background: #1a2540; }
+.accent { color: var(--accent); }
+.accent-bg { background: var(--accent); }
+.text-stone-200 { color: var(--stone-200); }
+.text-stone-300 { color: var(--stone-300); }
+.text-stone-400 { color: var(--stone-400); }
+.text-stone-500 { color: var(--text-muted); }
+.text-stone-600 { color: var(--text-dim); }
+.bg-stone-800 { background: var(--bg-3); }
 
 /* ═══════════════════════════════════════════════
    COMPONENT: TEXT SIZES
@@ -135,7 +173,7 @@ button {
 .rounded-xl { border-radius: 14px; }
 .rounded-2xl { border-radius: 18px; }
 .rounded-3xl { border-radius: 24px; }
-.border-t { border-top: 1px solid #1a2540; }
+.border-t { border-top: 1px solid var(--bg-3); }
 
 /* ═══════════════════════════════════════════════
    STYLE HELPERS
@@ -149,14 +187,14 @@ button {
    COMPONENT: CARDS
    ═══════════════════════════════════════════════ */
 .card {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 24px;
   padding: 20px;
 }
 .card-accent {
-  background: linear-gradient(135deg, #0a1530 0%, #0f1525 100%);
-  border: 1px solid rgba(0, 212, 255, 0.2);
+  background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
   border-radius: 24px;
   padding: 20px;
   position: relative;
@@ -169,12 +207,12 @@ button {
   right: -30%;
   width: 60%;
   height: 200%;
-  background: radial-gradient(circle, rgba(0,212,255,0.08) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.08) 0%, transparent 70%);
   pointer-events: none;
 }
 .card-coach {
-  background: linear-gradient(135deg, rgba(0,212,255,0.08) 0%, rgba(0,212,255,0.02) 100%);
-  border: 1px solid rgba(0, 212, 255, 0.25);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.08) 0%, rgba(var(--accent-rgb), 0.02) 100%);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
   border-radius: 24px;
   padding: 18px;
 }
@@ -183,7 +221,7 @@ button {
    COMPONENT: PROGRESS BAR
    ═══════════════════════════════════════════════ */
 .progress-bg {
-  background: #1a2540;
+  background: var(--bg-3);
   border-radius: 9999px;
   overflow: hidden;
   height: 6px;
@@ -191,8 +229,8 @@ button {
 .progress-fill {
   height: 100%;
   border-radius: 9999px;
-  background: #00d4ff;
-  box-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
+  background: var(--accent);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.4);
   transition: width 0.5s ease;
 }
 
@@ -206,15 +244,15 @@ button {
   flex-shrink: 0;
 }
 .dot-passed {
-  background: #00d4ff;
-  box-shadow: 0 0 8px #00d4ff;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
 }
 .dot-pending {
-  background: #1a2540;
+  background: var(--bg-3);
 }
 .dot-ideal {
-  background: #00d4ff;
-  box-shadow: 0 0 12px #00d4ff, inset 0 0 0 2px white;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent), inset 0 0 0 2px white;
 }
 
 /* ═══════════════════════════════════════════════
@@ -224,8 +262,8 @@ button {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: rgba(0, 212, 255, 0.12);
-  border: 1px solid rgba(0, 212, 255, 0.4);
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -244,31 +282,31 @@ button {
   justify-content: center;
 }
 .day-box-empty {
-  background: #050810;
-  border: 1px solid #1a2540;
+  background: var(--bg-0);
+  border: 1px solid var(--bg-3);
 }
 .day-box-done {
-  background: rgba(0, 212, 255, 0.12);
-  border: 1px solid rgba(0, 212, 255, 0.4);
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
 }
 .day-box-today {
-  background: #050810;
-  border: 1px solid #00d4ff;
+  background: var(--bg-0);
+  border: 1px solid var(--accent);
 }
 .today-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #00d4ff;
-  box-shadow: 0 0 8px #00d4ff;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
 }
 
 /* ═══════════════════════════════════════════════
    COMPONENT: PR BADGE
    ═══════════════════════════════════════════════ */
 .pr-badge {
-  background: rgba(0, 212, 255, 0.08);
-  border: 1px solid rgba(0, 212, 255, 0.25);
+  background: rgba(var(--accent-rgb), 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
   border-radius: 14px;
   padding: 14px;
   display: flex;
@@ -280,8 +318,8 @@ button {
    COMPONENT: QUICK BUTTON
    ═══════════════════════════════════════════════ */
 .quick-btn {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 18px;
   padding: 14px 8px;
   transition: all 0.15s;
@@ -289,18 +327,18 @@ button {
   width: 100%;
 }
 .quick-btn:active {
-  background: #1a2540;
+  background: var(--bg-3);
   transform: scale(0.97);
 }
 .quick-btn-icon {
   width: 40px;
   height: 40px;
   border-radius: 12px;
-  background: rgba(0, 212, 255, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #00d4ff;
+  color: var(--accent);
   margin: 0 auto 8px;
 }
 
@@ -312,10 +350,10 @@ button {
   bottom: 0;
   left: 0;
   right: 0;
-  background: rgba(5, 8, 16, 0.95);
+  background: rgba(var(--bg-0-rgb), 0.95);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border-top: 1px solid #1a2540;
+  border-top: 1px solid var(--bg-3);
   padding: 10px 0 24px 0;
   z-index: 100;
   display: flex;
@@ -329,10 +367,10 @@ button {
   padding: 6px 0;
   cursor: pointer;
   transition: color 0.2s;
-  color: #4a5568;
+  color: var(--text-dim);
 }
 .tab.active {
-  color: #00d4ff;
+  color: var(--accent);
 }
 .tab svg {
   width: 22px;
@@ -341,7 +379,7 @@ button {
 }
 .tab span {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   letter-spacing: 0.05em;
 }
 
@@ -352,13 +390,13 @@ button {
   width: 80px;
   height: 80px;
   border-radius: 18px;
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0 auto 24px;
-  color: #4a5568;
+  color: var(--text-dim);
 }
 
 /* ═══════════════════════════════════════════════
@@ -374,8 +412,8 @@ button {
    COMPONENT: SESSION CARD (운동 메인)
    ═══════════════════════════════════════════════ */
 .session-card {
-  background: linear-gradient(135deg, #0a1530 0%, #0f1525 100%);
-  border: 1px solid rgba(0, 212, 255, 0.4);
+  background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   border-radius: 28px;
   padding: 24px;
   position: relative;
@@ -388,27 +426,27 @@ button {
   right: -10%;
   width: 50%;
   height: 140%;
-  background: radial-gradient(circle, rgba(0,212,255,0.12) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.12) 0%, transparent 70%);
   pointer-events: none;
 }
 .session-badge {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #00d4ff;
+  font-family: var(--font-mono);
+  color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   padding: 4px 8px;
   border-radius: 6px;
-  background: rgba(0, 212, 255, 0.12);
-  border: 1px solid rgba(0, 212, 255, 0.25);
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
 }
 .start-btn {
   width: 100%;
   padding: 16px;
   border-radius: 18px;
-  background: #00d4ff;
-  color: #050810;
-  font-family: 'Space Grotesk', sans-serif;
+  background: var(--accent);
+  color: var(--bg-0);
+  font-family: var(--font-sans);
   font-weight: 700;
   font-size: 15px;
   display: flex;
@@ -421,7 +459,7 @@ button {
 }
 .start-btn:active {
   transform: scale(0.98);
-  box-shadow: 0 0 30px rgba(0, 212, 255, 0.5);
+  box-shadow: 0 0 30px rgba(var(--accent-rgb), 0.5);
 }
 
 /* ═══════════════════════════════════════════════
@@ -437,14 +475,14 @@ button {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: #1a2540;
+  background: var(--bg-3);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #00d4ff;
+  font-family: var(--font-mono);
+  color: var(--accent);
   font-weight: 700;
 }
 
@@ -452,8 +490,8 @@ button {
    COMPONENT: OPTION CARD (다른 옵션)
    ═══════════════════════════════════════════════ */
 .option-card {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 18px;
   padding: 14px 8px;
   cursor: pointer;
@@ -462,7 +500,7 @@ button {
   width: 100%;
 }
 .option-card:active {
-  background: #1a2540;
+  background: var(--bg-3);
   transform: scale(0.97);
 }
 
@@ -474,14 +512,14 @@ button {
   align-items: center;
   justify-content: space-between;
   padding: 12px 0;
-  border-bottom: 1px solid #1a2540;
+  border-bottom: 1px solid var(--bg-3);
 }
 .history-row:last-child { border-bottom: none; }
 .history-bar {
   width: 4px;
   height: 32px;
   border-radius: 2px;
-  background: #00d4ff;
+  background: var(--accent);
   flex-shrink: 0;
 }
 
@@ -496,13 +534,13 @@ button {
 }
 .stat-item p:first-child {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
   text-transform: uppercase;
   margin-bottom: 4px;
 }
 .stat-item .stat-value {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: var(--font-bebas);
   font-size: 22px;
   letter-spacing: 0.05em;
 }
@@ -518,14 +556,14 @@ button {
 }
 .section-header p:first-child {
   font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
 
 /* SVG fill 보정 (start-btn 안의 아이콘) */
-.start-btn svg { stroke: #050810; fill: #050810; }
+.start-btn svg { stroke: var(--bg-0); fill: var(--bg-0); }
 
 /* ═══════════════════════════════════════════════
    추가 폰트/색 헬퍼
@@ -541,8 +579,8 @@ button {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -550,22 +588,22 @@ button {
   color: white;
 }
 .session-progress {
-  background: #1a2540;
+  background: var(--bg-3);
   border-radius: 9999px;
   overflow: hidden;
   height: 4px;
 }
 .session-progress-fill {
   height: 100%;
-  background: #00d4ff;
-  box-shadow: 0 0 8px rgba(0, 212, 255, 0.4);
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
   transition: width 0.3s ease;
 }
 
 /* 세트 행 */
 .set-row {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 14px;
   padding: 14px 16px;
   display: flex;
@@ -576,41 +614,41 @@ button {
 }
 .set-row:active { transform: scale(0.99); }
 .set-row.completed {
-  background: rgba(0, 212, 255, 0.06);
-  border-color: rgba(0, 212, 255, 0.25);
+  background: rgba(var(--accent-rgb), 0.06);
+  border-color: rgba(var(--accent-rgb), 0.25);
 }
 .set-row.active {
-  border-color: #00d4ff;
-  background: #0a1530;
+  border-color: var(--accent);
+  background: var(--bg-1);
 }
 .set-row.warmup {
-  background: rgba(42, 53, 80, 0.4);
-  border-color: #2a3550;
+  background: rgba(var(--bg-4-rgb), 0.4);
+  border-color: var(--bg-4);
 }
 
 .set-label {
   width: 30px;
   height: 30px;
   border-radius: 10px;
-  background: #1a2540;
-  color: #6b7a99;
+  background: var(--bg-3);
+  color: var(--text-muted);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 700;
   flex-shrink: 0;
 }
-.set-label.warmup-label { background: #2a3550; color: #8a99b8; }
+.set-label.warmup-label { background: var(--bg-4); color: var(--text-faint); }
 .set-label.done {
-  background: #00d4ff;
-  color: #050810;
+  background: var(--accent);
+  color: var(--bg-0);
 }
 .set-label.active-label {
-  background: rgba(0, 212, 255, 0.12);
-  color: #00d4ff;
-  border: 1px solid #00d4ff;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  border: 1px solid var(--accent);
 }
 
 .set-info-grid {
@@ -621,25 +659,25 @@ button {
 }
 .set-info-label {
   font-size: 9px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
   text-transform: uppercase;
 }
 .set-info-value {
   font-size: 14px;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--font-sans);
   font-weight: 700;
-  color: #d6d3d1;
+  color: var(--stone-300);
 }
 .set-info-value.done { color: white; }
-.set-info-value.active { color: #00d4ff; }
-.set-info-value.pending { color: #4a5568; }
+.set-info-value.active { color: var(--accent); }
+.set-info-value.pending { color: var(--text-dim); }
 
 .set-status-pill {
   font-size: 9px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #00d4ff;
-  background: rgba(0, 212, 255, 0.15);
+  font-family: var(--font-mono);
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.15);
   padding: 4px 8px;
   border-radius: 6px;
   text-transform: uppercase;
@@ -653,12 +691,12 @@ button {
   left: 0;
   right: 0;
   padding: 16px 20px 12px;
-  background: linear-gradient(to top, #050810 80%, transparent);
+  background: linear-gradient(to top, var(--bg-0) 80%, transparent);
   z-index: 99;
 }
 .rest-timer {
-  background: #0a1530;
-  border: 1px solid rgba(0, 212, 255, 0.4);
+  background: var(--bg-1);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   border-radius: 18px;
   padding: 14px 16px;
   display: flex;
@@ -669,19 +707,19 @@ button {
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  background: rgba(0, 212, 255, 0.12);
-  border: 1px solid rgba(0, 212, 255, 0.4);
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #00d4ff;
+  color: var(--accent);
 }
 .rest-skip-btn {
   padding: 8px 12px;
   border-radius: 10px;
-  background: #1a2540;
+  background: var(--bg-3);
   color: white;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   cursor: pointer;
   font-weight: 500;
@@ -689,9 +727,9 @@ button {
 .rest-done-btn {
   padding: 8px 14px;
   border-radius: 10px;
-  background: #00d4ff;
-  color: #050810;
-  font-family: 'Space Grotesk', sans-serif;
+  background: var(--accent);
+  color: var(--bg-0);
+  font-family: var(--font-sans);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -705,7 +743,7 @@ button {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(var(--black-rgb), 0.7);
   z-index: 200;
   display: flex;
   align-items: flex-end;
@@ -717,11 +755,11 @@ button {
 }
 .sheet {
   width: 100%;
-  background: #0f1525;
+  background: var(--bg-2);
   border-top-left-radius: 28px;
   border-top-right-radius: 28px;
   padding: 16px 20px 32px;
-  border-top: 1px solid #1a2540;
+  border-top: 1px solid var(--bg-3);
   animation: slideUp 0.25s ease-out;
   max-height: 90vh;
   overflow-y: auto;
@@ -733,22 +771,22 @@ button {
 .sheet-handle {
   width: 40px;
   height: 4px;
-  background: #2a3550;
+  background: var(--bg-4);
   border-radius: 9999px;
   margin: 0 auto 16px;
 }
 
 /* 큰 숫자 입력 */
 .number-display {
-  background: #050810;
-  border: 1px solid #1a2540;
+  background: var(--bg-0);
+  border: 1px solid var(--bg-3);
   border-radius: 16px;
   padding: 20px;
   text-align: center;
   margin-bottom: 8px;
 }
 .number-display p {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: var(--font-bebas);
   font-size: 52px;
   letter-spacing: 0.05em;
 }
@@ -758,7 +796,7 @@ button {
   border: none;
   outline: none;
   color: inherit;
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: var(--font-bebas);
   font-size: 52px;
   letter-spacing: 0.05em;
   text-align: center;
@@ -778,10 +816,10 @@ button {
   gap: 8px;
 }
 .adj-btn {
-  background: #1a2540;
+  background: var(--bg-3);
   border-radius: 12px;
   padding: 12px 0;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 14px;
   color: white;
   border: none;
@@ -790,13 +828,13 @@ button {
   transition: all 0.1s;
 }
 .adj-btn:active {
-  background: #2a3550;
+  background: var(--bg-4);
   transform: scale(0.96);
 }
 .adj-btn.accent-btn {
-  background: rgba(0, 212, 255, 0.15);
-  color: #00d4ff;
-  border: 1px solid rgba(0, 212, 255, 0.4);
+  background: rgba(var(--accent-rgb), 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
 }
 
 /* 워밍업 토글 */
@@ -805,7 +843,7 @@ button {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  background: #050810;
+  background: var(--bg-0);
   border-radius: 12px;
   margin-bottom: 20px;
 }
@@ -813,12 +851,12 @@ button {
   position: relative;
   width: 44px;
   height: 24px;
-  background: #1a2540;
+  background: var(--bg-3);
   border-radius: 9999px;
   cursor: pointer;
   transition: background 0.2s;
 }
-.toggle-switch.on { background: #00d4ff; }
+.toggle-switch.on { background: var(--accent); }
 .toggle-knob {
   position: absolute;
   top: 2px;
@@ -831,7 +869,7 @@ button {
 }
 .toggle-switch.on .toggle-knob {
   transform: translateX(20px);
-  background: #050810;
+  background: var(--bg-0);
 }
 
 /* 시트 완료 버튼 */
@@ -839,9 +877,9 @@ button {
   width: 100%;
   padding: 16px;
   border-radius: 18px;
-  background: #00d4ff;
-  color: #050810;
-  font-family: 'Space Grotesk', sans-serif;
+  background: var(--accent);
+  color: var(--bg-0);
+  font-family: var(--font-sans);
   font-weight: 700;
   font-size: 15px;
   border: none;
@@ -855,10 +893,10 @@ button {
   width: 100%;
   padding: 14px;
   border-radius: 14px;
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  font-family: 'Space Grotesk', sans-serif;
+  background: rgba(var(--danger-rgb), 0.1);
+  color: var(--danger);
+  border: 1px solid rgba(var(--danger-rgb), 0.3);
+  font-family: var(--font-sans);
   font-weight: 700;
   font-size: 14px;
   cursor: pointer;
@@ -871,18 +909,18 @@ button {
 }
 .sheet-delete-btn:active { transform: scale(0.98); }
 .sheet-delete-btn:hover {
-  background: rgba(239, 68, 68, 0.18);
-  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(var(--danger-rgb), 0.18);
+  border-color: rgba(var(--danger-rgb), 0.5);
 }
 
 /* 삭제 확인 (2단계) */
 .sheet-cancel-btn {
   padding: 14px;
   border-radius: 14px;
-  background: #0f1525;
-  color: #b0b8d0;
-  border: 1px solid #1a2540;
-  font-family: 'Space Grotesk', sans-serif;
+  background: var(--bg-2);
+  color: var(--text-soft);
+  border: 1px solid var(--bg-3);
+  font-family: var(--font-sans);
   font-weight: 700;
   font-size: 14px;
   cursor: pointer;
@@ -892,10 +930,10 @@ button {
 .sheet-delete-btn-confirm {
   padding: 14px;
   border-radius: 14px;
-  background: #ef4444;
+  background: var(--danger);
   color: white;
   border: none;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--font-sans);
   font-weight: 700;
   font-size: 14px;
   cursor: pointer;
@@ -903,14 +941,14 @@ button {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+  box-shadow: 0 4px 16px rgba(var(--danger-rgb), 0.4);
 }
 .sheet-delete-btn-confirm:active { transform: scale(0.98); }
 
 /* 상세 시트 전용 통계 카드 (4칼럼 - 작게) */
 .stat-sheet-card {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 10px;
   padding: 8px 4px;
   text-align: center;
@@ -919,8 +957,8 @@ button {
 }
 .stat-sheet-label {
   font-size: 9px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: 3px;
@@ -929,7 +967,7 @@ button {
   text-overflow: ellipsis;
 }
 .stat-sheet-value {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: var(--font-bebas);
   font-size: 17px;
   color: white;
   letter-spacing: 0;
@@ -938,11 +976,11 @@ button {
   text-overflow: ellipsis;
   line-height: 1.1;
 }
-.stat-sheet-value.accent { color: #00d4ff; }
+.stat-sheet-value.accent { color: var(--accent); }
 .stat-sheet-unit {
   font-size: 8px;
-  color: #6b7a99;
-  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
   margin-left: 1px;
 }
 
@@ -958,10 +996,10 @@ button {
   margin: 2px -4px;
 }
 .food-item-row:active {
-  background: rgba(0, 212, 255, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
 }
 .food-item-row:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(var(--white-rgb), 0.02);
 }
 
 /* 운동 기록 행 (클릭 가능) */
@@ -974,21 +1012,21 @@ button {
   cursor: pointer;
   transition: all 0.15s;
   margin-bottom: 4px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(var(--white-rgb), 0.02);
 }
 .workout-history-row:active {
-  background: rgba(0, 212, 255, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
   transform: scale(0.99);
 }
 .workout-history-row:hover {
-  background: rgba(0, 212, 255, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
 }
 .workout-history-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #00d4ff;
-  box-shadow: 0 0 6px rgba(0, 212, 255, 0.5);
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.5);
 }
 
 .input-group { margin-bottom: 16px; }
@@ -1000,16 +1038,16 @@ button {
 }
 .input-label p {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: #6b7a99;
+  color: var(--text-muted);
 }
 
 /* 종목 정보 카드 */
 .exercise-info-card {
-  background: linear-gradient(135deg, #0a1530 0%, #0f1525 100%);
-  border: 1px solid rgba(0, 212, 255, 0.25);
+  background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
   border-radius: 18px;
   padding: 18px;
   margin-bottom: 12px;
@@ -1017,8 +1055,8 @@ button {
 
 /* 1RM 카드 */
 .rm-card {
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.06) 0%, rgba(251, 191, 36, 0.01) 100%);
-  border: 1px solid rgba(251, 191, 36, 0.25);
+  background: linear-gradient(135deg, rgba(var(--warn-rgb), 0.06) 0%, rgba(var(--warn-rgb), 0.01) 100%);
+  border: 1px solid rgba(var(--warn-rgb), 0.25);
   border-radius: 14px;
   padding: 14px 16px;
   margin-bottom: 12px;
@@ -1026,8 +1064,8 @@ button {
 
 /* 이전 기록 */
 .prev-record {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 12px;
   padding: 12px 16px;
   display: flex;
@@ -1043,13 +1081,13 @@ button {
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: rgba(0, 212, 255, 0.12);
-  border: 1px solid rgba(0, 212, 255, 0.5);
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0 auto 16px;
-  color: #00d4ff;
+  color: var(--accent);
 }
 
 /* 컨디션 입력 */
@@ -1065,8 +1103,8 @@ button {
 }
 .condition-label {
   font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #a8a29e;
+  font-family: var(--font-mono);
+  color: var(--stone-400);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   margin-bottom: 4px;
@@ -1081,10 +1119,10 @@ button {
   grid-template-columns: repeat(5, 1fr);
 }
 .cond-btn {
-  background: #0f1525;
-  border: 1px solid #1a2540;
-  color: #a8a29e;
-  font-family: 'JetBrains Mono', monospace;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  color: var(--stone-400);
+  font-family: var(--font-mono);
   font-size: 14px;
   font-weight: 600;
   padding: 14px 0;
@@ -1103,53 +1141,53 @@ button {
   transform: scale(0.95);
 }
 .cond-btn.selected {
-  background: #00d4ff;
-  color: #050810;
-  border-color: #00d4ff;
-  box-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
+  background: var(--accent);
+  color: var(--bg-0);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.4);
 }
 .condition-hint {
   font-size: 10px;
-  color: #6b6661;
-  font-family: 'JetBrains Mono', monospace;
+  color: var(--stone-500);
+  font-family: var(--font-mono);
 }
 
 .stat-card {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 18px;
   padding: 16px 10px;
   text-align: center;
 }
 .stat-card-label {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
   text-transform: uppercase;
   margin-bottom: 4px;
 }
 .stat-card-value {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: var(--font-bebas);
   font-size: 30px;
   letter-spacing: 0.05em;
-  color: #00d4ff;
+  color: var(--accent);
 }
 .stat-card-unit {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
 }
 
 .pr-alert-icon {
   width: 40px;
   height: 40px;
   border-radius: 12px;
-  background: rgba(0, 212, 255, 0.15);
-  border: 1px solid rgba(0, 212, 255, 0.4);
+  background: rgba(var(--accent-rgb), 0.15);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #00d4ff;
+  color: var(--accent);
   flex-shrink: 0;
 }
 
@@ -1158,14 +1196,14 @@ button {
   align-items: center;
   justify-content: space-between;
   padding: 10px 0;
-  border-bottom: 1px solid #1a2540;
+  border-bottom: 1px solid var(--bg-3);
 }
 .exercise-summary-row:last-child { border-bottom: none; }
 .pr-tag {
   font-size: 9px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #00d4ff;
-  background: rgba(0, 212, 255, 0.15);
+  font-family: var(--font-mono);
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.15);
   padding: 3px 8px;
   border-radius: 6px;
 }
@@ -1174,7 +1212,7 @@ button {
   width: 100%;
   padding: 16px;
   border-radius: 18px;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--font-sans);
   font-weight: 700;
   font-size: 15px;
   border: none;
@@ -1183,12 +1221,12 @@ button {
 }
 .complete-action-btn:active { transform: scale(0.98); }
 .complete-primary {
-  background: #00d4ff;
-  color: #050810;
+  background: var(--accent);
+  color: var(--bg-0);
 }
 .complete-secondary {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   color: white;
 }
 
@@ -1213,7 +1251,7 @@ button {
   width: 100px;
   height: 100px;
   border-radius: 50%;
-  background: #0f1525;
+  background: var(--bg-2);
 }
 .donut-content {
   position: relative;
@@ -1221,26 +1259,26 @@ button {
   text-align: center;
 }
 .donut-content .donut-main {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: var(--font-bebas);
   font-size: 28px;
-  color: #00d4ff;
+  color: var(--accent);
   letter-spacing: 0.05em;
 }
 .donut-content .donut-sub {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
   text-transform: uppercase;
 }
 
 /* 매크로 미니 바 */
-.macro-bg { background: #1a2540; height: 3px; border-radius: 9999px; overflow: hidden; }
+.macro-bg { background: var(--bg-3); height: 3px; border-radius: 9999px; overflow: hidden; }
 .macro-fill { height: 100%; border-radius: 9999px; transition: width 0.5s ease; }
 
 /* 끼니 카드 */
 .meal-card {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 18px;
   padding: 14px 16px;
   cursor: pointer;
@@ -1248,29 +1286,29 @@ button {
 }
 .meal-card:active { transform: scale(0.99); }
 .meal-card.passed {
-  border-color: rgba(0, 212, 255, 0.25);
-  background: linear-gradient(135deg, #0a1530 0%, #0f1525 100%);
+  border-color: rgba(var(--accent-rgb), 0.25);
+  background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
 }
 .meal-card.empty {
   border-style: dashed;
-  border-color: #2a3550;
+  border-color: var(--bg-4);
 }
 
 .meal-status-pill {
   font-size: 9px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   padding: 3px 8px;
   border-radius: 6px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 .meal-status-pill.passed {
-  color: #00d4ff;
-  background: rgba(0, 212, 255, 0.15);
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.15);
 }
 .meal-status-pill.warning {
-  color: #fbbf24;
-  background: rgba(251, 191, 36, 0.15);
+  color: var(--warn);
+  background: rgba(var(--warn-rgb), 0.15);
 }
 
 /* FAB - 플로팅 입력 버튼 */
@@ -1281,20 +1319,20 @@ button {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: #00d4ff;
+  background: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 8px 30px rgba(0, 212, 255, 0.4);
+  box-shadow: 0 8px 30px rgba(var(--accent-rgb), 0.4);
   cursor: pointer;
   z-index: 50;
-  color: #050810;
+  color: var(--bg-0);
   border: none;
   transition: all 0.15s;
 }
 .fab:active {
   transform: scale(0.92);
-  box-shadow: 0 4px 20px rgba(0, 212, 255, 0.6);
+  box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.6);
 }
 
 /* ═══════════════════════════════════════════════
@@ -1304,12 +1342,12 @@ button {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: #050810;
+  background: var(--bg-0);
 }
 
 .food-input-header {
   padding: 48px 20px 16px;
-  border-bottom: 1px solid #0f1525;
+  border-bottom: 1px solid var(--bg-2);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1325,16 +1363,16 @@ button {
 }
 
 .chat-bot {
-  background: rgba(0, 212, 255, 0.06);
-  border: 1px solid rgba(0, 212, 255, 0.2);
+  background: rgba(var(--accent-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
   border-radius: 18px 18px 18px 4px;
   padding: 12px 16px;
   max-width: 85%;
   color: white;
 }
 .chat-user {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 18px 18px 4px 18px;
   padding: 12px 16px;
   max-width: 80%;
@@ -1343,7 +1381,7 @@ button {
 }
 
 .food-analysis-card {
-  background: #050810;
+  background: var(--bg-0);
   border-radius: 12px;
   padding: 12px;
   display: flex;
@@ -1352,8 +1390,8 @@ button {
   margin-bottom: 8px;
 }
 .food-analysis-card.not-found {
-  border: 1px dashed #2a3550;
-  background: rgba(251, 191, 36, 0.05);
+  border: 1px dashed var(--bg-4);
+  background: rgba(var(--warn-rgb), 0.05);
 }
 
 .meal-select-grid {
@@ -1365,18 +1403,18 @@ button {
 .meal-select-btn {
   padding: 10px;
   border-radius: 12px;
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   color: white;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--font-sans);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.15s;
 }
 .meal-select-btn:active {
-  background: #00d4ff;
-  color: #050810;
+  background: var(--accent);
+  color: var(--bg-0);
   transform: scale(0.97);
 }
 
@@ -1385,8 +1423,8 @@ button {
   bottom: 0;
   left: 0;
   right: 0;
-  background: #050810;
-  border-top: 1px solid #1a2540;
+  background: var(--bg-0);
+  border-top: 1px solid var(--bg-3);
   padding: 16px 20px 32px;
   z-index: 50;
 }
@@ -1399,26 +1437,26 @@ button {
   padding-bottom: 4px;
 }
 .preset-chip {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 9999px;
   padding: 8px 14px;
   font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #b0b8d0;
+  font-family: var(--font-mono);
+  color: var(--text-soft);
   white-space: nowrap;
   cursor: pointer;
   flex-shrink: 0;
   transition: all 0.15s;
 }
 .preset-chip:active {
-  background: rgba(0, 212, 255, 0.15);
-  border-color: #00d4ff;
+  background: rgba(var(--accent-rgb), 0.15);
+  border-color: var(--accent);
 }
 
 .chat-input-bar {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 20px;
   padding: 10px 14px;
   display: flex;
@@ -1435,15 +1473,15 @@ button {
   font-family: inherit;
 }
 .chat-input-bar input::placeholder {
-  color: #6b7a99;
+  color: var(--text-muted);
 }
 .chat-send-btn {
   flex-shrink: 0;
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #00d4ff;
-  color: #050810;
+  background: var(--accent);
+  color: var(--bg-0);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1451,8 +1489,8 @@ button {
   cursor: pointer;
 }
 .chat-send-btn:disabled {
-  background: #1a2540;
-  color: #6b7a99;
+  background: var(--bg-3);
+  color: var(--text-muted);
   cursor: not-allowed;
 }
 
@@ -1460,14 +1498,14 @@ button {
 .manual-input-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(var(--black-rgb), 0.7);
   z-index: 200;
   display: flex;
   align-items: flex-end;
 }
 .manual-input-sheet {
   width: 100%;
-  background: #0f1525;
+  background: var(--bg-2);
   border-top-left-radius: 28px;
   border-top-right-radius: 28px;
   padding: 16px 20px 32px;
@@ -1476,8 +1514,8 @@ button {
 
 .input-field {
   width: 100%;
-  background: #050810;
-  border: 1px solid #1a2540;
+  background: var(--bg-0);
+  border: 1px solid var(--bg-3);
   border-radius: 12px;
   padding: 14px 16px;
   color: white;
@@ -1486,15 +1524,15 @@ button {
   outline: none;
 }
 .input-field:focus {
-  border-color: #00d4ff;
+  border-color: var(--accent);
 }
 
 /* 로딩 스피너 */
 .loading-spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(0, 212, 255, 0.2);
-  border-top-color: #00d4ff;
+  border: 2px solid rgba(var(--accent-rgb), 0.2);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -1506,8 +1544,8 @@ button {
    COMPONENT: 더보기 화면
    ═══════════════════════════════════════════════ */
 .more-profile-card {
-  background: linear-gradient(135deg, #0a1530 0%, #0f1525 100%);
-  border: 1px solid rgba(0, 212, 255, 0.2);
+  background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
   border-radius: 24px;
   padding: 20px;
 }
@@ -1515,21 +1553,21 @@ button {
   width: 64px;
   height: 64px;
   border-radius: 18px;
-  background: rgba(0, 212, 255, 0.12);
-  border: 1px solid rgba(0, 212, 255, 0.4);
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: #00d4ff;
-  font-family: 'Bebas Neue', sans-serif;
+  color: var(--accent);
+  font-family: var(--font-bebas);
   font-size: 26px;
   letter-spacing: 0.05em;
 }
 
 .coach-chat-card {
-  background: linear-gradient(135deg, rgba(0,212,255,0.18) 0%, rgba(0,212,255,0.04) 100%);
-  border: 1px solid rgba(0, 212, 255, 0.5);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.18) 0%, rgba(var(--accent-rgb), 0.04) 100%);
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
   border-radius: 24px;
   padding: 18px;
   cursor: pointer;
@@ -1541,19 +1579,19 @@ button {
   width: 44px;
   height: 44px;
   border-radius: 14px;
-  background: #00d4ff;
+  background: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: #050810;
-  box-shadow: 0 4px 20px rgba(0, 212, 255, 0.3);
+  color: var(--bg-0);
+  box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.3);
 }
 
 .section-group {
-  background: #0f1525;
+  background: var(--bg-2);
   border-radius: 16px;
-  border: 1px solid #1a2540;
+  border: 1px solid var(--bg-3);
   overflow: hidden;
 }
 .menu-row {
@@ -1561,44 +1599,44 @@ button {
   align-items: center;
   gap: 14px;
   padding: 14px 16px;
-  border-bottom: 1px solid #1a2540;
+  border-bottom: 1px solid var(--bg-3);
   cursor: pointer;
   transition: background 0.15s;
 }
 .menu-row:last-child { border-bottom: none; }
-.menu-row:active { background: #1a2540; }
+.menu-row:active { background: var(--bg-3); }
 .menu-icon-sm {
   width: 38px;
   height: 38px;
   border-radius: 11px;
-  background: #1a2540;
+  background: var(--bg-3);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: #b0b8d0;
+  color: var(--text-soft);
 }
 .menu-icon-sm.accent-bg-soft {
-  background: rgba(0, 212, 255, 0.12);
-  border: 1px solid rgba(0, 212, 255, 0.4);
-  color: #00d4ff;
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
+  color: var(--accent);
 }
 .menu-icon-sm.danger-bg-soft {
-  background: rgba(239, 68, 68, 0.12);
-  color: #ef4444;
+  background: rgba(var(--danger-rgb), 0.12);
+  color: var(--danger);
 }
 .menu-row-content {
   flex: 1;
 }
 .menu-arrow {
-  color: #4a5568;
+  color: var(--text-dim);
   flex-shrink: 0;
 }
 
 .section-label {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   margin-bottom: 8px;
@@ -1609,12 +1647,12 @@ button {
   position: relative;
   width: 40px;
   height: 22px;
-  background: #1a2540;
+  background: var(--bg-3);
   border-radius: 9999px;
   transition: background 0.2s;
   flex-shrink: 0;
 }
-.toggle-switch-sm.on { background: #00d4ff; }
+.toggle-switch-sm.on { background: var(--accent); }
 .toggle-knob-sm {
   position: absolute;
   top: 2px;
@@ -1627,7 +1665,7 @@ button {
 }
 .toggle-switch-sm.on .toggle-knob-sm {
   transform: translateX(18px);
-  background: #050810;
+  background: var(--bg-0);
 }
 
 .app-footer {
@@ -1635,52 +1673,52 @@ button {
   padding: 24px 0;
 }
 .app-footer-brand {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: var(--font-bebas);
   font-size: 18px;
   letter-spacing: 0.05em;
-  color: #00d4ff;
+  color: var(--accent);
 }
 
 /* API 키 입력 모달 */
 .api-key-input {
   width: 100%;
-  background: #050810;
-  border: 1px solid #1a2540;
+  background: var(--bg-0);
+  border: 1px solid var(--bg-3);
   border-radius: 12px;
   padding: 14px 16px;
   color: white;
   font-size: 13px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   outline: none;
 }
-.api-key-input:focus { border-color: #00d4ff; }
+.api-key-input:focus { border-color: var(--accent); }
 
 .api-status-badge {
   padding: 6px 12px;
   border-radius: 9999px;
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 .api-status-badge.active {
-  background: rgba(0, 212, 255, 0.15);
-  color: #00d4ff;
-  border: 1px solid rgba(0, 212, 255, 0.4);
+  background: rgba(var(--accent-rgb), 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
 }
 .api-status-badge.inactive {
-  background: rgba(107, 122, 153, 0.12);
-  color: #6b7a99;
-  border: 1px solid #1a2540;
+  background: rgba(var(--muted-rgb), 0.12);
+  color: var(--text-muted);
+  border: 1px solid var(--bg-3);
 }
 
 .btn-danger {
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #ef4444;
+  background: rgba(var(--danger-rgb), 0.12);
+  border: 1px solid rgba(var(--danger-rgb), 0.3);
+  color: var(--danger);
   padding: 12px;
   border-radius: 12px;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--font-sans);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -1694,49 +1732,49 @@ button {
 .period-tab {
   padding: 8px 16px;
   border-radius: 9999px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.05em;
-  color: #6b7a99;
+  color: var(--text-muted);
   background: transparent;
   border: 1px solid transparent;
   cursor: pointer;
   transition: all 0.15s;
 }
 .period-tab.active {
-  background: rgba(0, 212, 255, 0.12);
-  color: #00d4ff;
-  border-color: rgba(0, 212, 255, 0.4);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.4);
 }
 
 .stat-mini-card {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 18px;
   padding: 16px;
 }
 .stat-mini-label {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   margin-bottom: 8px;
 }
 .stat-mini-value {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: var(--font-bebas);
   font-size: 30px;
   letter-spacing: 0.05em;
 }
 .stat-mini-unit {
   font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
 }
 .stat-mini-change {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   margin-top: 6px;
   display: flex;
   align-items: center;
@@ -1758,8 +1796,8 @@ button {
   justify-content: space-between;
   align-items: flex-end;
   font-size: 9px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #4a5568;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
 }
 .chart-x-labels {
   position: absolute;
@@ -1769,11 +1807,11 @@ button {
   display: flex;
   justify-content: space-between;
   font-size: 9px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #4a5568;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
 }
 .chart-grid-line {
-  border-top: 1px dashed #1a2540;
+  border-top: 1px dashed var(--bg-3);
   height: 1px;
 }
 
@@ -1792,33 +1830,33 @@ button {
   gap: 6px;
 }
 .bar-shape {
-  background: #1a2540;
+  background: var(--bg-3);
   border-radius: 4px 4px 0 0;
   width: 100%;
   transition: all 0.3s ease;
 }
 .bar-shape.active {
-  background: #00d4ff;
-  box-shadow: 0 -2px 12px rgba(0, 212, 255, 0.4);
+  background: var(--accent);
+  box-shadow: 0 -2px 12px rgba(var(--accent-rgb), 0.4);
 }
 .bar-shape.partial {
-  background: linear-gradient(to top, rgba(0, 212, 255, 0.5) 0%, rgba(0, 212, 255, 0.25) 100%);
+  background: linear-gradient(to top, rgba(var(--accent-rgb), 0.5) 0%, rgba(var(--accent-rgb), 0.25) 100%);
 }
 .bar-label {
   font-size: 9px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #4a5568;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
 }
 .bar-value {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #d6d3d1;
+  font-family: var(--font-mono);
+  color: var(--stone-300);
 }
 
 /* PR 히스토리 아이템 */
 .pr-history-item {
-  background: linear-gradient(135deg, #0a1530 0%, #0f1525 100%);
-  border: 1px solid rgba(0, 212, 255, 0.2);
+  background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
   border-radius: 14px;
   padding: 14px;
 }
@@ -1830,15 +1868,15 @@ button {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: #050810;
+  background: var(--bg-0);
 }
 .coach-header {
   padding: 48px 20px 16px;
-  border-bottom: 1px solid #0f1525;
+  border-bottom: 1px solid var(--bg-2);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #050810;
+  background: var(--bg-0);
   position: sticky;
   top: 0;
   z-index: 10;
@@ -1854,20 +1892,20 @@ button {
   width: 36px;
   height: 36px;
   border-radius: 12px;
-  background: rgba(0, 212, 255, 0.15);
-  border: 1px solid rgba(0, 212, 255, 0.5);
+  background: rgba(var(--accent-rgb), 0.15);
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #00d4ff;
+  color: var(--accent);
   flex-shrink: 0;
 }
 .coach-online-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #00d4ff;
-  box-shadow: 0 0 6px #00d4ff;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
   display: inline-block;
 }
 .coach-chat-area {
@@ -1879,8 +1917,8 @@ button {
   padding-bottom: 120px;
 }
 .coach-msg-bot {
-  background: rgba(0, 212, 255, 0.06);
-  border: 1px solid rgba(0, 212, 255, 0.2);
+  background: rgba(var(--accent-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
   border-radius: 18px 18px 18px 4px;
   padding: 14px 16px;
   max-width: 88%;
@@ -1892,23 +1930,23 @@ button {
   white-space: pre-wrap;
 }
 .coach-msg-bot .msg-content strong {
-  color: #00d4ff;
+  color: var(--accent);
   font-weight: 700;
 }
 .coach-msg-bot .msg-content em {
-  color: #a8a29e;
+  color: var(--stone-400);
   font-style: italic;
 }
 .coach-msg-bot .msg-content code {
-  background: #050810;
+  background: var(--bg-0);
   padding: 2px 6px;
   border-radius: 4px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 .coach-msg-user {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 18px 18px 4px 18px;
   padding: 12px 16px;
   max-width: 80%;
@@ -1923,34 +1961,34 @@ button {
   margin-bottom: 12px;
 }
 .coach-quick-chip {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 9999px;
   padding: 8px 14px;
   font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #b0b8d0;
+  font-family: var(--font-mono);
+  color: var(--text-soft);
   white-space: nowrap;
   cursor: pointer;
   flex-shrink: 0;
 }
 .coach-quick-chip:active {
-  background: rgba(0, 212, 255, 0.15);
-  border-color: #00d4ff;
+  background: rgba(var(--accent-rgb), 0.15);
+  border-color: var(--accent);
 }
 .coach-input-bottom {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  background: #050810;
-  border-top: 1px solid #1a2540;
+  background: var(--bg-0);
+  border-top: 1px solid var(--bg-3);
   padding: 16px 20px 32px;
   z-index: 50;
 }
 .coach-api-required {
-  background: rgba(251, 191, 36, 0.08);
-  border: 1px solid rgba(251, 191, 36, 0.3);
+  background: rgba(var(--warn-rgb), 0.08);
+  border: 1px solid rgba(var(--warn-rgb), 0.3);
   border-radius: 14px;
   padding: 14px;
   display: flex;
@@ -1963,8 +2001,8 @@ button {
    COMPONENT: AI 추천 카드
    ═══════════════════════════════════════════════ */
 .ai-rec-card {
-  background: linear-gradient(135deg, #0a1530 0%, #0f1525 100%);
-  border: 1px solid rgba(0, 212, 255, 0.4);
+  background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   border-radius: 28px;
   padding: 24px;
   position: relative;
@@ -1977,7 +2015,7 @@ button {
   right: -10%;
   width: 50%;
   height: 140%;
-  background: radial-gradient(circle, rgba(0,212,255,0.15) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.15) 0%, transparent 70%);
   pointer-events: none;
 }
 .ai-badge {
@@ -1985,31 +2023,31 @@ button {
   align-items: center;
   gap: 4px;
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #00d4ff;
+  font-family: var(--font-mono);
+  color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   padding: 4px 10px;
   border-radius: 9999px;
-  background: rgba(0, 212, 255, 0.15);
-  border: 1px solid rgba(0, 212, 255, 0.4);
+  background: rgba(var(--accent-rgb), 0.15);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
 }
 .ai-rec-reason {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--white-rgb), 0.03);
   border-radius: 12px;
   padding: 12px 14px;
   margin-top: 16px;
 }
 .ai-rec-caution {
-  background: rgba(251, 191, 36, 0.08);
-  border: 1px solid rgba(251, 191, 36, 0.2);
+  background: rgba(var(--warn-rgb), 0.08);
+  border: 1px solid rgba(var(--warn-rgb), 0.2);
   border-radius: 12px;
   padding: 10px 14px;
   margin-top: 10px;
 }
 .ai-rec-suggestion {
-  background: rgba(0, 212, 255, 0.06);
-  border: 1px solid rgba(0, 212, 255, 0.2);
+  background: rgba(var(--accent-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
   border-radius: 12px;
   padding: 10px 14px;
   margin-top: 10px;
@@ -2019,8 +2057,8 @@ button {
    COMPONENT: 주간 리뷰 + 정체기 카드
    ═══════════════════════════════════════════════ */
 .weekly-review-card {
-  background: linear-gradient(135deg, rgba(0, 212, 255, 0.12) 0%, rgba(0, 212, 255, 0.03) 100%);
-  border: 1px solid rgba(0, 212, 255, 0.5);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.12) 0%, rgba(var(--accent-rgb), 0.03) 100%);
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
   border-radius: 24px;
   padding: 20px;
   cursor: pointer;
@@ -2036,13 +2074,13 @@ button {
   right: -20%;
   width: 60%;
   height: 160%;
-  background: radial-gradient(circle, rgba(0,212,255,0.2) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.2) 0%, transparent 70%);
   pointer-events: none;
 }
 
 .plateau-card {
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.1) 0%, rgba(251, 191, 36, 0.02) 100%);
-  border: 1px solid rgba(251, 191, 36, 0.4);
+  background: linear-gradient(135deg, rgba(var(--warn-rgb), 0.1) 0%, rgba(var(--warn-rgb), 0.02) 100%);
+  border: 1px solid rgba(var(--warn-rgb), 0.4);
   border-radius: 24px;
   padding: 20px;
   cursor: pointer;
@@ -2054,23 +2092,23 @@ button {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: #050810;
+  background: var(--bg-0);
   padding-bottom: 40px;
 }
 .review-section {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 18px;
   padding: 16px 18px;
   margin-bottom: 12px;
 }
 .review-section.highlight {
-  background: rgba(0, 212, 255, 0.06);
-  border-color: rgba(0, 212, 255, 0.3);
+  background: rgba(var(--accent-rgb), 0.06);
+  border-color: rgba(var(--accent-rgb), 0.3);
 }
 .review-section.warning {
-  background: rgba(251, 191, 36, 0.06);
-  border-color: rgba(251, 191, 36, 0.3);
+  background: rgba(var(--warn-rgb), 0.06);
+  border-color: rgba(var(--warn-rgb), 0.3);
 }
 .review-bullet {
   display: flex;
@@ -2079,7 +2117,7 @@ button {
   margin-bottom: 8px;
   font-size: 13px;
   line-height: 1.55;
-  color: #d6d3d1;
+  color: var(--stone-300);
 }
 .review-bullet:last-child { margin-bottom: 0; }
 .review-bullet-dot {
@@ -2105,27 +2143,27 @@ button {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #1a2540;
+  background: var(--bg-3);
   transition: all 0.2s;
 }
 .step-dot.active {
-  background: #00d4ff;
-  box-shadow: 0 0 8px rgba(0, 212, 255, 0.6);
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.6);
 }
 .step-dot.completed {
-  background: rgba(0, 212, 255, 0.4);
+  background: rgba(var(--accent-rgb), 0.4);
 }
 .step-line {
   flex: 1;
   height: 1px;
-  background: #1a2540;
+  background: var(--bg-3);
 }
-.step-line.active { background: rgba(0, 212, 255, 0.4); }
+.step-line.active { background: rgba(var(--accent-rgb), 0.4); }
 
 /* 주간 기록 - 7일 막대그래프 */
 .weekly-bars-card {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 20px;
   padding: 18px 16px;
   margin-bottom: 20px;
@@ -2153,32 +2191,32 @@ button {
 }
 .day-bar-shape {
   width: 100%;
-  background: #1a2540;
+  background: var(--bg-3);
   border-radius: 4px 4px 0 0;
   transition: all 0.3s;
   position: relative;
   min-height: 6px;
 }
-.day-bar-shape.push { background: linear-gradient(to top, #00d4ff, #00d4ff80); }
-.day-bar-shape.pull { background: linear-gradient(to top, #a78bfa, #a78bfa80); }
-.day-bar-shape.legs { background: linear-gradient(to top, #fbbf24, #fbbf2480); }
-.day-bar-shape.free { background: linear-gradient(to top, #6b7a99, #6b7a9980); }
+.day-bar-shape.push { background: linear-gradient(to top, var(--accent), rgba(var(--accent-rgb), 0.5)); }
+.day-bar-shape.pull { background: linear-gradient(to top, var(--purple), rgba(var(--purple-rgb), 0.5)); }
+.day-bar-shape.legs { background: linear-gradient(to top, var(--warn), rgba(var(--warn-rgb), 0.5)); }
+.day-bar-shape.free { background: linear-gradient(to top, var(--text-muted), rgba(var(--muted-rgb), 0.5)); }
 .day-bar-shape.today {
-  outline: 2px solid #00d4ff;
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 .day-bar-label {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
   text-align: center;
 }
-.day-bar-label.today { color: #00d4ff; font-weight: 700; }
+.day-bar-label.today { color: var(--accent); font-weight: 700; }
 
 /* 부위 선택 카드 (큰 버튼) */
 .body-part-card {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 24px;
   padding: 22px 20px;
   margin-bottom: 12px;
@@ -2189,12 +2227,12 @@ button {
 }
 .body-part-card:active { transform: scale(0.985); }
 .body-part-card:hover {
-  border-color: rgba(0, 212, 255, 0.3);
+  border-color: rgba(var(--accent-rgb), 0.3);
 }
 
 .body-part-card.recommended {
-  background: linear-gradient(135deg, rgba(0, 212, 255, 0.15) 0%, rgba(0, 212, 255, 0.04) 100%);
-  border: 1px solid rgba(0, 212, 255, 0.5);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15) 0%, rgba(var(--accent-rgb), 0.04) 100%);
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
 }
 .body-part-card.recommended::before {
   content: '';
@@ -2203,7 +2241,7 @@ button {
   right: -10%;
   width: 50%;
   height: 160%;
-  background: radial-gradient(circle, rgba(0,212,255,0.18) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.18) 0%, transparent 70%);
   pointer-events: none;
 }
 
@@ -2220,12 +2258,12 @@ button {
 }
 
 .body-part-name {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: var(--font-bebas);
   font-size: 38px;
   letter-spacing: 0.04em;
   line-height: 1;
 }
-.body-part-name.recommended { color: #00d4ff; }
+.body-part-name.recommended { color: var(--accent); }
 
 .body-part-meta {
   display: flex;
@@ -2240,24 +2278,24 @@ button {
   align-items: flex-end;
 }
 .body-part-count-num {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: var(--font-bebas);
   font-size: 24px;
-  color: #b0b8d0;
+  color: var(--text-soft);
 }
-.body-part-count-num.zero { color: #fbbf24; }
-.body-part-count-num.done { color: #00d4ff; }
+.body-part-count-num.zero { color: var(--warn); }
+.body-part-count-num.done { color: var(--accent); }
 .body-part-count-label {
   font-size: 9px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
 
 .body-part-desc {
   font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
   position: relative;
 }
 
@@ -2265,13 +2303,13 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: rgba(0, 212, 255, 0.2);
-  border: 1px solid rgba(0, 212, 255, 0.5);
-  color: #00d4ff;
+  background: rgba(var(--accent-rgb), 0.2);
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
+  color: var(--accent);
   padding: 3px 9px;
   border-radius: 9999px;
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
   margin-bottom: 8px;
   position: relative;
@@ -2283,8 +2321,8 @@ button {
 
 /* AI 분석 헤더 카드 */
 .routine-analysis-card {
-  background: linear-gradient(135deg, rgba(0, 212, 255, 0.12) 0%, rgba(0, 212, 255, 0.02) 100%);
-  border: 1px solid rgba(0, 212, 255, 0.4);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.12) 0%, rgba(var(--accent-rgb), 0.02) 100%);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   border-radius: 24px;
   padding: 22px;
   margin-bottom: 16px;
@@ -2298,7 +2336,7 @@ button {
   right: -10%;
   width: 50%;
   height: 160%;
-  background: radial-gradient(circle, rgba(0,212,255,0.15) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.15) 0%, transparent 70%);
   pointer-events: none;
 }
 .routine-meta-grid {
@@ -2307,22 +2345,22 @@ button {
   gap: 8px;
   margin-top: 16px;
   padding-top: 16px;
-  border-top: 1px solid rgba(0, 212, 255, 0.2);
+  border-top: 1px solid rgba(var(--accent-rgb), 0.2);
   position: relative;
 }
 .routine-meta-item {
   text-align: center;
 }
 .routine-meta-num {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: var(--font-bebas);
   font-size: 24px;
   color: white;
   letter-spacing: 0.02em;
 }
 .routine-meta-label {
   font-size: 9px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   margin-top: 2px;
@@ -2330,8 +2368,8 @@ button {
 
 /* 루틴 종목 카드 */
 .routine-exercise {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 16px;
   padding: 14px 16px;
   margin-bottom: 8px;
@@ -2339,11 +2377,11 @@ button {
   transition: all 0.15s;
 }
 .routine-exercise:hover {
-  border-color: rgba(0, 212, 255, 0.3);
+  border-color: rgba(var(--accent-rgb), 0.3);
 }
 .routine-exercise.main {
-  border-color: rgba(0, 212, 255, 0.3);
-  background: linear-gradient(135deg, rgba(0,212,255,0.04) 0%, #0f1525 100%);
+  border-color: rgba(var(--accent-rgb), 0.3);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.04) 0%, var(--bg-2) 100%);
 }
 .routine-ex-header {
   display: flex;
@@ -2355,30 +2393,30 @@ button {
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: #1a2540;
+  background: var(--bg-3);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
-  color: #6b7a99;
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 .routine-ex-num.main {
-  background: rgba(0, 212, 255, 0.15);
-  color: #00d4ff;
-  border: 1px solid rgba(0, 212, 255, 0.3);
+  background: rgba(var(--accent-rgb), 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
 }
 .routine-ex-name {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--font-sans);
   font-weight: 700;
   font-size: 14px;
   color: white;
 }
 .routine-ex-type {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
   margin-top: 2px;
 }
 .routine-ex-prescription {
@@ -2386,7 +2424,7 @@ button {
   gap: 14px;
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px dashed #1a2540;
+  border-top: 1px dashed var(--bg-3);
 }
 .routine-ex-stat {
   display: flex;
@@ -2395,26 +2433,26 @@ button {
 }
 .routine-ex-stat-label {
   font-size: 9px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #6b7a99;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 .routine-ex-stat-value {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: var(--font-bebas);
   font-size: 18px;
-  color: #00d4ff;
+  color: var(--accent);
   letter-spacing: 0.02em;
 }
 .routine-ex-stat-value.regular { color: white; }
 .routine-ex-tag {
   display: inline-block;
-  background: rgba(0, 212, 255, 0.1);
-  color: #00d4ff;
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--accent);
   padding: 2px 7px;
   border-radius: 4px;
   font-size: 9px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   margin-left: 6px;
 }
 
@@ -2426,31 +2464,31 @@ button {
   margin-top: 18px;
 }
 .routine-btn-modify {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 14px;
   padding: 14px;
-  color: #b0b8d0;
-  font-family: 'Space Grotesk', sans-serif;
+  color: var(--text-soft);
+  font-family: var(--font-sans);
   font-weight: 600;
   font-size: 14px;
   cursor: pointer;
   transition: all 0.15s;
 }
 .routine-btn-modify:active { transform: scale(0.98); }
-.routine-btn-modify:hover { border-color: rgba(0, 212, 255, 0.3); }
+.routine-btn-modify:hover { border-color: rgba(var(--accent-rgb), 0.3); }
 
 .routine-btn-start {
-  background: #00d4ff;
-  color: #050810;
+  background: var(--accent);
+  color: var(--bg-0);
   border-radius: 14px;
   padding: 14px;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--font-sans);
   font-weight: 700;
   font-size: 14px;
   cursor: pointer;
   border: none;
-  box-shadow: 0 4px 20px rgba(0, 212, 255, 0.3);
+  box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.3);
   transition: all 0.15s;
   display: flex;
   align-items: center;
@@ -2461,19 +2499,19 @@ button {
 
 /* AI 한 줄 카드 (이유, 주의 등) */
 .routine-insight {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--white-rgb), 0.03);
   border-radius: 12px;
   padding: 12px 14px;
   margin-top: 10px;
   position: relative;
 }
 .routine-insight.warning {
-  background: rgba(251, 191, 36, 0.06);
-  border: 1px solid rgba(251, 191, 36, 0.2);
+  background: rgba(var(--warn-rgb), 0.06);
+  border: 1px solid rgba(var(--warn-rgb), 0.2);
 }
 .routine-insight-label {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   margin-bottom: 4px;
@@ -2481,8 +2519,8 @@ button {
 
 /* 로딩 화면 (분석 중) */
 .routine-loading-card {
-  background: linear-gradient(135deg, rgba(0,212,255,0.06) 0%, rgba(0,212,255,0.01) 100%);
-  border: 1px solid rgba(0, 212, 255, 0.3);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.06) 0%, rgba(var(--accent-rgb), 0.01) 100%);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
   border-radius: 24px;
   padding: 60px 30px;
   text-align: center;
@@ -2506,13 +2544,13 @@ button {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: #050810;
+  background: var(--bg-0);
 }
 
 /* 상단 루틴 미리보기 (접힘/펼침) */
 .routine-preview {
-  background: #050810;
-  border-bottom: 1px solid #1a2540;
+  background: var(--bg-0);
+  border-bottom: 1px solid var(--bg-3);
   padding: 12px 20px;
 }
 .routine-preview-collapsed {
@@ -2531,18 +2569,18 @@ button {
   justify-content: space-between;
   align-items: center;
   padding: 8px 10px;
-  background: #0f1525;
+  background: var(--bg-2);
   border-radius: 10px;
   margin-bottom: 6px;
   font-size: 11px;
 }
 .routine-preview-ex.changed {
-  background: linear-gradient(90deg, rgba(0,212,255,0.08), #0f1525);
-  border-left: 2px solid #00d4ff;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.08), var(--bg-2));
+  border-left: 2px solid var(--accent);
 }
 .routine-preview-ex.added {
-  background: linear-gradient(90deg, rgba(34,197,94,0.08), #0f1525);
-  border-left: 2px solid #22c55e;
+  background: linear-gradient(90deg, rgba(var(--success-rgb), 0.08), var(--bg-2));
+  border-left: 2px solid var(--success);
 }
 
 /* 채팅 영역 */
@@ -2556,8 +2594,8 @@ button {
 }
 
 .rc-msg-bot {
-  background: rgba(0, 212, 255, 0.06);
-  border: 1px solid rgba(0, 212, 255, 0.2);
+  background: rgba(var(--accent-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
   border-radius: 16px 16px 16px 4px;
   padding: 12px 14px;
   max-width: 90%;
@@ -2565,8 +2603,8 @@ button {
   line-height: 1.55;
 }
 .rc-msg-user {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 16px 16px 4px 16px;
   padding: 12px 14px;
   max-width: 85%;
@@ -2576,8 +2614,8 @@ button {
 
 /* 변경사항 카드 */
 .routine-change-card {
-  background: rgba(0, 212, 255, 0.06);
-  border: 1px solid rgba(0, 212, 255, 0.3);
+  background: rgba(var(--accent-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
   border-radius: 12px;
   padding: 10px 12px;
   margin-top: 8px;
@@ -2593,7 +2631,7 @@ button {
 .change-approval-btn {
   padding: 10px;
   border-radius: 10px;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--font-sans);
   font-weight: 700;
   font-size: 12px;
   cursor: pointer;
@@ -2602,20 +2640,20 @@ button {
 }
 .change-approval-btn:active { transform: scale(0.97); }
 .change-approval-btn.cancel {
-  background: #0f1525;
-  border: 1px solid #1a2540;
-  color: #b0b8d0;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  color: var(--text-soft);
 }
-.change-approval-btn.cancel:hover { border-color: rgba(239, 68, 68, 0.4); color: #ef4444; }
+.change-approval-btn.cancel:hover { border-color: rgba(var(--danger-rgb), 0.4); color: var(--danger); }
 .change-approval-btn.apply {
-  background: #00d4ff;
-  color: #050810;
-  box-shadow: 0 2px 12px rgba(0, 212, 255, 0.3);
+  background: var(--accent);
+  color: var(--bg-0);
+  box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.3);
 }
 .change-approval-btn.applied {
-  background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
-  border: 1px solid rgba(34, 197, 94, 0.4);
+  background: rgba(var(--success-rgb), 0.15);
+  color: var(--success);
+  border: 1px solid rgba(var(--success-rgb), 0.4);
   pointer-events: none;
 }
 .change-line {
@@ -2636,9 +2674,9 @@ button {
   font-weight: 700;
   flex-shrink: 0;
 }
-.change-icon.add { background: rgba(34,197,94,0.2); color: #22c55e; }
-.change-icon.remove { background: rgba(239,68,68,0.2); color: #ef4444; }
-.change-icon.modify { background: rgba(0,212,255,0.2); color: #00d4ff; }
+.change-icon.add { background: rgba(var(--success-rgb), 0.2); color: var(--success); }
+.change-icon.remove { background: rgba(var(--danger-rgb), 0.2); color: var(--danger); }
+.change-icon.modify { background: rgba(var(--accent-rgb), 0.2); color: var(--accent); }
 
 /* 빠른 수정 칩 */
 .routine-quick-chips {
@@ -2649,20 +2687,20 @@ button {
   margin-bottom: 8px;
 }
 .rc-quick-chip {
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 9999px;
   padding: 7px 12px;
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #b0b8d0;
+  font-family: var(--font-mono);
+  color: var(--text-soft);
   white-space: nowrap;
   cursor: pointer;
   flex-shrink: 0;
 }
 .rc-quick-chip:active {
-  background: rgba(0, 212, 255, 0.15);
-  border-color: #00d4ff;
+  background: rgba(var(--accent-rgb), 0.15);
+  border-color: var(--accent);
 }
 
 /* 하단 입력 + 시작 버튼 */
@@ -2671,8 +2709,8 @@ button {
   bottom: 0;
   left: 0;
   right: 0;
-  background: #050810;
-  border-top: 1px solid #1a2540;
+  background: var(--bg-0);
+  border-top: 1px solid var(--bg-3);
   padding: 12px 20px 28px;
   z-index: 50;
 }
@@ -2684,8 +2722,8 @@ button {
 }
 .routine-chat-input-bar {
   flex: 1;
-  background: #0f1525;
-  border: 1px solid #1a2540;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
   border-radius: 20px;
   padding: 10px 14px;
   display: flex;
@@ -2702,15 +2740,15 @@ button {
   font-family: inherit;
 }
 .routine-chat-input-bar input::placeholder {
-  color: #6b7a99;
+  color: var(--text-muted);
 }
 .rc-send-btn {
   flex-shrink: 0;
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #00d4ff;
-  color: #050810;
+  background: var(--accent);
+  color: var(--bg-0);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2718,21 +2756,21 @@ button {
   cursor: pointer;
 }
 .rc-send-btn:disabled {
-  background: #1a2540;
-  color: #6b7a99;
+  background: var(--bg-3);
+  color: var(--text-muted);
   cursor: not-allowed;
 }
 .routine-final-start {
-  background: #00d4ff;
-  color: #050810;
+  background: var(--accent);
+  color: var(--bg-0);
   border-radius: 14px;
   padding: 14px;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--font-sans);
   font-weight: 700;
   font-size: 14px;
   cursor: pointer;
   border: none;
-  box-shadow: 0 4px 20px rgba(0, 212, 255, 0.3);
+  box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.3);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2755,5 +2793,5 @@ button {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #00d4ff;
+  background: var(--accent);
 }
