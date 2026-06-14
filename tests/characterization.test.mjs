@@ -640,3 +640,80 @@ test('묶음6-D 뒤로가기 배선 — popstate 리스너 + 부팅 트랩 + 핵
   assert.match(screens, /history\.pushState\(\s*\{\s*nav:\s*['"]trap['"]/, '부팅/재설정 트랩 pushState');
   assert.ok(screens.includes('function getTopLayer') && screens.includes('function navBack'), '뒤로가기 핵심 함수 정의');
 });
+
+// ═══════════════════════════════════════════════
+// 코치 지식 강화 — 지식 베이스 확장 + 질문 유형별 답변 + prompt caching
+// ═══════════════════════════════════════════════
+
+// ── Cycle A: 지식 베이스 상수 (data.js) — 운동과학 전 영역 + 근거 표기 ──
+test('코치지식 COACH_KNOWLEDGE — 운동/영양/부상/식단전략/보충제/회복 전 영역 + 근거', () => {
+  const app = loadApp();
+  assert.equal(typeof app.COACH_KNOWLEDGE, 'string', 'COACH_KNOWLEDGE 문자열 상수 존재');
+  assert.ok(app.COACH_KNOWLEDGE.length > 2500, '지식 베이스가 충분히 풍부 (기존 ~25줄 대비 대폭 확장)');
+  // 도메인 커버리지: 새로 추가된 영역들이 실제로 들어있어야 함
+  const k = app.COACH_KNOWLEDGE;
+  assert.ok(k.includes('자세') || k.includes('폼'), '종목 자세/폼 큐 포함');
+  assert.ok(k.includes('부상') || k.includes('통증'), '부상·통증 대응 포함');
+  assert.ok(k.includes('벌크') && k.includes('컷'), '다이어트 전략(벌크/컷) 포함');
+  assert.ok(k.includes('크레아틴') && k.includes('카페인'), '보충제(크레아틴/카페인) 포함');
+  assert.ok(k.includes('워밍업') || k.includes('가동성'), '워밍업·가동성 포함');
+  // 근거 표기(메타분석 저자/연도)는 유지
+  assert.ok(/Pelland|Schoenfeld|Morton/.test(k), '메타분석 근거 표기 유지');
+});
+
+// ── Cycle B: 캐싱 분리 — 고정(지식) 블록과 가변(사용자데이터) 블록 ──
+test('코치지식 buildCoachSystemParts — 고정 지식블록 / 가변 사용자블록 분리', () => {
+  const app = loadApp();
+  assert.equal(typeof app.buildCoachSystemParts, 'function', 'buildCoachSystemParts 함수 존재');
+  const parts = app.buildCoachSystemParts();
+  assert.equal(typeof parts.stable, 'string', 'stable(고정) 블록 존재');
+  assert.equal(typeof parts.dynamic, 'string', 'dynamic(가변) 블록 존재');
+  // 고정 블록: 지식 베이스 포함, 사용자 데이터는 없어야 캐시가 호출마다 적중
+  assert.ok(parts.stable.includes('크레아틴'), '고정 블록에 지식 베이스 주입');
+  assert.ok(!parts.stable.includes('사용자 정보'), '고정 블록에 사용자 데이터 없음(캐시 적중 위해)');
+  // 가변 블록: 사용자 컨텍스트 포함
+  assert.ok(parts.dynamic.includes('사용자 정보') || parts.dynamic.includes('사용자 현재 데이터'), '가변 블록에 사용자 데이터');
+});
+
+// ── Cycle C: 질문 유형별 답변 + 옛 "데이터 안에서만" 제약 제거 + 레거시 보존 ──
+test('코치지식 getCoachSystemPrompt — 질문 유형 분기 + 입막음 제거 + 레거시 유지', () => {
+  const app = loadApp();
+  const sys = app.getCoachSystemPrompt();
+  // 새: 질문 유형별 답변 지시(일반 지식 질문 허용)
+  assert.ok(sys.includes('질문 유형') || sys.includes('일반 운동'), '질문 유형별 답변 지시 주입');
+  assert.ok(sys.includes('지식 베이스') || sys.includes('크레아틴'), '지식 베이스가 프롬프트에 포함');
+  // 옛 입막음 제약 제거
+  assert.ok(!sys.includes('위 데이터 안에서만'), '"위 데이터 안에서만 답하기" 제약 제거');
+  assert.ok(!sys.includes('데이터에 없는 추측 금지'), '"데이터에 없는 추측 금지" 제약 제거');
+  // 레거시 보존 (기존 테스트와 동일 계약)
+  assert.ok(sys.includes('기억 노트'), '기억 노트 섹션 유지');
+  assert.ok(sys.includes('```memory'), 'memory 저장 지시 유지');
+  assert.ok(sys.includes('5주 사이클'), '5주 사이클 표현 유지');
+});
+
+// ── Cycle D: callCoachAPI — system 배열 + cache_control(prompt caching) ──
+test('코치지식 callCoachAPI — system 배열 + cache_control ephemeral(고정), 가변 분리', async () => {
+  const app = loadApp();
+  app.state.apiKey = 'sk-test';
+  let captured = null;
+  app.fetch = (url, opts) => {
+    captured = JSON.parse(opts.body);
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ content: [{ text: 'ok' }] }),
+      text: () => Promise.resolve(''),
+    });
+  };
+  const res = await app.callCoachAPI([{ role: 'user', content: '안녕' }]);
+  assert.equal(res.text, 'ok', '정상 응답 파싱');
+  assert.ok(Array.isArray(captured.system), 'system이 배열(캐싱 구조)');
+  assert.ok(captured.system.length >= 2, '고정/가변 두 블록으로 분리');
+  // 고정 블록: 지식 + cache_control, 사용자 데이터 없음(호출마다 동일 → 캐시 적중)
+  assert.equal(captured.system[0].type, 'text');
+  assert.deepEqual(captured.system[0].cache_control, { type: 'ephemeral' }, '고정 블록에 cache_control ephemeral');
+  assert.ok(captured.system[0].text.includes('크레아틴'), '고정 블록 = 지식 베이스');
+  assert.ok(!captured.system[0].text.includes('사용자 정보'), '고정 블록에 사용자 데이터 없음');
+  // 가변 블록: 사용자 데이터, 캐시 분기점 뒤라 cache_control 없음
+  assert.ok(captured.system[1].text.includes('사용자 정보') || captured.system[1].text.includes('사용자 현재 데이터'), '두 번째 블록 = 사용자 데이터');
+  assert.ok(!captured.system[1].cache_control, '가변 블록엔 cache_control 없음');
+});
