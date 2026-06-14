@@ -16,6 +16,16 @@ var DEFAULT_PROFILE = {
   weekSessionsDone: 0
 };
 
+// 코치 기억 노트 카테고리 (묶음3)
+var MEMORY_CATEGORIES = ['injury', 'preference', 'goal', 'schedule', 'other'];
+var MEMORY_CATEGORY_META = {
+  injury: { kr: '부상·제약', emoji: '🤕' },
+  preference: { kr: '선호', emoji: '❤️' },
+  goal: { kr: '목표', emoji: '🎯' },
+  schedule: { kr: '일정', emoji: '📅' },
+  other: { kr: '기타', emoji: '📝' }
+};
+
 // ═══════════════════════════════════════════════
 // 아이콘 (SVG)
 // ═══════════════════════════════════════════════

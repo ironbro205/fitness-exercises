@@ -24,7 +24,9 @@ var KEYS = {
   ACTIVE_SESSION: 'fitness_active_session',
   REST_TIMER: 'fitness_rest_timer',
   WORKOUT_WIZARD: 'fitness_workout_wizard',
-  CYCLE_HISTORY: 'fitness_cycle_history'
+  CYCLE_HISTORY: 'fitness_cycle_history',
+  COACH_MEMORY: 'fitness_coach_memory',
+  AI_RECOMMENDATION_HISTORY: 'fitness_ai_recommendation_history'
 };
 
 var storage = {
@@ -88,9 +90,11 @@ var BACKUP_TRANSIENT_KEYS = [
   KEYS.EXERCISES_CACHE,    // 재생성 가능
   KEYS.EXERCISES_VERSION,
   KEYS.AI_RECOMMENDATION,  // AI 캐시 (새 데이터 기준으로 재생성)
+  KEYS.AI_RECOMMENDATION_HISTORY, // 추천 다양성용 이력 (재생성 가능)
   KEYS.WEEKLY_REVIEW,
   KEYS.PLATEAU_CHECK
 ];
+// 참고: COACH_MEMORY(기억 노트)는 제외 목록에 없음 → 백업에 포함(새 폰 복원). 사용자가 큐레이션한 개인 정보.
 var BACKUP_EXCLUDE_KEYS = BACKUP_LOCAL_ONLY_KEYS.concat(BACKUP_TRANSIENT_KEYS);
 
 // 현재 저장소를 복원 가능한 백업 객체로 직렬화
@@ -264,6 +268,13 @@ var state = {
   plateauOpen: false,
   // 1RM 리스트
   oneRMListOpen: false,
+  // 코치 기억 노트 (묶음3)
+  coachMemory: [],            // [{id, category, text, source, date}]
+  coachMemoryOpen: false,
+  coachMemoryInput: '',
+  coachMemoryCategory: 'other',
+  coachMemoryEditingId: null, // 수정 중인 노트 id (null=새 추가)
+  coachMemoryDeleteId: null,  // 삭제 확인 중인 노트 id
   // 운동 마법사 (새 구조)
   workoutWizardStep: 1,
   selectedBodyPart: null,
@@ -309,6 +320,13 @@ function scrollChatToBottom() {
     var chatArea = document.getElementById('chat-area');
     if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
   }, 50);
+}
+
+// HTML 이스케이프 (innerHTML/속성 값에 사용자·AI 텍스트 넣을 때)
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // API 키 마스킹
@@ -393,9 +411,13 @@ function init() {
     storage.set(KEYS.NUTRITION_LOG, demo.nutritionLog);
     storage.set(KEYS.PERSONAL_RECORDS, demo.personalRecords);
     storage.set(KEYS.BODY_LOG, demo.bodyLog);
+    storage.set(KEYS.COACH_MEMORY, [
+      { id: 'mem_demo1', category: 'injury', text: '왼쪽 어깨 약간 불편 — 오버헤드는 가볍게', source: 'manual', date: getTodayStr() },
+      { id: 'mem_demo2', category: 'preference', text: '머신·덤벨 선호', source: 'manual', date: getTodayStr() }
+    ]);
     storage.set(KEYS.INITIALIZED, true);
   }
-  
+
   state.profile = storage.get(KEYS.PROFILE, DEFAULT_PROFILE);
   state.data = {
     workoutLog: storage.get(KEYS.WORKOUT_LOG, []),
@@ -416,6 +438,9 @@ function init() {
   // API 키 + 설정 로드
   state.apiKey = storage.get(KEYS.API_KEY, null);
   state.settings = storage.get(KEYS.SETTINGS, { notifications: true, theme: 'dark', unit: 'kg' });
+
+  // 코치 기억 노트 로드 (묶음3)
+  state.coachMemory = storage.get(KEYS.COACH_MEMORY, []);
   
   // 1RM 초기 데이터 로드 (첫 실행 시 INITIAL_1RM 자동 입력)
   initializeOneRMData();

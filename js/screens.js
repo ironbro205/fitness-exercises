@@ -3731,9 +3731,21 @@ function renderMore() {
               (state.plateauCheck ? '<span class="api-status-badge" style="background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.4);">감지</span>' : '<div class="menu-arrow">' + icon('chevron', 16) + '</div>') +
             '</div>'
           : '') +
+          // 기억 노트 (API 키 없어도 직접 추가 가능)
+          '<div class="menu-row" onclick="openCoachMemory()">' +
+            '<div class="menu-icon-sm accent-bg-soft">' + icon('msg', 18) + '</div>' +
+            '<div class="menu-row-content">' +
+              '<p class="text-sm font-display font-bold">기억 노트</p>' +
+              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">코치가 기억할 부상·선호·목표·일정</p>' +
+            '</div>' +
+            '<div style="display:flex; align-items:center; gap:8px;">' +
+              '<p class="text-[10px] font-mono text-stone-500">' + (state.coachMemory ? state.coachMemory.length : 0) + '개</p>' +
+              '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
+            '</div>' +
+          '</div>' +
         '</div>' +
       '</div>' +
-      
+
       // 사이클
       '<div>' +
         '<p class="section-label">사이클</p>' +
@@ -4026,12 +4038,18 @@ window.sendCoachMessage = async function() {
       content: '⚠️ ' + result.error 
     });
   } else {
-    state.coachMessages.push({ 
-      role: 'assistant', 
-      content: result.text 
+    // 코치 응답 끝의 숨김 memory 블록 추출 → 본문만 표시, 항목은 기억 노트에 자동 저장 (묶음3)
+    var parsed = parseCoachMemoryBlock(result.text);
+    state.coachMessages.push({
+      role: 'assistant',
+      content: parsed.clean
     });
+    if (parsed.items.length) {
+      state.coachMemory = mergeCoachMemory(state.coachMemory, parsed.items, 'auto', getTodayStr(), 'mem_' + Date.now());
+      storage.set(KEYS.COACH_MEMORY, state.coachMemory);
+    }
   }
-  
+
   // 저장
   var toSave = state.coachMessages.slice(-30);
   storage.set(KEYS.COACH_HISTORY, toSave);
@@ -4039,6 +4057,130 @@ window.sendCoachMessage = async function() {
   render();
   scrollCoachToBottom();
 };
+
+// ═══════════════════════════════════════════════
+// 코치 기억 노트 화면 (묶음3)
+// ═══════════════════════════════════════════════
+window.openCoachMemory = function() {
+  state.coachMemoryOpen = true;
+  state.coachMemoryInput = '';
+  state.coachMemoryCategory = 'other';
+  state.coachMemoryEditingId = null;
+  state.coachMemoryDeleteId = null;
+  render();
+};
+window.closeCoachMemory = function() {
+  state.coachMemoryOpen = false;
+  state.coachMemoryEditingId = null;
+  state.coachMemoryDeleteId = null;
+  render();
+};
+window.updateMemoryInput = function(value) { state.coachMemoryInput = value; };
+window.setMemoryCategory = function(cat) { state.coachMemoryCategory = cat; render(); };
+
+window.saveMemoryNote = function() {
+  var text = (state.coachMemoryInput || '').trim();
+  if (!text) return;
+  var cat = state.coachMemoryCategory || 'other';
+  if (state.coachMemoryEditingId) {
+    state.coachMemory = state.coachMemory.map(function(m) {
+      return m.id === state.coachMemoryEditingId
+        ? { id: m.id, category: cat, text: text.slice(0, 140), source: m.source, date: m.date }
+        : m;
+    });
+    state.coachMemoryEditingId = null;
+  } else {
+    state.coachMemory = mergeCoachMemory(state.coachMemory, [{ category: cat, text: text }], 'manual', getTodayStr(), 'mem_' + Date.now());
+  }
+  storage.set(KEYS.COACH_MEMORY, state.coachMemory);
+  state.coachMemoryInput = '';
+  state.coachMemoryCategory = 'other';
+  render();
+  showToast('기억 노트 저장됨');
+};
+
+window.editMemoryNote = function(id) {
+  var note = (state.coachMemory || []).find(function(m) { return m.id === id; });
+  if (!note) return;
+  state.coachMemoryEditingId = id;
+  state.coachMemoryInput = note.text;
+  state.coachMemoryCategory = note.category;
+  state.coachMemoryDeleteId = null;
+  render();
+  setTimeout(function() { var el = document.getElementById('memory-input'); if (el) el.focus(); }, 50);
+};
+
+window.deleteMemoryNote = function(id) { state.coachMemoryDeleteId = id; render(); };
+window.cancelMemoryDelete = function() { state.coachMemoryDeleteId = null; render(); };
+window.executeDeleteMemory = function(id) {
+  state.coachMemory = (state.coachMemory || []).filter(function(m) { return m.id !== id; });
+  storage.set(KEYS.COACH_MEMORY, state.coachMemory);
+  state.coachMemoryDeleteId = null;
+  if (state.coachMemoryEditingId === id) { state.coachMemoryEditingId = null; state.coachMemoryInput = ''; }
+  render();
+  showToast('삭제됨');
+};
+
+function renderCoachMemory() {
+  var notes = state.coachMemory || [];
+  var groups = '';
+  MEMORY_CATEGORIES.forEach(function(cat) {
+    var meta = MEMORY_CATEGORY_META[cat];
+    var inCat = notes.filter(function(m) { return m.category === cat; });
+    if (!inCat.length) return;
+    var rows = inCat.map(function(m) {
+      if (state.coachMemoryDeleteId === m.id) {
+        return '<div class="menu-row" style="background: rgba(239,68,68,0.08);">' +
+          '<div class="flex-1"><p class="text-sm">' + escapeHtml(m.text) + '</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">정말 삭제할까요?</p></div>' +
+          '<div style="display:flex; gap:6px;">' +
+            '<button onclick="cancelMemoryDelete()" style="padding:6px 12px; border-radius:10px; background:transparent; border:1px solid #2a3550; color:#9aa7c0; font-size:12px;">취소</button>' +
+            '<button class="btn-danger" style="padding:6px 12px; width:auto;" onclick="executeDeleteMemory(\'' + m.id + '\')">삭제</button>' +
+          '</div>' +
+        '</div>';
+      }
+      var srcBadge = m.source === 'auto'
+        ? '<span class="accent">자동</span>'
+        : '<span class="text-stone-500">직접</span>';
+      return '<div class="menu-row">' +
+        '<div class="flex-1" onclick="editMemoryNote(\'' + m.id + '\')" style="cursor:pointer;">' +
+          '<p class="text-sm">' + escapeHtml(m.text) + '</p>' +
+          '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + srcBadge + ' · ' + (m.date || '') + ' · 탭하여 수정</p>' +
+        '</div>' +
+        '<button class="session-header-btn" onclick="deleteMemoryNote(\'' + m.id + '\')">' + icon('trash', 16) + '</button>' +
+      '</div>';
+    }).join('');
+    groups += '<p class="section-label">' + meta.emoji + ' ' + meta.kr + '</p><div class="section-group" style="margin-bottom:16px;">' + rows + '</div>';
+  });
+  if (!groups) {
+    groups = '<p class="text-sm text-stone-500 text-center" style="padding:40px 0; line-height:1.6;">아직 기억 노트가 없어요.<br>아래에 직접 추가하거나, 코치와 대화하면 자동으로 쌓여요.</p>';
+  }
+
+  var chips = MEMORY_CATEGORIES.map(function(cat) {
+    var meta = MEMORY_CATEGORY_META[cat];
+    var on = state.coachMemoryCategory === cat;
+    var style = 'padding:5px 10px; border-radius:999px; font-size:11px; font-family:monospace; cursor:pointer; border:1px solid ' +
+      (on ? '#00d4ff' : '#2a3550') + '; background:' + (on ? 'rgba(0,212,255,0.15)' : 'transparent') + '; color:' + (on ? '#00d4ff' : '#9aa7c0') + ';';
+    return '<button style="' + style + '" onclick="setMemoryCategory(\'' + cat + '\')">' + meta.emoji + ' ' + meta.kr + '</button>';
+  }).join('');
+
+  return '<div class="review-detail-screen">' +
+    '<div class="coach-header">' +
+      '<button class="session-header-btn" onclick="closeCoachMemory()">' + icon('close', 18) + '</button>' +
+      '<div class="coach-header-info"><p class="text-sm font-display font-bold">기억 노트</p>' +
+        '<p class="text-[10px] font-mono text-stone-500">총 ' + notes.length + '개 · 코치가 참고해요</p></div>' +
+      '<div style="width:36px;"></div>' +
+    '</div>' +
+    '<div class="px-5 pt-5" style="padding-bottom:160px;">' + groups + '</div>' +
+    '<div style="position:fixed; left:0; right:0; bottom:0; padding:12px 16px calc(14px + env(safe-area-inset-bottom)); background:#0a0e1a; border-top:1px solid #1a2540; z-index:50;">' +
+      '<div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">' + chips + '</div>' +
+      '<div style="display:flex; gap:8px;">' +
+        '<input type="text" id="memory-input" class="api-key-input" style="flex:1;" placeholder="' + (state.coachMemoryEditingId ? '수정 내용...' : '기억할 내용 추가...') + '" value="' + escapeHtml(state.coachMemoryInput || '') + '" oninput="updateMemoryInput(this.value)" onkeydown="if(event.key===\'Enter\'){saveMemoryNote();}" />' +
+        '<button class="sheet-submit" style="width:auto; padding:0 18px;" onclick="saveMemoryNote()">' + (state.coachMemoryEditingId ? '수정' : '추가') + '</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
 
 // 간단한 마크다운 → HTML (안전한 기본 변환)
 function renderMarkdown(text) {
@@ -4315,7 +4457,19 @@ function renderWeeklyReviewDetail() {
               '</div>' +
             '</div>' +
           '</div>' : '') +
-        
+
+        // 코치와 상담 (코치가 이 주간리뷰를 자동 인용)
+        '<button class="coach-chat-card mt-5" onclick="closeWeeklyReview(); openCoachChat();" style="width: 100%;">' +
+          '<div class="flex items-center gap-3">' +
+            '<div class="coach-chat-icon">' + icon('msg', 22) + '</div>' +
+            '<div class="flex-1 text-left">' +
+              '<p class="font-display font-bold text-sm">이번 주에 대해 코치와 상담</p>' +
+              '<p class="text-[10px] font-mono text-stone-400 mt-0\\.5">개선 전략 짜기</p>' +
+            '</div>' +
+            '<div style="color: #00d4ff;">' + icon('chevron', 16) + '</div>' +
+          '</div>' +
+        '</button>' +
+
       '</div>' +
     '</div>';
 }
@@ -4955,7 +5109,13 @@ function render() {
     document.getElementById('app').innerHTML = renderOneRMList();
     return;
   }
-  
+
+  // 코치 기억 노트
+  if (state.coachMemoryOpen) {
+    document.getElementById('app').innerHTML = renderCoachMemory();
+    return;
+  }
+
   // 주간 리뷰 상세
   if (state.weeklyReviewOpen) {
     document.getElementById('app').innerHTML = renderWeeklyReviewDetail();

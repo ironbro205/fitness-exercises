@@ -507,6 +507,75 @@ function getIdleComebackMessage(workoutLog, todayStr) {
   return { days: days, message: days + '일째 쉬는 중이에요. 가볍게 다시 시작해볼까요?' };
 }
 
+// ═══════════════════════════════════════════════
+// 코치 기억 노트 (묶음3): 코치 응답 끝의 숨김 블록 파싱 + 중복제거 병합
+// ═══════════════════════════════════════════════
+
+// 코치 응답 끝의 ```memory [...] ``` 블록을 떼어내고 항목을 추출.
+// 반환: { clean: 블록 제거된 본문, items: [{category, text}] }. 절대 throw 안 함.
+function parseCoachMemoryBlock(responseText) {
+  var text = String(responseText == null ? '' : responseText);
+  var re = /```memory\s*([\s\S]*?)```\s*$/;
+  var m = text.match(re);
+  if (!m) return { clean: text.trim(), items: [] };
+  var clean = text.slice(0, m.index).trim();
+  var items = [];
+  try {
+    var parsed = JSON.parse(m[1].trim());
+    if (Array.isArray(parsed)) {
+      parsed.forEach(function(it) {
+        if (it && it.text && String(it.text).trim()) {
+          items.push({ category: it.category || 'other', text: String(it.text).trim() });
+        }
+      });
+    }
+  } catch (e) { /* 망가진 블록 → 본문에서만 제거, 항목 없음 */ }
+  return { clean: clean, items: items };
+}
+
+function normalizeMemoryKey(category, text) {
+  return category + '|' + String(text).trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 24);
+}
+
+// 기존 노트에 새 항목 병합. 중복(카테고리+텍스트 앞부분) 건너뛰기, 미지 카테고리는 other 보정.
+// 최대 40개 유지(초과 시 오래된 auto부터 제거). 저장은 호출자 책임.
+function mergeCoachMemory(existing, newItems, source, today, idBase) {
+  var out = (existing || []).slice();
+  var seen = {};
+  out.forEach(function(m) { seen[normalizeMemoryKey(m.category, m.text)] = true; });
+  (newItems || []).forEach(function(it, i) {
+    if (!it || !it.text || !String(it.text).trim()) return;
+    var cat = MEMORY_CATEGORIES.indexOf(it.category) !== -1 ? it.category : 'other';
+    var key = normalizeMemoryKey(cat, it.text);
+    if (seen[key]) return;
+    seen[key] = true;
+    out.push({
+      id: (idBase || 'mem') + '_' + out.length + '_' + i,
+      category: cat,
+      text: String(it.text).trim().slice(0, 140),
+      source: source || 'auto',
+      date: today
+    });
+  });
+  // 40개 초과 시 오래된 auto부터 제거 (manual은 최대한 보존)
+  while (out.length > 40) {
+    var idx = -1;
+    for (var k = 0; k < out.length; k++) { if (out[k].source === 'auto') { idx = k; break; } }
+    out.splice(idx === -1 ? 0 : idx, 1);
+  }
+  return out;
+}
+
+// 시스템 프롬프트용 기억 노트 텍스트. 없으면 '없음'.
+function formatCoachMemoryForPrompt(items) {
+  var list = items || [];
+  if (!list.length) return '없음';
+  return list.map(function(m) {
+    var meta = MEMORY_CATEGORY_META[m.category] || MEMORY_CATEGORY_META.other;
+    return '- [' + meta.kr + '] ' + m.text;
+  }).join('\n');
+}
+
 // 통합 부위 코드 → 한국어 라벨 빠른 조회 (현재 직접 BODY_PART_GROUPS[g].kr 사용)
 // 헬퍼 미사용 — 호출 위치 추가 시 재활성화
 
