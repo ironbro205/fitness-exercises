@@ -46,7 +46,7 @@ Visual/behavioral QA still needs a real browser — **hard-reload** (or enable D
 
 ## Shipping changes — bump the service-worker cache
 
-`service-worker.js` caches the app shell under `CACHE_VERSION` (currently `health-app-v14`). Because it caches `index.html`/`css`/`js`, **clients keep running the old code until the cache name changes.** Whenever you change any app file (`index.html`, `css/styles.css`, `js/*.js`), bump `CACHE_VERSION`. If you add a new static file, also add it to `CORE_ASSETS`.
+`service-worker.js` caches the app shell under `CACHE_VERSION` (check the constant in that file for the current value). Because it caches `index.html`/`css`/`js`, **clients keep running the old code until the cache name changes.** Whenever you change any app file (`index.html`, `css/styles.css`, `js/*.js`), bump `CACHE_VERSION`. If you add a new static file, also add it to `CORE_ASSETS`.
 
 ## Architecture
 
