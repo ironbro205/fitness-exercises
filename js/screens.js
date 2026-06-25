@@ -3768,6 +3768,7 @@ function renderMore() {
       '<div class="app-footer">' +
         '<p class="app-footer-brand">FITNESS</p>' +
         '<p class="text-[10px] font-mono text-stone-600 mt-1">Personal fitness tracker</p>' +
+        '<p class="text-[10px] font-mono text-stone-600 mt-0\\.5">버전 ' + APP_VERSION + '</p>' +
       '</div>' +
       
     '</div>' +
@@ -5311,9 +5312,44 @@ function navBack() {
 // ═══════════════════════════════════════════════
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() {
+    // 새 버전 안내 배너 — 전역 오염 방지를 위해 콜백 내부 지역 함수로 둔다.
+    // 새 서비스워커가 '설치됨' 상태가 되었고, 이미 페이지를 제어하는 SW가 있으면(=첫 설치가 아닌 업데이트)
+    // 사용자에게 새로고침을 권한다. 자동 새로고침은 하지 않는다(루프·작업중단 방지).
+    var updateBannerShown = false;
+    function showAppUpdateBanner() {
+      if (updateBannerShown) return;
+      updateBannerShown = true;
+      var bar = document.createElement('div');
+      bar.style.cssText = 'position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; background: #00d4ff; color: #050810; padding: 11px 14px 11px 16px; border-radius: 100px; font-family: Space Grotesk, sans-serif; font-size: 13px; font-weight: 700; z-index: 9999; box-shadow: 0 8px 24px rgba(0,212,255,0.45); max-width: 92vw;';
+      var label = document.createElement('span');
+      label.textContent = '🆕 새 버전이 있어요';
+      var reloadBtn = document.createElement('button');
+      reloadBtn.textContent = '새로고침';
+      reloadBtn.style.cssText = 'background: #050810; color: #00d4ff; border: none; border-radius: 100px; padding: 6px 12px; font-weight: 700; font-size: 12px; font-family: inherit; cursor: pointer;';
+      reloadBtn.addEventListener('click', function() { window.location.reload(); });
+      var closeBtn = document.createElement('button');
+      closeBtn.textContent = '✕';
+      closeBtn.setAttribute('aria-label', '닫기');
+      closeBtn.style.cssText = 'background: transparent; color: #050810; border: none; font-size: 14px; font-weight: 700; cursor: pointer; padding: 2px 4px; line-height: 1;';
+      closeBtn.addEventListener('click', function() { bar.remove(); });
+      bar.appendChild(label);
+      bar.appendChild(reloadBtn);
+      bar.appendChild(closeBtn);
+      document.body.appendChild(bar);
+    }
+
     navigator.serviceWorker.register('/service-worker.js')
       .then(function(reg) {
         console.log('[PWA] Service Worker 등록 성공:', reg.scope);
+        reg.addEventListener('updatefound', function() {
+          var newWorker = reg.installing;
+          if (!newWorker) return;
+          newWorker.addEventListener('statechange', function() {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              showAppUpdateBanner();
+            }
+          });
+        });
       })
       .catch(function(err) {
         console.warn('[PWA] Service Worker 등록 실패:', err);
