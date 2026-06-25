@@ -1,5 +1,5 @@
 {
-  "functionCount": 195,
+  "functionCount": 196,
   "objectCount": 21,
   "functions": [
     "addBodyRecord",
@@ -65,6 +65,7 @@
     "executeResetAll",
     "exportData",
     "extractAmount",
+    "extractBalancedJson",
     "fetchAIRecommendation",
     "filterByPeriod",
     "finalizeSession",
