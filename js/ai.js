@@ -1,5 +1,26 @@
 // js/ai.js — Anthropic API 호출 + 프롬프트 (코치/음식/루틴/리뷰/정체기)
 'use strict';
+
+// AI 응답에서 첫 '{'부터 짝이 맞는 '}'까지 정확히 잘라낸다 (문자열·이스케이프 고려).
+// 응답 끝에 잡담이 붙거나, 탐욕적 정규식(/\{[\s\S]*\}/)이 과하게 무는 문제를 막는다.
+// 닫는 '}'를 못 찾으면(=응답이 중간에 잘림) null 을 돌려준다.
+function extractBalancedJson(s) {
+  var start = s.indexOf('{');
+  if (start === -1) return null;
+  var depth = 0, inStr = false, esc = false;
+  for (var i = start; i < s.length; i++) {
+    var ch = s[i];
+    if (inStr) {
+      if (esc) { esc = false; }
+      else if (ch === '\\') { esc = true; }
+      else if (ch === '"') { inStr = false; }
+    } else if (ch === '"') { inStr = true; }
+    else if (ch === '{') { depth++; }
+    else if (ch === '}') { depth--; if (depth === 0) return s.slice(start, i + 1); }
+  }
+  return null;
+}
+
 // ═══════════════════════════════════════════════
 // Haiku API 호출 (DB 매칭 실패 시)
 // ═══════════════════════════════════════════════
@@ -137,6 +158,7 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
     '   이때 changes=[], updatedRoutine=null (확정 안 함)\n' +
     '4. **확실한 요청 시만 updatedRoutine 생성**\n' +
     '5. **종목별 자동 분석 활용**: 한 부위 4개 이상 = 과잉 / 동일 부위·각도 중복 금지\n' +
+    '   - **같은 주 중복 회피**: 컨텍스트 "이번 주 이미 수행한 종목"에 있는 종목은 가능하면 추가하지 말고 다른 종목/각도로 새 자극을 준다 (부족 부위·점진적 과부하 우선).\n' +
     '6. **무게 — 점진적 과부하 우선**\n' +
     '   - "최근 종목별 실제 수행" 표에 데이터 있으면 그 무게 기준 더블 프로그레션 (상단 횟수 달성 시 +2.5kg, 미달 시 동일)\n' +
     '   - 사용자가 무게를 낮춘 적이 있으면 그 낮춘 무게가 새 기준선 (1RM 표 무시)\n' +
@@ -214,7 +236,9 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 2048,
+        // 4096: 6~7종목 전체 루틴 JSON(이유/note 포함)이 잘리지 않도록 충분히 확보.
+        // (2048은 응답 중간 잘림 → JSON 파싱 실패 → 날 JSON 노출 + 적용버튼 사라짐 버그의 원인이었다)
+        max_tokens: 4096,
         // 지식 베이스는 고정 블록(cache_control)으로, 루틴 분석·사용자데이터(systemPrompt)는 분기점 뒤
         system: [
           { type: 'text', text: '## 🧬 운동과학 지식 베이스 (루틴·코칭 결정에 활용)\n' + COACH_KNOWLEDGE, cache_control: { type: 'ephemeral' } },
@@ -233,41 +257,54 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
       return { error: 'AI 응답이 비어있어요. 다시 시도해주세요.' };
     }
     var content = data.content[0].text;
-    
+
     var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    var parsed;
+
+    var parsed = null;
     try {
       parsed = JSON.parse(cleaned);
     } catch (e) {
-      var match = cleaned.match(/\{[\s\S]*\}/);
-      if (match) {
-        try {
-          parsed = JSON.parse(match[0]);
-        } catch (e2) {
-          // JSON 추출 실패 - 텍스트를 question 답변으로 처리
-          return {
-            intent: 'question',
-            reply: cleaned || '응답을 받지 못했어요. 다시 질문해주세요.',
-            changes: [],
-            updatedRoutine: null
-          };
-        }
-      } else {
-        // 아예 JSON이 없음 - 자연어 답변으로 간주
+      var jsonStr = extractBalancedJson(cleaned);
+      if (jsonStr) {
+        try { parsed = JSON.parse(jsonStr); } catch (e2) { parsed = null; }
+      }
+    }
+
+    if (!parsed) {
+      // JSON 파싱 실패. 응답이 JSON을 의도한 것(=중간에 잘림)이면 날 JSON을 사용자에게 보여주지 않는다.
+      // 단, 본문에 우연히 든 중괄호 한 글자(이모지 ':}', 세트표기 '{3~4}' 등)로 진짜 자연어 답변을
+      // 끊김으로 오인하지 않도록 좁게 판정한다: '{'로 시작하거나, JSON 전용 키+콜론이 보일 때만.
+      var looksLikeJson = cleaned.charAt(0) === '{' ||
+        /"(intent|updatedRoutine|exercises|changes|reply)"\s*:/.test(cleaned);
+      if (looksLikeJson) {
         return {
           intent: 'question',
-          reply: cleaned || '응답을 받지 못했어요. 다시 질문해주세요.',
+          reply: '수정안을 만들다가 응답이 끊긴 것 같아요. 한 번만 더, 조금 더 짧게 말씀해 주시겠어요? (예: "무게 살짝 줄여줘", "어깨 종목 하나 추가")',
           changes: [],
           updatedRoutine: null
         };
       }
+      // 진짜 자연어 답변(JSON 흔적 없음)이면 그대로 보여준다.
+      return {
+        intent: 'question',
+        reply: cleaned || '응답을 받지 못했어요. 다시 질문해주세요.',
+        changes: [],
+        updatedRoutine: null
+      };
     }
-    
+
+    // 변경안(updatedRoutine)은 종목이 1개 이상 있을 때만 유효로 친다.
+    // 빈/종목없는 변경안을 그대로 통과시키면 [적용하기]를 눌러도 루틴이 비어 있어
+    // "운동 시작" 버튼이 계속 비활성으로 남는다(generateFullRoutine 과 동일한 가드).
+    var validRoutine = (parsed.updatedRoutine &&
+      Array.isArray(parsed.updatedRoutine.exercises) &&
+      parsed.updatedRoutine.exercises.length > 0) ? parsed.updatedRoutine : null;
+
     return {
-      intent: parsed.intent || (parsed.updatedRoutine ? 'modify' : 'question'),
+      intent: parsed.intent || (validRoutine ? 'modify' : 'question'),
       reply: parsed.reply || '',
       changes: Array.isArray(parsed.changes) ? parsed.changes : [],
-      updatedRoutine: parsed.updatedRoutine || null
+      updatedRoutine: validRoutine
     };
   } catch (error) {
     return { error: error.message };
@@ -395,6 +432,20 @@ function buildUserContext(options) {
       var dayName = ['일','월','화','수','목','금','토'][new Date(w.date).getDay()];
       ctx += '  · ' + dayName + ': ' + w.sessionKr + ' (' + w.duration + '분, ' + w.sets + '세트)\n';
     });
+
+    // 이번 주 실제 수행한 종목명 (같은 주 같은 부위 중복 회피용 — 추가 요구사항)
+    var thisWeekExNames = [];
+    thisWeekWorkouts.forEach(function(w) {
+      var exList = w.exercises || w.exercisesData;
+      if (!Array.isArray(exList)) return;
+      exList.forEach(function(ex) {
+        if (ex && ex.name && thisWeekExNames.indexOf(ex.name) === -1) thisWeekExNames.push(ex.name);
+      });
+    });
+    if (thisWeekExNames.length > 0) {
+      ctx += '- 이번 주 이미 수행한 종목: ' + thisWeekExNames.join(', ') + '\n';
+      ctx += '  ⚠️ 같은 주에 같은 부위를 다시 운동할 때는 위 종목과 **다른 종목/각도**를 골라 새로운 자극을 준다 (부족 부위 보충·점진적 과부하는 우선).\n';
+    }
   } else {
     ctx += '- 아직 운동 안 함\n';
   }
@@ -964,7 +1015,7 @@ async function generateFullRoutine(bodyPart) {
     '## 핵심 원칙 (사용자 데이터 + 과학 근거)\n' +
     '1. **부족 부위 우선 보충** — 컨텍스트 "부족 부위" 리스트의 부위를 메인/고립으로 1~2개 포함\n' +
     '2. **부위별 1~3개** (4개 이상 = 과잉) / 동일 부위·각도 중복 금지\n' +
-    '   - **다양성**: "최근 종목별 실제 수행"에 있는 종목과는 가능하면 다른 종목·각도를 골라 매번 같은 루틴이 반복되지 않게 한다 (부족 부위 보충은 우선).\n' +
+    '   - **다양성 (중요)**: 컨텍스트 "이번 주 이미 수행한 종목"에 있는 종목은 이번 루틴에 **다시 넣지 않는다** — 같은 부위라도 다른 종목·각도로 새로운 자극을 준다. "최근 종목별 실제 수행"과도 가능하면 겹치지 않게 한다. (부족 부위 보충·점진적 과부하는 우선)\n' +
     '3. **메인 1~2개** (isMain: true, 복합, 첫 1~2번째) + **신장 강조 최소 1개**\n' +
     '4. **순서**: 메인 복합 → 보조 복합 → 고립 → 신장 강조 → 펌프\n' +
     '5. **무게 — 점진적 과부하 우선**\n' +
@@ -1016,7 +1067,8 @@ async function generateFullRoutine(bodyPart) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 2048,
+        // 4096: 7종목 루틴 + reason/note 가 잘리지 않도록 (2048은 중간 잘림 위험)
+        max_tokens: 4096,
         // 지식 베이스는 고정 블록(cache_control)으로, 부위·종목풀·사용자데이터(systemPrompt)는 분기점 뒤
         system: [
           { type: 'text', text: '## 🧬 운동과학 지식 베이스 (루틴·코칭 결정에 활용)\n' + COACH_KNOWLEDGE, cache_control: { type: 'ephemeral' } },
@@ -1040,15 +1092,16 @@ async function generateFullRoutine(bodyPart) {
     var content = data.content[0].text;
     
     var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    var parsed;
+
+    var parsed = null;
     try {
       parsed = JSON.parse(cleaned);
     } catch (e) {
-      var match = cleaned.match(/\{[\s\S]*\}/);
-      if (match) parsed = JSON.parse(match[0]);
-      else return { error: 'JSON 파싱 실패' };
+      var jsonStr = extractBalancedJson(cleaned);
+      if (jsonStr) { try { parsed = JSON.parse(jsonStr); } catch (e2) { parsed = null; } }
     }
-    
+    if (!parsed) return { error: 'AI 응답을 이해하지 못했어요. 다시 시도해주세요.' };
+
     if (!Array.isArray(parsed.exercises) || parsed.exercises.length === 0) {
       return { error: '종목 목록이 없습니다' };
     }

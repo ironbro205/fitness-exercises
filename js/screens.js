@@ -635,12 +635,19 @@ window.sendRoutineModification = async function() {
     });
   } else {
     // 루틴 수정 (modify) - 변경 카드 + 대기 중인 변경안
+    // 새 변경안이 생기면, 아직 적용 안 한 이전 pending 카드를 '대체됨'으로 내린다.
+    // (옛 카드를 나중에 눌러 방금 적용한 변경을 조용히 되돌리는 사고 방지)
+    if (result.updatedRoutine) {
+      state.routineChatHistory.forEach(function(m) {
+        if (m.approvalStatus === 'pending') m.approvalStatus = 'superseded';
+      });
+    }
     state.routineChatHistory.push({
       role: 'assistant',
       content: result.reply,
       changes: result.changes,
       pendingRoutine: result.updatedRoutine,  // 사용자 승인 대기
-      approvalStatus: result.updatedRoutine ? 'pending' : null  // pending | applied | cancelled
+      approvalStatus: result.updatedRoutine ? 'pending' : null  // pending | applied | cancelled | superseded
     });
     // 루틴은 자동 업데이트 X - 사용자가 [적용] 눌러야 반영
   }
@@ -708,16 +715,22 @@ function renderWorkoutStep3() {
   state.routineChatHistory.forEach(function(msg, idx) {
     if (msg.role === 'assistant') {
       var changesHtml = '';
-      if (msg.changes && msg.changes.length > 0) {
-        var changeLines = msg.changes.map(function(c) {
-          var iconCls = c.type === 'add' ? 'add' : c.type === 'remove' ? 'remove' : 'modify';
-          var sym = c.type === 'add' ? '+' : c.type === 'remove' ? '−' : '~';
-          return '<div class="change-line">' +
-            '<div class="change-icon ' + iconCls + '">' + sym + '</div>' +
-            '<span class="text-stone-200"><strong>' + c.exercise + '</strong> ' + c.detail + '</span>' +
-          '</div>';
-        }).join('');
-        
+      var hasChanges = msg.changes && msg.changes.length > 0;
+      // 변경 카드는 (1) 변경 목록이 있거나 (2) 승인 대기/완료/취소 상태가 있으면 표시한다.
+      // pendingRoutine 은 있는데 changes 가 비어도 [✓ 적용하기] 버튼이 사라지지 않게 한다(버그 수정).
+      if (hasChanges || msg.approvalStatus) {
+        var changeLines = '';
+        if (hasChanges) {
+          changeLines = msg.changes.map(function(c) {
+            var iconCls = c.type === 'add' ? 'add' : c.type === 'remove' ? 'remove' : 'modify';
+            var sym = c.type === 'add' ? '+' : c.type === 'remove' ? '−' : '~';
+            return '<div class="change-line">' +
+              '<div class="change-icon ' + iconCls + '">' + sym + '</div>' +
+              '<span class="text-stone-200"><strong>' + c.exercise + '</strong> ' + c.detail + '</span>' +
+            '</div>';
+          }).join('');
+        }
+
         // 승인 상태별 액션 버튼
         var actionHtml = '';
         if (msg.approvalStatus === 'pending') {
@@ -732,14 +745,20 @@ function renderWorkoutStep3() {
               '<button class="change-approval-btn applied">✓ 적용 완료</button>' +
             '</div>';
         } else if (msg.approvalStatus === 'cancelled') {
-          actionHtml = 
+          actionHtml =
             '<div class="change-approval-actions" style="grid-template-columns: 1fr;">' +
               '<button class="change-approval-btn cancel" style="pointer-events: none; opacity: 0.6;">취소됨</button>' +
             '</div>';
+        } else if (msg.approvalStatus === 'superseded') {
+          actionHtml =
+            '<div class="change-approval-actions" style="grid-template-columns: 1fr;">' +
+              '<button class="change-approval-btn cancel" style="pointer-events: none; opacity: 0.6;">최신 제안으로 대체됨</button>' +
+            '</div>';
         }
         
+        var cardLabel = hasChanges ? '✨ 제안된 변경사항' : '✨ 새 루틴 준비됨';
         changesHtml = '<div class="routine-change-card">' +
-          '<p class="text-[10px] font-mono accent uppercase tracking-widest mb-1\\.5">✨ 제안된 변경사항</p>' +
+          '<p class="text-[10px] font-mono accent uppercase tracking-widest mb-1\\.5">' + cardLabel + '</p>' +
           changeLines +
           actionHtml +
         '</div>';
