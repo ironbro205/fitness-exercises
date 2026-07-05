@@ -271,7 +271,8 @@ function renderWorkout() {
   var pullCount = thisWeek.filter(function(w) { return w.sessionKr === 'PULL'; }).length;
   var legsCount = thisWeek.filter(function(w) { return w.sessionKr === 'LEGS'; }).length;
   var freeCount = thisWeek.filter(function(w) { return w.sessionKr === 'FREE'; }).length;
-  
+  var upperCount = thisWeek.filter(function(w) { return w.sessionKr === 'UPPER'; }).length;
+
   // 추천 부위 (가장 적게 한 부위, 룰: legs < pull < push)
   var counts = { push: pushCount, pull: pullCount, legs: legsCount };
   var minCount = Math.min(pushCount, pullCount, legsCount);
@@ -374,6 +375,7 @@ function renderWorkout() {
       partCard('push', 'PUSH', '가슴 · 어깨 · 삼두', '밀기 동작', pushCount) +
       partCard('pull', 'PULL', '등 · 이두', '당기기 동작', pullCount) +
       partCard('legs', 'LEGS', '하체 · 코어', '레그 데이', legsCount) +
+      partCard('upper', 'UPPER', '상체 전체', '가슴·등·어깨·팔', upperCount) +
       partCard('free', 'FREE', '자유 구성', '직접 종목 선택', freeCount) +
       
     '</div>';
@@ -517,7 +519,7 @@ window.goToStep3 = function() {
 
   // 첫 진입 시 첫 봇 메시지
   if (state.routineChatHistory.length === 0) {
-    var partKor = { push: '가슴/어깨/삼두', pull: '등/이두', legs: '하체/코어', free: '자유' };
+    var partKor = { push: '가슴/어깨/삼두', pull: '등/이두', legs: '하체/코어', upper: '가슴/등/어깨/팔', free: '자유' };
     var part = state.selectedBodyPart;
 
     state.routineChatHistory = [
@@ -694,7 +696,7 @@ function renderWorkoutStep3() {
       '<button onclick="backToStep1()" class="text-xs accent mt-4">처음으로</button></div>';
   }
   
-  var partNames = { push: 'PUSH', pull: 'PULL', legs: 'LEGS', free: 'FREE' };
+  var partNames = { push: 'PUSH', pull: 'PULL', legs: 'LEGS', upper: 'UPPER', free: 'FREE' };
   var partName = partNames[state.selectedBodyPart] || routine.bodyPart || '';
   
   // 미리보기 - 종목 리스트
@@ -910,7 +912,7 @@ window.startGeneratedRoutine = function() {
     // 워밍업 1세트 (메인 종목만)
     if (ex.isMain) {
       sets.push({
-        weight: ex.weight ? Math.round((ex.weight * 0.5) / 2.5) * 2.5 : null,
+        weight: ex.weight ? snapWeightToEquipment(ex.weight * 0.5, ex.name) : null,
         reps: 10,
         completed: false,
         isWarmup: true
@@ -920,7 +922,7 @@ window.startGeneratedRoutine = function() {
     // 본 세트
     for (var s = 0; s < (ex.sets || 3); s++) {
       sets.push({
-        weight: ex.weight || null,
+        weight: ex.weight ? snapWeightToEquipment(ex.weight, ex.name) : null,
         reps: parseInt(String(ex.reps).split('-')[0]) || 8,
         completed: false,
         isWarmup: false
@@ -930,6 +932,7 @@ window.startGeneratedRoutine = function() {
     return {
       name: ex.name,
       type: ex.type || '보조',
+      rest: ex.rest,
       sets: sets,
       reps: ex.reps,
       targetReps: ex.reps || '8-12',  // 세션 화면에서 사용
@@ -969,8 +972,8 @@ window.startGeneratedRoutine = function() {
 
 // STEP 2: AI 루틴 분석 결과 화면
 function renderWorkoutStep2() {
-  var partNames = { push: 'PUSH', pull: 'PULL', legs: 'LEGS', free: 'FREE' };
-  var partKor = { push: '가슴 · 어깨 · 삼두', pull: '등 · 이두', legs: '하체 · 코어', free: '자유 구성' };
+  var partNames = { push: 'PUSH', pull: 'PULL', legs: 'LEGS', upper: 'UPPER', free: 'FREE' };
+  var partKor = { push: '가슴 · 어깨 · 삼두', pull: '등 · 이두', legs: '하체 · 코어', upper: '가슴 · 등 · 어깨 · 팔', free: '자유 구성' };
   var part = state.selectedBodyPart;
   var routine = state.generatedRoutine;
   
@@ -1059,6 +1062,12 @@ function renderWorkoutStep2() {
             '<p class="routine-ex-stat-label">RIR</p>' +
             '<p class="routine-ex-stat-value regular">' + ex.rir + '</p>' +
           '</div>' +
+          (ex.rest ? (
+            '<div class="routine-ex-stat">' +
+              '<p class="routine-ex-stat-label">휴식</p>' +
+              '<p class="routine-ex-stat-value regular">' + String(ex.rest).split('-').map(function(x){ var m = parseInt(x, 10) / 60; return (m % 1 === 0) ? m : Math.round(m * 10) / 10; }).join('-') + '분</p>' +
+            '</div>'
+          ) : '') +
         '</div>' +
       '</div>';
   });
@@ -1778,8 +1787,8 @@ window.commitEdit = function(field) {
     if (field === 'reps') {
       set.reps = Math.floor(n);
     } else {
-      // 무게는 0.5kg 단위로 반올림
-      set.weight = Math.round(n * 2) / 2;
+      // 무게는 그 종목 장비 단위로 스냅 (덤벨 2kg·그 외 5kg — .5kg 실행 불가 방지 + 오타 보정)
+      set.weight = snapWeightToEquipment(n, state.activeSession.exercises[s.exerciseIdx].name);
     }
     saveActiveSession();
   }
@@ -1794,7 +1803,7 @@ window.adjustWeight = function(delta) {
   if (!state.editingSet) return;
   var s = state.editingSet;
   var set = state.activeSession.exercises[s.exerciseIdx].sets[s.setIdx];
-  set.weight = Math.max(0, (set.weight || 0) + delta);
+  set.weight = snapWeightToEquipment(Math.max(0, (set.weight || 0) + delta), state.activeSession.exercises[s.exerciseIdx].name);
   saveActiveSession();
   updateEditSheetDisplay();
 };
@@ -1833,11 +1842,12 @@ window.completeSet = function() {
     }
   }
   
-  // 휴식 시간 결정 (복합 vs 고립)
+  // 휴식 시간 결정: AI가 지정한 rest(초) 우선, 없으면 복합/고립 기본값 (B안)
   var isCompound = ['프레스', '풀업', '랫풀다운', '로우', '스쿼트', '데드리프트', '레그 프레스', '핵 스쿼트'].some(function(k) {
     return exercise.name.indexOf(k) !== -1;
   });
-  var restDuration = set.isWarmup ? 60 : (isCompound ? 150 : 90); // 워밍업 1분, 복합 2.5분, 고립 1.5분
+  var aiRest = exercise.rest ? parseInt(String(exercise.rest), 10) : NaN; // 범위 "120-180"이면 하단 120초
+  var restDuration = set.isWarmup ? 60 : ((!isNaN(aiRest) && aiRest > 0) ? aiRest : (isCompound ? 150 : 90));
   
   state.restTimer = {
     startTime: Date.now(),
@@ -2209,14 +2219,17 @@ function renderWorkoutSession() {
             '</div>' +
             '<div class="number-display" onclick="enterEditMode(\'weight\')">' +
               '<p id="sheet-weight-value">' + (set.weight !== null ? set.weight : 0) + '</p>' +
-              '<input id="sheet-weight-input" class="number-input" type="number" inputmode="decimal" step="0.5" min="0" style="display:none;" onclick="event.stopPropagation()" onblur="commitEdit(\'weight\')" onkeydown="if(event.key===\'Enter\')this.blur()" />' +
+              '<input id="sheet-weight-input" class="number-input" type="number" inputmode="decimal" step="' + getWeightIncrement(ex.name) + '" min="0" style="display:none;" onclick="event.stopPropagation()" onblur="commitEdit(\'weight\')" onkeydown="if(event.key===\'Enter\')this.blur()" />' +
             '</div>' +
-            '<div class="adj-grid">' +
-              '<button class="adj-btn" onclick="adjustWeight(-5)">−5</button>' +
-              '<button class="adj-btn" onclick="adjustWeight(-2.5)">−2.5</button>' +
-              '<button class="adj-btn" onclick="adjustWeight(2.5)">+2.5</button>' +
-              '<button class="adj-btn accent-btn" onclick="adjustWeight(5)">+5</button>' +
-            '</div>' +
+            // 조절 버튼 = 종목 장비 단위 (덤벨 ±2/±4, 그 외 ±5/±10). 1칸 = getWeightIncrement
+            (function(inc) {
+              return '<div class="adj-grid">' +
+                '<button class="adj-btn" onclick="adjustWeight(' + (-2 * inc) + ')">−' + (2 * inc) + '</button>' +
+                '<button class="adj-btn" onclick="adjustWeight(' + (-inc) + ')">−' + inc + '</button>' +
+                '<button class="adj-btn" onclick="adjustWeight(' + inc + ')">+' + inc + '</button>' +
+                '<button class="adj-btn accent-btn" onclick="adjustWeight(' + (2 * inc) + ')">+' + (2 * inc) + '</button>' +
+              '</div>';
+            })(getWeightIncrement(ex.name)) +
           '</div>' +
 
           // 횟수 입력
@@ -3406,7 +3419,7 @@ function renderOneRMList() {
     
     var itemsHtml = items.map(function(name) {
       var rm = data[name];
-      var w75 = Math.round((rm * 0.75) / 2.5) * 2.5;
+      var w75 = snapWeightToEquipment(rm * 0.75, name);
       return '<div class="menu-row" style="cursor: default;">' +
         '<div class="flex-1">' +
           '<p class="text-sm font-display font-bold">' + name + '</p>' +

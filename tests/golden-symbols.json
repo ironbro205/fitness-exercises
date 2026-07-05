@@ -1,5 +1,5 @@
 {
-  "functionCount": 196,
+  "functionCount": 198,
   "objectCount": 21,
   "functions": [
     "addBodyRecord",
@@ -93,6 +93,7 @@
     "getTopLayer",
     "getVolumeDiagnosis",
     "getWeekId",
+    "getWeightIncrement",
     "goHome",
     "goToExercise",
     "goToStep3",
@@ -179,6 +180,7 @@
     "showFailureMessage",
     "showToast",
     "skipRest",
+    "snapWeightToEquipment",
     "startGeneratedRoutine",
     "startRestTimerTick",
     "startSession",

@@ -2175,6 +2175,7 @@ button {
 .day-bar-shape.pull { background: linear-gradient(to top, var(--purple), rgba(var(--purple-rgb), 0.5)); }
 .day-bar-shape.legs { background: linear-gradient(to top, var(--warn), rgba(var(--warn-rgb), 0.5)); }
 .day-bar-shape.free { background: linear-gradient(to top, var(--text-muted), rgba(var(--muted-rgb), 0.5)); }
+.day-bar-shape.upper { background: linear-gradient(to top, var(--success), rgba(var(--success-rgb), 0.5)); }
 .day-bar-shape.today {
   outline: 2px solid var(--accent);
   outline-offset: 1px;

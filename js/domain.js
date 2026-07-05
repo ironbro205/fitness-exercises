@@ -21,7 +21,7 @@ function getRecommendedSession() {
   var done = thisWeek.map(function(w) { return w.session || w.sessionKr.toLowerCase(); });
   
   // 우선순위: PUSH → PULL → LEGS → FREE
-  var priority = ['push', 'pull', 'legs', 'free'];
+  var priority = ['push', 'pull', 'legs', 'upper', 'free'];
   for (var i = 0; i < priority.length; i++) {
     if (done.indexOf(priority[i]) === -1) return priority[i];
   }
@@ -232,7 +232,7 @@ function getLastPerformedSets(exerciseName) {
 }
 
 // 점진적 과부하 추천 (더블 프로그레션)
-// 지난 본 세트 모두가 목표 횟수 상단을 달성하면 +2.5kg, 그 외 같은 무게 유지
+// 지난 본 세트 모두가 목표 횟수 상단을 달성하면 +한 칸(장비 단위), 그 외 같은 무게 유지
 // 기록이 없으면 1RM 기반 추천으로 폴백
 function getProgressiveRecommendation(exerciseName, targetReps) {
   var last = getLastPerformedSets(exerciseName);
@@ -247,17 +247,19 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
 
   var maxW = Math.max.apply(null, workingSets.map(function(s) { return s.weight; }));
   var topReps = parseRepRange(targetReps).high || 10;
+  var inc = getWeightIncrement(exerciseName); // 장비 증량 단위 (덤벨 2kg / 그 외 5kg)
 
   var setsAtMaxW = workingSets.filter(function(s) { return s.weight === maxW; });
   var allReachedTop = setsAtMaxW.length > 0 && setsAtMaxW.every(function(s) { return s.reps >= topReps; });
 
   if (allReachedTop) {
+    var newW = snapWeightToEquipment(maxW + inc, exerciseName);
     return {
-      weight: maxW + 2.5,
+      weight: newW,
       source: 'progress',
       previousWeight: maxW,
       previousReps: setsAtMaxW.map(function(s) { return s.reps; }),
-      note: '지난 ' + maxW + 'kg × 상단 ' + topReps + '+회 달성 → +2.5kg'
+      note: '지난 ' + maxW + 'kg × 상단 ' + topReps + '+회 달성 → ' + newW + 'kg'
     };
   }
 
@@ -266,7 +268,7 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
     source: 'maintain',
     previousWeight: maxW,
     previousReps: workingSets.map(function(s) { return s.reps; }),
-    note: '지난 ' + maxW + 'kg에서 ' + topReps + '회 도전 (상단 도달 시 +2.5kg)'
+    note: '지난 ' + maxW + 'kg에서 ' + topReps + '회 도전 (상단 도달 시 +' + inc + 'kg)'
   };
 }
 
@@ -356,6 +358,19 @@ function reconcile1RMFromLog(exerciseNames) {
   if (changed) storage.set(KEYS.ONE_RM_DATA, data);
 }
 
+// 장비별 최소 무게 증량 단위 (사용자 짐 기준): 덤벨 2kg, 그 외(머신·케이블·바벨·스미스) 5kg.
+// 종목 이름으로 판별 (예: "체스트 프레스 머신"→5, "덤벨 숄더 프레스"→2). 맨몸/무게없음은 호출부에서 걸러짐.
+function getWeightIncrement(exerciseName) {
+  return (exerciseName || '').indexOf('덤벨') >= 0 ? 2 : 5;
+}
+
+// 무게를 그 종목 장비가 실제로 낼 수 있는 단위로 스냅(반올림). .5kg 같은 실행 불가 무게 방지.
+function snapWeightToEquipment(weight, exerciseName) {
+  if (!weight || weight <= 0) return weight;
+  var step = getWeightIncrement(exerciseName);
+  return Math.max(step, Math.round(weight / step) * step); // 양수는 최소 1스텝 보장 (0kg 방지)
+}
+
 // 작업 무게 추천 (1RM의 N%) — 신규 종목 또는 기록 없는 종목용 백업
 function suggestWorkingWeight(exerciseName, percentage) {
   var rm = get1RM(exerciseName);
@@ -364,9 +379,8 @@ function suggestWorkingWeight(exerciseName, percentage) {
   var pct = percentage || 0.7; // 기본 70%
   var weight = rm * pct;
   
-  // 머신/덤벨에 따라 반올림
-  // 덤벨: 0.5kg 단위, 머신: 2.5kg 단위 (간단히 둘 다 2.5kg)
-  return Math.round(weight / 2.5) * 2.5;
+  // 장비별 실제 증량 단위로 스냅 (덤벨 2kg / 머신·케이블·바벨·스미스 5kg)
+  return snapWeightToEquipment(weight, exerciseName);
 }
 
 // 1RM 없는 종목에 대해 같은 부위 종목의 1RM 평균으로 추정
@@ -595,7 +609,7 @@ function analyzeRoutineBalance(exercises) {
   if (!exercises || exercises.length === 0) return { partCounts: {}, totalExercises: 0, mainCount: 0, isolationCount: 0, stretchedCount: 0, warnings: [] };
   
   var partCounts = {};        // primary 기준 (정수)
-  var partCountsWithSec = {}; // primary 1.0 + secondary 0.3 (소수)
+  var partCountsWithSec = {}; // primary 1.0 + secondary 0.5 (소수)
   var compoundCount = 0;
   var isolationCount = 0;
   var stretchedCount = 0;
@@ -615,10 +629,10 @@ function analyzeRoutineBalance(exercises) {
     partCounts[info.primary] = (partCounts[info.primary] || 0) + 1;
     partCountsWithSec[info.primary] = (partCountsWithSec[info.primary] || 0) + 1.0;
     
-    // secondary 부위 +0.3 (자극 기여도)
+    // secondary 부위 +0.5 (자극 기여도)
     if (info.secondary && info.secondary.length > 0) {
       info.secondary.forEach(function(s) {
-        partCountsWithSec[s] = (partCountsWithSec[s] || 0) + 0.3;
+        partCountsWithSec[s] = (partCountsWithSec[s] || 0) + 0.5;
       });
     }
     
@@ -694,7 +708,7 @@ function formatBalanceAnalysis(analysis) {
   if (analysis.partCountsWithSec) {
     var secList = Object.keys(analysis.partCountsWithSec).sort(function(a, b) { return analysis.partCountsWithSec[b] - analysis.partCountsWithSec[a]; });
     if (secList.length > 0) {
-      lines.push('실제 자극 (secondary 0.3 포함): ' + secList.map(function(p) { return (BODY_PART_KR[p] || p) + ' ' + analysis.partCountsWithSec[p].toFixed(1); }).join(', '));
+      lines.push('실제 자극 (secondary 0.5 포함): ' + secList.map(function(p) { return (BODY_PART_KR[p] || p) + ' ' + analysis.partCountsWithSec[p].toFixed(1); }).join(', '));
     }
   }
   
@@ -745,10 +759,10 @@ function getRecentVolumeByPart(weeks) {
       // primary 부위에 풀 세트
       volumeByPart[info.primary] = (volumeByPart[info.primary] || 0) + setCount;
       
-      // secondary 부위에 0.3 세트 (메타분석상 secondary 자극 30~40%)
+      // secondary(보조근) 부위에 0.5 세트 (Pelland 2025 분할세트 예측력 최고; 0.3~0.7 휴리스틱 중 0.5)
       if (info.secondary && info.secondary.length > 0) {
         info.secondary.forEach(function(s) {
-          volumeByPart[s] = (volumeByPart[s] || 0) + setCount * 0.3;
+          volumeByPart[s] = (volumeByPart[s] || 0) + setCount * 0.5;
         });
       }
     });
@@ -763,6 +777,8 @@ function getVolumeDiagnosis(volumeByPart, weeks) {
   var lacking = [];
   var optimal = [];
   var excessive = [];
+  var belowOptimal = []; // MEV 통과·최적 하한(주10세트) 미달 (🟡)
+  var untouched = []; // 주0세트 미접촉 (저우선 참고 — '최우선' 도배 방지)
   
   // 그룹 합산
   var groupedVol = groupVolumeBy(volumeByPart);
@@ -773,25 +789,27 @@ function getVolumeDiagnosis(volumeByPart, weeks) {
     var label = BODY_PART_GROUPS[g].kr;
     var entry = { group: g, label: label, vol: weeklyVol };
     
-    if (weeklyVol < 4) {
-      // 0세트인 경우 (운동 안 함)는 진단에서 제외할지 포함할지 — 일단 제외
-      // 사용자가 그 부위 운동 안 했을 때 매번 "부족" 표시는 노이즈
-      if (weeklyVol > 0) {
-        entry.label += ' (주' + weeklyVol.toFixed(1) + '세트)';
-        lacking.push(entry);
-      }
-    } else if (weeklyVol >= 4 && weeklyVol < 10) {
-      // MEV 통과, MAV 미달 — 별도 분류 없이 통과
-    } else if (weeklyVol >= 10 && weeklyVol <= 20) {
+    if (weeklyVol === 0) {
+      // 미접촉: 저우선 참고 버킷(전완·복근 등이 매번 '최우선'으로 도배되는 노이즈 방지)
+      untouched.push(entry);
+    } else if (weeklyVol < 4) {
+      entry.label += ' (주' + weeklyVol.toFixed(1) + '세트)';
+      lacking.push(entry);
+    } else if (weeklyVol < 10) {
+      // MEV는 넘었지만 최적 하한(주10세트) 미달 → 🟡 별도 등급
+      entry.label += ' (주' + weeklyVol.toFixed(1) + '세트·하한 미달)';
+      belowOptimal.push(entry);
+    } else if (weeklyVol <= 24) {
       entry.label += ' (주' + weeklyVol.toFixed(1) + '세트)';
       optimal.push(entry);
-    } else if (weeklyVol > 20) {
+    } else {
+      // 간접(보조근 0.5)까지 24세트 초과 = 수확 체감 구간(하드컷 아님)
       entry.label += ' (주' + weeklyVol.toFixed(1) + '세트)';
       excessive.push(entry);
     }
   });
   
-  return { lacking: lacking, optimal: optimal, excessive: excessive };
+  return { lacking: lacking, belowOptimal: belowOptimal, untouched: untouched, optimal: optimal, excessive: excessive };
 }
 
 // SVG path 생성 (선 그래프)
