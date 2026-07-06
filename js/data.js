@@ -243,10 +243,12 @@ var EXERCISE_BODY_PART_MAP = {
   '덤벨 플라이': { primary: 'chest', secondary: [], compound: false, mainEligible: false, angle: 'flat', stretched: true },
   
   // 어깨 (shoulders)
-  '머신 시티드 숄더 프레스': { primary: 'shoulders_front', secondary: ['shoulders_side', 'triceps'], compound: true, mainEligible: false },
-  '숄더 프레스 머신': { primary: 'shoulders_front', secondary: ['shoulders_side', 'triceps'], compound: true, mainEligible: false },
-  '덤벨 숄더 프레스': { primary: 'shoulders_front', secondary: ['shoulders_side', 'triceps'], compound: true, mainEligible: true },
-  '덤벨 아놀드 프레스': { primary: 'shoulders_front', secondary: ['shoulders_side', 'triceps'], compound: true, mainEligible: true },
+  // 프레스류 보조부위에서 '어깨 측면(shoulders_side)' 제외: 오버헤드 프레스는 전면(front) 주동 + 삼두 보조이며,
+  // 측면 델트 근비대 자극은 미미하다(측면은 사이드 레터럴 레이즈 같은 직접 고립이 필요). 근거: RP/Helms/Schoenfeld.
+  '머신 시티드 숄더 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: false },
+  '숄더 프레스 머신': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: false },
+  '덤벨 숄더 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: true },
+  '덤벨 아놀드 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: true },
   '덤벨 사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false },
   '사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false },
   '케이블 원 암 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, stretched: true },
@@ -367,7 +369,10 @@ var BODY_PART_GROUPS = {
   hamstrings:      { kr: '햄스트링',   subParts: ['hamstrings'], size: 'large' },
   glutes:          { kr: '둔근',       subParts: ['glutes', 'glutes_med'], size: 'large' },
   adductors:       { kr: '내전근',     subParts: ['adductors'], size: 'small' },
-  calves:          { kr: '종아리',     subParts: ['calves'], size: 'small' },
+  // 종아리: 어떤 종목도 calves를 보조근(secondary)으로 두지 않아 복합운동 간접자극이 거의 0 →
+  // '작은 근육=간접자극으로 목표 낮춤' 전제가 성립 안 함. 볼륨 목표는 큰 근육 수준으로 둔다(고볼륨 내성).
+  // 이 size 값은 해부학적 크기가 아니라 '직접 볼륨 목표' 분류이며, getVolumeDiagnosis·ai.js 볼륨 임계가 함께 참조. 근거: RP/Schoenfeld.
+  calves:          { kr: '종아리',     subParts: ['calves'], size: 'large' },
   abs:             { kr: '복근',       subParts: ['abs', 'obliques'], size: 'small' },
   lower_back:      { kr: '요추',       subParts: ['lower_back'], size: 'small' }
 };

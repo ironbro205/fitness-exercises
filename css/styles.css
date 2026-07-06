@@ -3,20 +3,20 @@
    (값은 기존과 동일. 색 하나 바꾸려면 이 블록만 수정)
    ═══════════════════════════════════════════════ */
 :root {
-  /* 액센트 (청록) */
-  --accent: #00d4ff;        --accent-rgb: 0, 212, 255;
-  /* 배경 4단계 (깊음→밝음) */
-  --bg-0: #050810;          --bg-0-rgb: 5, 8, 16;
-  --bg-1: #0a1530;
-  --bg-2: #0f1525;
-  --bg-3: #1a2540;
-  --bg-4: #2a3550;          --bg-4-rgb: 42, 53, 80;
-  /* 텍스트 */
-  --text-muted: #6b7a99;    --muted-rgb: 107, 122, 153;
-  --text-dim: #4a5568;
-  --text-soft: #b0b8d0;
-  --text-faint: #8a99b8;
-  /* 상태색 */
+  /* 액센트 (오렌지 — 형광 청록 #00d4ff에서 교체) */
+  --accent: #F68460;        --accent-rgb: 246, 132, 96;
+  /* 배경 4단계 (깊음→밝음, 따뜻한 차콜 — 눈부심 완화) */
+  --bg-0: #201E1B;          --bg-0-rgb: 32, 30, 27;
+  --bg-1: #2B2926;
+  --bg-2: #333029;
+  --bg-3: #3D3934;
+  --bg-4: #4A453F;          --bg-4-rgb: 74, 69, 63;
+  /* 텍스트 (대비 개선 — 흐린 회색 상향) */
+  --text-muted: #B1ACA5;    --muted-rgb: 177, 172, 165;
+  --text-dim: #877F73;
+  --text-soft: #D5D2CC;
+  --text-faint: #9B948A;
+  /* 상태색 (기능색 — 유지) */
   --danger: #ef4444;        --danger-rgb: 239, 68, 68;
   --warn: #fbbf24;          --warn-rgb: 251, 191, 36;
   --success: #22c55e;       --success-rgb: 34, 197, 94;
@@ -29,11 +29,12 @@
   /* 오버레이용 흑/백 */
   --white-rgb: 255, 255, 255;
   --black-rgb: 0, 0, 0;
-  /* 폰트 — 한글은 Pretendard, 라틴/숫자는 기존 폰트 우선 + 한글 폴백 */
-  --font-body: 'Pretendard Variable', 'Pretendard', 'Space Grotesk', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-sans: 'Space Grotesk', 'Pretendard Variable', 'Pretendard', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Pretendard Variable', 'Pretendard', ui-monospace, monospace;
-  --font-bebas: 'Bebas Neue', 'Pretendard Variable', 'Pretendard', sans-serif;
+  /* 폰트 — 원티드 산스 한 벌(제목·본문·숫자). 위계는 굵기로. 한글 시스템 폴백 견고 */
+  --font: 'Wanted Sans Variable', 'Wanted Sans', 'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Segoe UI Symbol';
+  --font-body: var(--font);
+  --font-sans: var(--font);
+  --font-mono: var(--font);
+  --font-bebas: var(--font);
 }
 
 /* ═══════════════════════════════════════════════
@@ -69,7 +70,7 @@ button {
    ═══════════════════════════════════════════════ */
 .font-display { font-family: var(--font-sans); }
 .font-mono { font-family: var(--font-mono); }
-.font-bebas { font-family: var(--font-bebas); letter-spacing: 0.05em; }
+.font-bebas { font-family: var(--font-bebas); letter-spacing: 0; }
 
 /* ═══════════════════════════════════════════════
    LAYOUT HELPERS

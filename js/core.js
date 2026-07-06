@@ -335,10 +335,10 @@ function scrollRoutineChatToBottom() {
 // 간단한 토스트 함수
 function showToast(message, isError) {
   var toast = document.createElement('div');
-  var bgColor = isError ? '#ef4444' : '#00d4ff';
-  var textColor = isError ? 'white' : '#050810';
-  var shadow = isError ? 'rgba(239,68,68,0.4)' : 'rgba(0,212,255,0.4)';
-  toast.style.cssText = 'position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%); background: ' + bgColor + '; color: ' + textColor + '; padding: 12px 24px; border-radius: 100px; font-family: Space Grotesk, sans-serif; font-weight: 700; font-size: 13px; z-index: 9999; box-shadow: 0 8px 24px ' + shadow + '; max-width: 90vw; text-align: center;';
+  var bgColor = isError ? 'var(--danger)' : 'var(--accent)';
+  var textColor = isError ? 'white' : 'var(--bg-0)';
+  var shadow = isError ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.4)';
+  toast.style.cssText = 'position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%); background: ' + bgColor + '; color: ' + textColor + '; padding: 12px 24px; border-radius: 100px; font-family: var(--font); font-weight: 700; font-size: 13px; z-index: 9999; box-shadow: 0 8px 24px ' + shadow + '; max-width: 90vw; text-align: center;';
   toast.textContent = message;
   document.body.appendChild(toast);
   setTimeout(function() {
