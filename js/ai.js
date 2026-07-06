@@ -1,4 +1,4 @@
-// js/ai.js — Anthropic API 호출 + 프롬프트 (코치/음식/루틴/리뷰/정체기)
+// js/ai.js — Anthropic API 호출 + 프롬프트 (코치/루틴/리뷰/정체기)
 'use strict';
 
 // AI 응답에서 첫 '{'부터 짝이 맞는 '}'까지 정확히 잘라낸다 (문자열·이스케이프 고려).
@@ -19,86 +19,6 @@ function extractBalancedJson(s) {
     else if (ch === '}') { depth--; if (depth === 0) return s.slice(start, i + 1); }
   }
   return null;
-}
-
-// ═══════════════════════════════════════════════
-// Haiku API 호출 (DB 매칭 실패 시)
-// ═══════════════════════════════════════════════
-async function analyzeFoodWithAI(text) {
-  var apiKey = state.apiKey;
-  if (!apiKey) return null;
-  
-  var systemPrompt = '당신은 한국 음식 영양 분석 전문가입니다. 사용자가 입력한 음식의 단백질(g), 칼로리(kcal), 탄수화물(g), 지방(g)을 분석해 JSON으로만 응답하세요. 양이 명시되지 않으면 일반적인 1인분 기준. 한국 음식과 양 단위(인분, 그릇, 공기, 줌 등)에 익숙합니다. 응답은 반드시 다음 형식의 JSON만 포함하세요:\n{"foods": [{"name": "음식명", "amount": "양 표시(예: 100g)", "protein": 숫자, "kcal": 숫자, "carbs": 숫자, "fat": 숫자}]}\n\n여러 음식이 있으면 foods 배열에 각각 분리. 추가 설명 금지, JSON만 출력.';
-  
-  try {
-    var response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5',
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: [
-          { role: 'user', content: text }
-        ]
-      })
-    });
-    
-    if (!response.ok) {
-      var errorText = await response.text();
-      console.error('API error:', response.status, errorText);
-      return { error: 'API 오류 (' + response.status + ')', detail: errorText };
-    }
-    
-    var data = await response.json();
-    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
-      return { error: 'AI 응답이 비어있어요. 다시 시도해주세요.' };
-    }
-    var content = data.content[0].text;
-    
-    // JSON 추출 (```json 블록 제거)
-    var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    
-    var parsed;
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch (e) {
-      // JSON 추출 시도 (텍스트 중간에 JSON이 있을 경우)
-      var match = cleaned.match(/\{[\s\S]*\}/);
-      if (match) {
-        parsed = JSON.parse(match[0]);
-      } else {
-        throw e;
-      }
-    }
-    
-    if (!parsed.foods || !Array.isArray(parsed.foods)) {
-      return { error: '응답 형식 오류' };
-    }
-    
-    // 형식 정규화
-    return {
-      foods: parsed.foods.map(function(f) {
-        return {
-          name: f.name || '음식',
-          amount: f.amount || '1인분',
-          protein: Math.round((parseFloat(f.protein) || 0) * 10) / 10,
-          kcal: Math.round(parseFloat(f.kcal) || 0),
-          carbs: Math.round((parseFloat(f.carbs) || 0) * 10) / 10,
-          fat: Math.round((parseFloat(f.fat) || 0) * 10) / 10,
-          aiAnalyzed: true
-        };
-      })
-    };
-  } catch (error) {
-    console.error('AI 분석 실패:', error);
-    return { error: '네트워크 오류 또는 응답 파싱 실패: ' + error.message };
-  }
 }
 
 // AI에게 루틴 수정 요청
@@ -318,8 +238,7 @@ function buildUserContext(options) {
   var focusBodyPart = options.focusBodyPart || null;
   var profile = state.profile;
   var today = new Date();
-  var todayStr = getTodayStr();
-  
+
   // 최근 4주 운동
   var fourWeeksAgo = new Date(today);
   fourWeeksAgo.setDate(today.getDate() - 28);
@@ -342,26 +261,6 @@ function buildUserContext(options) {
   var pullCnt = recentWorkouts.filter(function(w) { return w.sessionKr === 'PULL'; }).length;
   var legsCnt = recentWorkouts.filter(function(w) { return w.sessionKr === 'LEGS'; }).length;
   var upperCnt = recentWorkouts.filter(function(w) { return w.sessionKr === 'UPPER'; }).length;
-  
-  // 오늘 영양
-  var todayMeals = state.data.nutritionLog.filter(function(m) { return m.date === todayStr; });
-  var todayProtein = todayMeals.reduce(function(s, m) { return s + (m.protein || 0); }, 0);
-  var todayKcal = todayMeals.reduce(function(s, m) { return s + (m.kcal || 0); }, 0);
-  var thresholdCnt = todayMeals.filter(function(m) { return m.thresholdPassed; }).length;
-  
-  // 최근 7일 단백질 평균
-  var sevenDaysAgo = new Date(today);
-  sevenDaysAgo.setDate(today.getDate() - 7);
-  var sevenDaysAgoStr = getDateStr(sevenDaysAgo);
-  var recentMeals = state.data.nutritionLog.filter(function(m) { return m.date >= sevenDaysAgoStr; });
-  var dailyP = {};
-  recentMeals.forEach(function(m) {
-    if (!dailyP[m.date]) dailyP[m.date] = 0;
-    dailyP[m.date] += m.protein || 0;
-  });
-  var avgP7 = Object.values(dailyP).length > 0 
-    ? Math.round(Object.values(dailyP).reduce(function(s, p) { return s + p; }, 0) / Object.values(dailyP).length) 
-    : 0;
   
   // 체중 추이
   var bodyLog = state.data.bodyLog || [];
@@ -424,17 +323,7 @@ function buildUserContext(options) {
   ctx += '- 경력: 명목상 중급, 실질 초~중급\n';
   ctx += '- 환경: 헬스장 머신/덤벨 위주, 풀업 ' + pullupRangeStr + '개 가능\n';
   ctx += '- 사이클: ' + profile.currentCycle + '차 / ' + profile.currentWeek + '주차 (' + profile.cyclePhase + ')\n';
-  ctx += '- 목표: 단백질 ' + profile.proteinTarget + 'g, 칼로리 ' + profile.calorieTarget + 'kcal/일, 주 ' + profile.workoutFreq + '회 운동\n\n';
-  
-  ctx += '## 오늘 상태 (' + todayStr + ')\n';
-  ctx += '- 단백질: ' + todayProtein + 'g / ' + profile.proteinTarget + 'g (' + thresholdCnt + '/4 끼니 임계점 통과)\n';
-  ctx += '- 칼로리: ' + todayKcal + 'kcal\n';
-  if (todayMeals.length > 0) {
-    ctx += '- 오늘 먹은 끼니: ' + todayMeals.map(function(m) { return m.mealKr + '(' + m.protein + 'g)'; }).join(', ') + '\n';
-  } else {
-    ctx += '- 아직 기록한 끼니 없음\n';
-  }
-  ctx += '\n';
+  ctx += '- 목표: 주 ' + profile.workoutFreq + '회 운동\n\n';
   
   ctx += '## 이번 주 운동\n';
   if (thisWeekWorkouts.length > 0) {
@@ -465,7 +354,6 @@ function buildUserContext(options) {
   ctx += '## 최근 4주 패턴\n';
   ctx += '- 총 ' + recentWorkouts.length + '회 운동\n';
   ctx += '- PUSH: ' + pushCnt + '회, PULL: ' + pullCnt + '회, LEGS: ' + legsCnt + '회, UPPER: ' + upperCnt + '회\n';
-  ctx += '- 단백질 7일 평균: ' + avgP7 + 'g (목표 ' + profile.proteinTarget + 'g)\n';
   if (Math.abs(parseFloat(weightChange)) > 0) {
     ctx += '- 체중 변화 (1개월): ' + (weightChange > 0 ? '+' : '') + weightChange + 'kg\n';
   }
@@ -618,21 +506,6 @@ function buildUserContext(options) {
     ctx += '\n';
   }
   
-  // 영양 × 운동 연결 분석
-  var workedOutToday = state.data.workoutLog.some(function(w) { return w.date === todayStr; });
-  if (workedOutToday) {
-    var proteinDeficit = profile.proteinTarget - todayProtein;
-    if (proteinDeficit > 30) {
-      ctx += '## ⚠️ 영양·회복 경고\n';
-      ctx += '- 오늘 운동 완료. 현재 단백질 ' + todayProtein + 'g (목표 대비 -' + proteinDeficit + 'g 부족)\n';
-      ctx += '- 회복 위해 단백질 ' + proteinDeficit + 'g 추가 섭취 권장 (운동 후 24시간 내 핵심)\n\n';
-    } else if (todayKcal < profile.calorieTarget * 0.6) {
-      ctx += '## ⚠️ 영양·회복 경고\n';
-      ctx += '- 오늘 운동 완료. 칼로리 ' + todayKcal + 'kcal (목표의 60% 미만)\n';
-      ctx += '- 큰 적자 시 근손실 위험. 추가 섭취 권장\n\n';
-    }
-  }
-  
   // 컨디션 추이 (최근 5회)
   var conditionLog = state.data.conditionLog || [];
   if (conditionLog.length > 0) {
@@ -705,29 +578,29 @@ function buildUserContext(options) {
 //  - stable: 역할·원칙·지식 베이스·답변규칙 (사용자 데이터 없음 → 호출마다 동일 → prompt caching 적중)
 //  - dynamic: 기억 노트 + 사용자 현재 데이터 (매번 바뀜 → 캐시 분기점 뒤)
 function buildCoachSystemParts() {
-  var stable = '당신은 사용자의 개인 피트니스 코치다. 운동생리학·영양학·스포츠과학의 메타분석 근거와 아래 지식 베이스에 기반해 코칭한다.\n\n' +
+  var stable = '당신은 사용자의 개인 피트니스 코치다. 운동생리학·스포츠과학의 메타분석 근거와 아래 지식 베이스에 기반해 코칭한다.\n\n' +
 
     '## 코칭 원칙\n' +
     '1. **근거 우선** — 메타분석/원리를 근거로 말한다. 확실하지 않으면 모른다고 밝히고 추측을 단정하지 않는다.\n' +
-    '2. **데이터 기반 개인화** — 내 데이터(부족/과잉 부위, 1RM, 단백질 평균 등)에 관한 질문은 그 데이터를 직접 인용한다.\n' +
+    '2. **데이터 기반 개인화** — 내 데이터(부족/과잉 부위, 1RM 등)에 관한 질문은 그 데이터를 직접 인용한다.\n' +
     '3. **사용자 환경 존중** — 머신/덤벨 중심. 프리웨이트 강요 금지.\n' +
-    '4. **점진적 과부하** — 구체적 수치 (예: 62.5 → 65kg).\n\n' +
+    '4. **점진적 과부하** — 구체적 수치 (예: 62.5 → 65kg).\n' +
+    '5. **근손실 방지 넛지** — 체지방을 빼는 시기에도 근육을 지키려면 웨이트(근력운동)를 병행하고 단백질을 충분히 확보하라고 조언할 수 있다(앱에 영양 추적 기능은 없으니 일반 텍스트 조언으로만).\n\n' +
 
     '## 🧬 지식 베이스 (이 내용을 활용해 충실히 답한다)\n' +
     COACH_KNOWLEDGE + '\n' +
 
     '## 답변 방식 (질문 유형별 — 중요)\n' +
     '사용자 메시지를 두 종류로 구분해 답한다.\n' +
-    '1. **개인 데이터 질문** (내 루틴/볼륨/무게/단백질/진도 등 "나"에 관한 것)\n' +
+    '1. **개인 데이터 질문** (내 루틴/볼륨/무게/진도 등 "나"에 관한 것)\n' +
     '   → 아래 "사용자 현재 데이터"를 직접 인용해 개인화한다. 데이터에 없는 내 수치를 지어내지 말 것.\n' +
-    '2. **일반 운동·영양 지식 질문** (종목 자세, 부상·통증, 식단 전략, 보충제, 원리 등)\n' +
+    '2. **일반 운동 지식 질문** (종목 자세, 부상·통증, 원리 등)\n' +
     '   → 위 지식 베이스와 너의 운동과학 지식으로 충실하고 구체적으로 답한다. 막연한 응원 대신 근거(메타분석/원리)를 들어 설명하고, 확실하지 않은 부분은 불확실하다고 밝힌다.\n' +
     '3. 두 종류가 섞이면 일반 지식으로 원리를 설명한 뒤 사용자 데이터로 개인화한다.\n\n' +
 
     '## 🎯 개인 데이터 인용 예시\n' +
     '- "이번 주 어깨 측면 주 2.5세트로 부족해요" (부위별 볼륨 인용)\n' +
     '- "1RM 레그프레스 240kg 기준, 작업 무게 168kg 권장" (1RM 인용)\n' +
-    '- "단백질 7일 평균 130g인데 목표 155g과 25g 차이" (영양 인용)\n' +
     '- "체스트프레스 65kg 3회 연속 같음 = 정체기, +5kg 도전" (정체기 활용)\n' +
     '※ "부위별 주간 볼륨"은 그룹 합산(가슴 = chest+chest_upper+chest_lower 등). 그대로 인용 OK.\n\n' +
 
@@ -1278,27 +1151,10 @@ function collectWeekData() {
     return d >= monday && d <= sunday;
   });
   
-  var weekMeals = state.data.nutritionLog.filter(function(m) {
-    var d = new Date(m.date);
-    return d >= monday && d <= sunday;
-  });
-  
   var weekPRs = state.data.personalRecords.filter(function(p) {
     var d = new Date(p.date);
     return d >= monday && d <= sunday;
   });
-  
-  // 일별 단백질
-  var dailyP = {};
-  weekMeals.forEach(function(m) {
-    if (!dailyP[m.date]) dailyP[m.date] = 0;
-    dailyP[m.date] += m.protein || 0;
-  });
-  var dailyProteins = Object.values(dailyP);
-  var avgProtein = dailyProteins.length > 0 
-    ? Math.round(dailyProteins.reduce(function(s, p) { return s + p; }, 0) / dailyProteins.length)
-    : 0;
-  var achievedDays = dailyProteins.filter(function(p) { return p >= state.profile.proteinTarget; }).length;
   
   // 체중 변화
   var weekBodyLogs = (state.data.bodyLog || []).filter(function(b) {
@@ -1320,9 +1176,6 @@ function collectWeekData() {
     freeCount: weekWorkouts.filter(function(w) { return w.sessionKr === 'FREE'; }).length,
     upperCount: weekWorkouts.filter(function(w) { return w.sessionKr === 'UPPER'; }).length,
     prs: weekPRs,
-    avgProtein: avgProtein,
-    achievedDays: achievedDays,
-    daysTracked: dailyProteins.length,
     weightChange: parseFloat(weightChange),
     startWeight: startWeight,
     endWeight: endWeight
@@ -1358,9 +1211,6 @@ async function generateWeeklyReview(forceRefresh) {
       weekSummary += '  · ' + dayMap[d.getDay()] + ': ' + w.sessionKr + ' (' + w.duration + '분, ' + w.sets + '세트)\n';
     });
   }
-  weekSummary += '\n### 영양\n';
-  weekSummary += '- 단백질 일평균: ' + weekData.avgProtein + 'g (목표 ' + profile.proteinTarget + 'g)\n';
-  weekSummary += '- 목표 달성일: ' + weekData.achievedDays + '/' + Math.max(1, weekData.daysTracked) + '일\n';
   weekSummary += '\n### 체중\n';
   weekSummary += '- 시작: ' + weekData.startWeight + 'kg → 종료: ' + weekData.endWeight + 'kg (' + (weekData.weightChange > 0 ? '+' : '') + weekData.weightChange + 'kg)\n';
   if (weekData.prs.length > 0) {
@@ -1430,21 +1280,20 @@ async function generateWeeklyReview(forceRefresh) {
     if (condCnt > 0) weekSummary += '- 전반 컨디션 평균: ' + (avgCond / condCnt).toFixed(1) + '/5\n';
   }
   
-  var systemPrompt = '당신은 사용자의 피트니스 코치입니다. 이번 주 운동/영양/체중 데이터를 분석해 주간 리뷰를 작성하세요. ' +
+  var systemPrompt = '당신은 사용자의 피트니스 코치입니다. 이번 주 운동/체중 데이터를 분석해 주간 리뷰를 작성하세요. ' +
     '반드시 JSON으로만 응답하세요.\n\n' +
     
     '## 🧬 평가 기준 (과학 근거)\n' +
     '- **운동 빈도**: 부위당 주 2회 자극 우월 (Schoenfeld 2016)\n' +
     '- **부위 볼륨**: 큰 근육(가슴·등·다리·둔근) 주 10~20세트 / 작은 근육(팔·어깨·종아리) 주 8~16세트 적정 (Pelland 2024, 간접세트 0.5 합산). 작은 근육은 복합운동 간접자극으로 목표가 낮다. 하한 미만 = 부족, 상한 초과 = 수확 체감\n' +
     '- **부위 균형**: PUSH/PULL/LEGS 골고루. 한 부위만 과잉 X.\n' +
-    '- **단백질**: 목표 달성률 (1.6~2.2g/kg 권장)\n' +
     '- **체중 변화**: 리컴포지션 목표 시 ±0.3kg/주 적정\n' +
     '- **PR 갱신**: 점진적 과부하 성과 지표\n\n' +
     
     '## 등급 기준\n' +
-    '- S: 운동 빈도 달성 + 부위 균형 + 단백질 90%+ + PR 갱신 있음\n' +
-    '- A: 운동 빈도 달성 + 단백질 80%+\n' +
-    '- B: 운동 빈도 70%+ 또는 단백질 70%+\n' +
+    '- S: 운동 빈도 달성 + 부위 균형 + PR 갱신 있음\n' +
+    '- A: 운동 빈도 달성 + 부위 균형\n' +
+    '- B: 운동 빈도 70%+\n' +
     '- C: 부분 달성 (40~60%)\n' +
     '- D: 거의 미실행 (40% 미만)\n\n' +
     
@@ -1460,7 +1309,7 @@ async function generateWeeklyReview(forceRefresh) {
     
     '## 사용자 프로필\n' +
     '- ' + profile.age + '세, ' + profile.height + 'cm, 목표: 린매스\n' +
-    '- 목표: 주 ' + profile.workoutFreq + '회 운동, 단백질 ' + profile.proteinTarget + 'g/일\n' +
+    '- 목표: 주 ' + profile.workoutFreq + '회 운동\n' +
     '- 사이클: ' + profile.currentCycle + '차 / ' + profile.currentWeek + '주차 (' + profile.cyclePhase + ')\n\n' +
     weekSummary;
   
@@ -1520,8 +1369,6 @@ async function generateWeeklyReview(forceRefresh) {
       coachNote: parsed.coachNote || '',
       stats: {
         workoutCount: weekData.workoutCount,
-        avgProtein: weekData.avgProtein,
-        achievedDays: weekData.achievedDays,
         weightChange: weekData.weightChange,
         prCount: weekData.prs.length
       },
@@ -1621,23 +1468,6 @@ function detectPlateauSignals() {
     signals.push('frequency_drop');
   }
 
-  // 4. 단백질 평균 부족
-  var recentMeals = state.data.nutritionLog.filter(function(m) {
-    return m.date >= oneWeekAgoStr;
-  });
-  var dailyP = {};
-  recentMeals.forEach(function(m) {
-    if (!dailyP[m.date]) dailyP[m.date] = 0;
-    dailyP[m.date] += m.protein || 0;
-  });
-  var values = Object.values(dailyP);
-  if (values.length > 0) {
-    var avg = values.reduce(function(s, p) { return s + p; }, 0) / values.length;
-    if (avg < state.profile.proteinTarget * 0.85) {
-      signals.push('protein_low');
-    }
-  }
-  
   return signals;
 }
 
@@ -1650,8 +1480,7 @@ async function analyzePlateauWithAI(signals) {
   var signalDescriptions = {
     'pr_stalled': '최근 2주간 PR 갱신 없음',
     'weight_stalled': '최근 2주간 체중 변화 0.3kg 미만',
-    'frequency_drop': '이번 주 운동 빈도가 목표보다 적음',
-    'protein_low': '최근 7일 단백질 평균이 목표 대비 85% 미만'
+    'frequency_drop': '이번 주 운동 빈도가 목표보다 적음'
   };
   
   var signalText = signals.map(function(s) { return '- ' + signalDescriptions[s]; }).join('\n');
@@ -1669,7 +1498,6 @@ async function analyzePlateauWithAI(signals) {
     '}\n\n' +
     '## 정체기 분석 원칙\n' +
     '- 점진 과부하 실패: 중량/횟수 정체 → 디로드 또는 변형 자극\n' +
-    '- 영양 부족: 단백질/칼로리 → 분배 또는 총량 조정\n' +
     '- 회복 부족: 빈도/수면 → 휴식일 늘리기\n' +
     '- 자극 적응: 같은 종목 6주 이상 → 종목 교체\n\n' +
     '## 사용자 데이터\n' + context;
@@ -1760,4 +1588,271 @@ async function loadPlateauCheckIfNeeded() {
   state.plateauCheck = analysis;
   state.plateauCheckLoading = false;
   render();
+}
+
+// ═══════════════════════════════════════════════
+// 유산소 인터벌 생성 (러닝머신 걷기·뛰기) — Sonnet
+// 입력: 운동 시간(분)만. 출력: 그 시간에 "딱 맞는" 구간 리스트.
+// 반환: { headline, totalSec, segments:[{startSec,endSec,type,speed,label}], note } | null(API 키 없음)
+// 근거: cardio-research.md — 첫 회 보수적 처방 / 향상 우선순위(★속력 아님: 비율·시간 먼저) /
+//       완주+RPE 게이트 / 정직한 톤(인터벌=지방순삭 아님) / 안전 가드레일(워밍업·쿨다운·10%·근손실 넛지).
+// ★시간 초과는 프롬프트만 믿지 않고 코드(fitToTotal)에서 절대 불가하게 보정한다.
+// ═══════════════════════════════════════════════
+async function generateCardioInterval(totalMinutes) {
+  // 계약: API 키 없으면 null (상위 화면이 안내)
+  if (!state.apiKey) return null;
+
+  // 입력 시간 정규화 (분 → 초). 병적 입력(음수·NaN·초대형)만 방어적으로 클램프.
+  var mins = Math.round(Number(totalMinutes) || 0);
+  mins = Math.max(3, Math.min(180, mins));
+  var totalSec = mins * 60;
+
+  var ALLOWED_TYPES = { warmup: 1, run: 1, walk: 1, cooldown: 1 };
+  var DEFAULT_LABEL = { warmup: '워밍업 걷기', run: '뛰기', walk: '걷기 회복', cooldown: '쿨다운 걷기' };
+  var DEFAULT_SPEED = { warmup: 3.5, run: 7, walk: 4, cooldown: 3.5 };
+
+  // 속력 숫자 정리: km/h, 1~20 클램프, 소수 1자리. 이상값이면 종류별 기본값.
+  function cleanSpeed(v, type) {
+    var n = Number(v);
+    if (!isFinite(n) || n <= 0) n = DEFAULT_SPEED[type] || 4;
+    if (n < 1) n = 1;
+    if (n > 20) n = 20;
+    return Math.round(n * 10) / 10;
+  }
+
+  // AI/폴백 구간(길이 sec 기반)을 totalSec에 "정확히" 맞춘다.
+  //  - 누적 위치를 반올림해 정수 경계를 만든다 → 구간 합이 항상 totalSec (초과·미달 0).
+  //  - 종류/속력 이상값 정리, 퇴화(0초) 구간 제거, 첫 구간 0초부터 연속 보장.
+  function fitToTotal(raw) {
+    var clean = [];
+    var sum = 0;
+    for (var i = 0; i < raw.length; i++) {
+      var seg = raw[i] || {};
+      var type = ALLOWED_TYPES[seg.type] ? seg.type : 'walk';
+      var sec = Number(seg.sec);
+      if (!isFinite(sec) || sec <= 0) continue;
+      clean.push({
+        type: type,
+        sec: sec,
+        speed: cleanSpeed(seg.speed, type),
+        label: (typeof seg.label === 'string' && seg.label.trim()) ? seg.label.trim() : (DEFAULT_LABEL[type] || '구간')
+      });
+      sum += sec;
+    }
+    if (!clean.length || sum <= 0) return null;
+
+    var out = [];
+    var prev = 0;
+    var cum = 0;
+    for (var j = 0; j < clean.length; j++) {
+      cum += clean[j].sec * totalSec / sum;               // 스케일된 누적 위치(실수)
+      var end = (j === clean.length - 1) ? totalSec : Math.round(cum);
+      if (end < prev) end = prev;
+      if (end > totalSec) end = totalSec;
+      if (end - prev <= 0) continue;                       // 퇴화 구간 스킵(누적은 유지)
+      out.push({
+        startSec: prev,
+        endSec: end,
+        type: clean[j].type,
+        speed: clean[j].speed,
+        label: clean[j].label
+      });
+      prev = end;
+    }
+    if (!out.length) return null;
+    // 마지막 구간이 정확히 끝(totalSec)까지 덮게 보정
+    if (out[out.length - 1].endSec !== totalSec) out[out.length - 1].endSec = totalSec;
+    return out;
+  }
+
+  // 지난 유산소 기록 요약 → 점진·게이트 컨텍스트. 기록 없으면 첫 회 안내.
+  function cardioHistoryContext() {
+    var log = (state.data && Array.isArray(state.data.cardioLog)) ? state.data.cardioLog : [];
+    if (!log.length) return '기록 없음 — 첫 회입니다. 위 "첫 회 처방"을 그대로 적용하고, 속력 욕심 없이 완주를 목표로 보수적으로 짜세요.';
+
+    var sorted = log.slice().sort(function(a, b) {
+      var da = (a && a.date) ? String(a.date) : '';
+      var db = (b && b.date) ? String(b.date) : '';
+      if (da === db) return 0;
+      return da < db ? 1 : -1;                             // 최근이 앞으로
+    });
+    var recent = sorted.slice(0, 3);
+
+    function avg(arr, pick) {
+      var vals = [];
+      arr.forEach(function(g) {
+        var v = Number(pick(g));
+        if (isFinite(v) && v > 0) vals.push(v);
+      });
+      if (!vals.length) return null;
+      var s = 0; vals.forEach(function(v) { s += v; });
+      return s / vals.length;
+    }
+
+    var lines = [];
+    recent.forEach(function(s, idx) {
+      if (!s) return;
+      var m = s.totalSec ? Math.round(s.totalSec / 60) : '?';
+      var segs = Array.isArray(s.segments) ? s.segments : [];
+      var runs = segs.filter(function(g) { return g && g.type === 'run'; });
+      var walks = segs.filter(function(g) { return g && g.type === 'walk'; });
+      var runSpeed = avg(runs, function(g) { return (typeof g.actualSpeed === 'number' ? g.actualSpeed : g.targetSpeed); });
+      var runSec = avg(runs, function(g) { return g.sec; });
+      var walkSec = avg(walks, function(g) { return g.sec; });
+      var done = s.completed ? '완주O' : '미완주X';
+      var rpe = (typeof s.rpe === 'number') ? ('RPE ' + s.rpe) : 'RPE기록없음';
+      var detail = '뛰기 ' + runs.length + '회' +
+        (runSec ? ' 각 ~' + Math.round(runSec) + '초' : '') +
+        (runSpeed ? ' ~' + (Math.round(runSpeed * 10) / 10) + 'km/h' : '') +
+        (walkSec ? ' / 걷기 각 ~' + Math.round(walkSec) + '초' : '');
+      var tag = idx === 0 ? '지난 회(기준선)' : (s.date || '이전');
+      lines.push('- ' + tag + ': ' + m + '분 · ' + done + ' · ' + rpe + ' · ' + detail);
+    });
+
+    // 코드가 완주+RPE로 향상/유지/하향을 1차 판정(참고). 최종 축·폭은 프롬프트 규칙대로.
+    var last = recent[0] || {};
+    var gate;
+    if (!last.completed) gate = '지난 회 미완주 → 이번엔 하향(걷기 +30초 또는 뛰기 -15초, 통증 있었으면 더 보수적으로).';
+    else if (typeof last.rpe === 'number' && last.rpe <= 7) gate = '지난 회 완주 + RPE≤7 → 향상 우선순위에서 "한 축만" 소폭 상향(먼저 걷기 단축/비율↑, 그다음 뛰기 시간↑, 속력·경사는 맨 마지막).';
+    else if (typeof last.rpe === 'number' && last.rpe >= 8) gate = '지난 회 완주지만 RPE 높음(8~9) → 이번엔 유지(그대로).';
+    else gate = '지난 회 완주(RPE 미기록) → 유지하거나 아주 소폭만 상향(보수적).';
+
+    return lines.join('\n') + '\n\n코드 판정(참고): ' + gate;
+  }
+
+  // 파싱 실패/네트워크 오류 시 폴백: 연구 첫 회 템플릿을 시간에 맞춰 스케일(기능이 항상 동작하도록).
+  function fallbackPlan() {
+    var warm = Math.min(300, Math.max(120, Math.round(totalSec * 0.2)));
+    var cool = warm;
+    var mid = totalSec - warm - cool;
+    var raw = [{ type: 'warmup', sec: warm, speed: 3.5, label: '워밍업 걷기' }];
+    if (mid < 120) {
+      raw.push({ type: 'walk', sec: Math.max(1, mid), speed: 5, label: '빠르게 걷기' });
+    } else {
+      var reps = Math.max(1, Math.floor(mid / 180));       // [뛰기 60초 + 걷기 120초] 반복
+      for (var i = 0; i < reps; i++) {
+        raw.push({ type: 'run', sec: 60, speed: 7, label: '뛰기' });
+        raw.push({ type: 'walk', sec: 120, speed: 4, label: '걷기 회복' });
+      }
+    }
+    raw.push({ type: 'cooldown', sec: cool, speed: 3.5, label: '쿨다운 걷기' });
+    var segs = fitToTotal(raw);
+    if (!segs) return null;
+    return {
+      headline: mins + '분 걷기·뛰기 인터벌 (완주 목표)',
+      totalSec: totalSec,
+      segments: segs,
+      note: '오늘은 무리 말고 완주가 목표예요. 뛰기는 "짧은 말은 되는데 대화는 벅찬" 정도로 편하게. 인터벌이 지방을 특별히 더 태우는 건 아니에요 — 꾸준한 총 운동량과 식사가 핵심입니다. 근육 지키려면 웨이트도 같이 하세요.'
+    };
+  }
+
+  var systemPrompt =
+`당신은 초보자의 러닝머신 인터벌 유산소(걷기·뛰기)를 안전하게 설계하는 코치다. 사용자가 준 '운동 시간' 안에 워밍업 + 인터벌 본운동 + 쿨다운을 빠짐없이 채우되 그 시간을 절대 넘기지 않게 구간을 짠다. 반드시 JSON으로만 응답한다(설명 문장 없이 JSON 하나).
+
+## ⏱️ 시간 규칙 (가장 중요)
+- 모든 구간 sec(초)의 합 = 정확히 ${totalSec}초 (= ${mins}분). 절대 초과 금지, 모자라게도 하지 말 것.
+- 반드시 warmup(걷기)로 시작하고 cooldown(걷기)로 끝낸다.
+- 시간이 짧으면 워밍업/쿨다운을 각각 최소 2~3분(120~180초)으로 압축하고, 인터벌(뛰기) 반복 횟수부터 줄인다.
+
+## 🐣 첫 회(기록 없음) 처방 — 보수적, 목표 = 완주
+- 워밍업 걷기 약 5분(3~4km/h) → [뛰기 60초 + 걷기 120초] 6~8회 반복 → 쿨다운 걷기 약 5분(3~4km/h).
+- 뛰기 속력 = "짧은 말은 되지만 대화는 벅찬" 편한 조깅(대략 6~8km/h, 첫 회는 6~7 권장). 속력 욕심 금지.
+- 주어진 시간이 위 템플릿보다 짧으면 뛰기 반복 횟수를 줄여 시간에 맞춘다.
+
+## 📈 향상 우선순위 (★속력이 아니다 — 한 번에 "한 축만")
+1. 걷기 구간 단축 / 뛰기:걷기 비율↑  (최우선, 속력은 그대로)
+2. 뛰기 구간 시간↑  (+15~30초)
+3. 속력·경사↑  (맨 마지막, +0.5km/h 정도)
+- 주당 총량은 이전 대비 +10% 이내. 한 세션에 여러 축을 동시에 올리지 말 것(정강이통증 예방).
+
+## ✅ 향상 게이트 (지난 기록 기반)
+- 지난 회 완주 AND 뛰기 RPE ≤ 7 → 위 우선순위에서 한 축만 소폭 상향.
+- 완주했지만 RPE 8~9(매우 힘듦) → 유지(그대로).
+- 미완주/통증 → 하향(걷기 +30초 또는 뛰기 -15초).
+- 지난 회 "실제 뛴 속력·구간"을 이번 기준선(anchor)으로 삼되, 올릴 때는 반드시 위 축 순서로.
+
+## 🗣️ 강도 지표 (초보용)
+- 대화 테스트 1순위: 뛰기 = "짧은 단어만 가능", 걷기 = "노래도 될 만큼 편함".
+- RPE 보조: 뛰기 6~7 / 걷기 2~3 (첫 회 뛰기 상한 6).
+
+## 🙅 정직한 톤 (note에 반영)
+- "인터벌 = 지방 순삭/애프터번 폭발" 같은 과장 금지. 체지방은 총에너지소비 × 식이 적자 × 꾸준함 × 근육보존이 핵심이다.
+- 인터벌 걷기·뛰기가 좋은 이유는 "지방연소 마법"이 아니라 안전·지속가능·총량이다.
+- 유산소만 하면 근육도 빠진다 → 웨이트 병행 + 단백질 확보를 짧게 권한다(근손실 방지 넛지).
+- 안전: 워밍업·쿨다운 필수, 주 3회+회복일, 통증 시 하향·휴식.
+
+## 📒 사용자 지난 유산소 기록
+${cardioHistoryContext()}
+
+## 📤 응답 형식 (JSON만)
+{
+  "headline": "한 줄 요약 (예: 첫 회 · 완주 목표 걷기·뛰기 / 또는 지난 회보다 걷기 10초 단축)",
+  "note": "정직한 안내 1~2문장 + 오늘의 포인트(향상/유지/하향 이유). 과장 금지, 근손실 넛지 한 조각.",
+  "segments": [
+    {"type":"warmup","sec":300,"speed":3.5,"label":"워밍업 걷기"},
+    {"type":"run","sec":60,"speed":7,"label":"뛰기"},
+    {"type":"walk","sec":120,"speed":4,"label":"걷기 회복"},
+    {"type":"cooldown","sec":300,"speed":3.5,"label":"쿨다운 걷기"}
+  ]
+}
+- type은 warmup|run|walk|cooldown 넷 중 하나. sec는 정수 초, speed는 km/h 숫자, label은 짧은 한국어.
+- 걷기 속력 3~5, 뛰기 속력 6~8 권장(첫 회 뛰기 6~7). sec의 합은 정확히 ${totalSec}.`;
+
+  try {
+    var response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': state.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 1500,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: mins + '분(= ' + totalSec + '초)짜리 러닝머신 인터벌을 만들어줘. 구간 sec 합이 정확히 ' + totalSec + '이 되게, JSON으로만.' }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      console.error('유산소 인터벌 생성 실패:', response.status);
+      return fallbackPlan();                                // API 오류여도 기능은 동작하게(연구 첫 회 템플릿)
+    }
+
+    var data = await response.json();
+    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+      return fallbackPlan();
+    }
+    var content = data.content[0].text;
+
+    var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    var parsed = null;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (e) {
+      var jsonStr = extractBalancedJson(cleaned);
+      if (jsonStr) { try { parsed = JSON.parse(jsonStr); } catch (e2) { parsed = null; } }
+    }
+
+    if (!parsed || !Array.isArray(parsed.segments) || parsed.segments.length === 0) {
+      return fallbackPlan();
+    }
+
+    // ★AI가 준 구간을 totalSec에 정확히 맞춘다(초과·미달 코드에서 원천 차단).
+    var segments = fitToTotal(parsed.segments);
+    if (!segments) return fallbackPlan();
+
+    return {
+      headline: (typeof parsed.headline === 'string' && parsed.headline.trim()) ? parsed.headline.trim() : (mins + '분 걷기·뛰기 인터벌'),
+      totalSec: totalSec,
+      segments: segments,
+      note: (typeof parsed.note === 'string' && parsed.note.trim()) ? parsed.note.trim() : '무리 말고 완주가 목표예요. 인터벌이 지방을 특별히 더 태우진 않아요 — 꾸준함과 식사, 그리고 근육 지키는 웨이트가 핵심입니다.'
+    };
+  } catch (error) {
+    console.error('유산소 인터벌 호출 실패:', error);
+    return fallbackPlan();                                  // 네트워크 예외에도 유산소 시작 가능하게
+  }
 }
