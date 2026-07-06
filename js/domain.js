@@ -783,27 +783,35 @@ function getVolumeDiagnosis(volumeByPart, weeks) {
   // 그룹 합산
   var groupedVol = groupVolumeBy(volumeByPart);
   
-  // 모든 그룹 평가
+  // 모든 그룹 평가 — 부위 크기(size)별 임계 적용 (조사 C: 작은 근육은 복합운동 간접자극으로 목표 낮음)
+  //   large(가슴·등·대퇴사두·햄스트링·둔근): 부족<4 / 하한미달 4~10 / 적정 10~20 / 수확체감 20+, 목표 12
+  //   small(어깨·이두·삼두·종아리·복근·내전근): 부족<3 / 하한미달 3~8 / 적정 8~16 / 수확체감 16+, 목표 8
+  //   size는 BODY_PART_GROUPS[group].size, 없거나 'small'이 아니면 'large'로 안전 처리
   Object.keys(BODY_PART_GROUPS).forEach(function(g) {
     var weeklyVol = (groupedVol[g] || 0) / weeks;
     var label = BODY_PART_GROUPS[g].kr;
-    var entry = { group: g, label: label, vol: weeklyVol };
-    
+    var size = (BODY_PART_GROUPS[g] && BODY_PART_GROUPS[g].size === 'small') ? 'small' : 'large';
+    var lackBelow  = size === 'small' ? 3 : 4;   // 부족(🔴) 상한
+    var optimalLow = size === 'small' ? 8 : 10;  // 최적 하한(미달 시 🟡)
+    var optimalTop = size === 'small' ? 16 : 20; // 최적 상한(초과 시 수확 체감 🔥)
+    var target     = size === 'small' ? 8 : 12;  // 폐루프 목표 세트(ai.js volNeedNote가 참조)
+    var entry = { group: g, label: label, vol: weeklyVol, size: size, target: target };
+
     if (weeklyVol === 0) {
       // 미접촉: 저우선 참고 버킷(전완·복근 등이 매번 '최우선'으로 도배되는 노이즈 방지)
       untouched.push(entry);
-    } else if (weeklyVol < 4) {
+    } else if (weeklyVol < lackBelow) {
       entry.label += ' (주' + weeklyVol.toFixed(1) + '세트)';
       lacking.push(entry);
-    } else if (weeklyVol < 10) {
-      // MEV는 넘었지만 최적 하한(주10세트) 미달 → 🟡 별도 등급
+    } else if (weeklyVol < optimalLow) {
+      // MEV는 넘었지만 최적 하한 미달 → 🟡 별도 등급
       entry.label += ' (주' + weeklyVol.toFixed(1) + '세트·하한 미달)';
       belowOptimal.push(entry);
-    } else if (weeklyVol <= 24) {
+    } else if (weeklyVol <= optimalTop) {
       entry.label += ' (주' + weeklyVol.toFixed(1) + '세트)';
       optimal.push(entry);
     } else {
-      // 간접(보조근 0.5)까지 24세트 초과 = 수확 체감 구간(하드컷 아님)
+      // 간접(보조근 0.5)까지 최적 상한 초과 = 수확 체감 구간(하드컷 아님)
       entry.label += ' (주' + weeklyVol.toFixed(1) + '세트)';
       excessive.push(entry);
     }

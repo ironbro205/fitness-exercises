@@ -3973,16 +3973,11 @@ window.sendCoachMessage = async function() {
       content: '⚠️ ' + result.error 
     });
   } else {
-    // 코치 응답 끝의 숨김 memory 블록 추출 → 본문만 표시, 항목은 기억 노트에 자동 저장 (묶음3)
-    var parsed = parseCoachMemoryBlock(result.text);
+    // 코치 원문 그대로 표시 (자동 기억 저장 폐지 — 기억은 수동 입력만: openCoachMemory)
     state.coachMessages.push({
       role: 'assistant',
-      content: parsed.clean
+      content: result.text
     });
-    if (parsed.items.length) {
-      state.coachMemory = mergeCoachMemory(state.coachMemory, parsed.items, 'auto', getTodayStr(), 'mem_' + Date.now());
-      storage.set(KEYS.COACH_MEMORY, state.coachMemory);
-    }
   }
 
   // 저장
@@ -4088,7 +4083,7 @@ function renderCoachMemory() {
     groups += '<p class="section-label">' + meta.emoji + ' ' + meta.kr + '</p><div class="section-group" style="margin-bottom:16px;">' + rows + '</div>';
   });
   if (!groups) {
-    groups = '<p class="text-sm text-stone-500 text-center" style="padding:40px 0; line-height:1.6;">아직 기억 노트가 없어요.<br>아래에 직접 추가하거나, 코치와 대화하면 자동으로 쌓여요.</p>';
+    groups = '<p class="text-sm text-stone-500 text-center" style="padding:40px 0; line-height:1.6;">아직 기억 노트가 없어요.<br>아래에서 직접 추가해 주세요 (부상·제약·선호 등).</p>';
   }
 
   var chips = MEMORY_CATEGORIES.map(function(cat) {
