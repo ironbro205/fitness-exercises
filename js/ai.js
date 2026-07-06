@@ -1589,3 +1589,270 @@ async function loadPlateauCheckIfNeeded() {
   state.plateauCheckLoading = false;
   render();
 }
+
+// ═══════════════════════════════════════════════
+// 유산소 인터벌 생성 (러닝머신 걷기·뛰기) — Sonnet
+// 입력: 운동 시간(분)만. 출력: 그 시간에 "딱 맞는" 구간 리스트.
+// 반환: { headline, totalSec, segments:[{startSec,endSec,type,speed,label}], note } | null(API 키 없음)
+// 근거: cardio-research.md — 첫 회 보수적 처방 / 향상 우선순위(★속력 아님: 비율·시간 먼저) /
+//       완주+RPE 게이트 / 정직한 톤(인터벌=지방순삭 아님) / 안전 가드레일(워밍업·쿨다운·10%·근손실 넛지).
+// ★시간 초과는 프롬프트만 믿지 않고 코드(fitToTotal)에서 절대 불가하게 보정한다.
+// ═══════════════════════════════════════════════
+async function generateCardioInterval(totalMinutes) {
+  // 계약: API 키 없으면 null (상위 화면이 안내)
+  if (!state.apiKey) return null;
+
+  // 입력 시간 정규화 (분 → 초). 병적 입력(음수·NaN·초대형)만 방어적으로 클램프.
+  var mins = Math.round(Number(totalMinutes) || 0);
+  mins = Math.max(3, Math.min(180, mins));
+  var totalSec = mins * 60;
+
+  var ALLOWED_TYPES = { warmup: 1, run: 1, walk: 1, cooldown: 1 };
+  var DEFAULT_LABEL = { warmup: '워밍업 걷기', run: '뛰기', walk: '걷기 회복', cooldown: '쿨다운 걷기' };
+  var DEFAULT_SPEED = { warmup: 3.5, run: 7, walk: 4, cooldown: 3.5 };
+
+  // 속력 숫자 정리: km/h, 1~20 클램프, 소수 1자리. 이상값이면 종류별 기본값.
+  function cleanSpeed(v, type) {
+    var n = Number(v);
+    if (!isFinite(n) || n <= 0) n = DEFAULT_SPEED[type] || 4;
+    if (n < 1) n = 1;
+    if (n > 20) n = 20;
+    return Math.round(n * 10) / 10;
+  }
+
+  // AI/폴백 구간(길이 sec 기반)을 totalSec에 "정확히" 맞춘다.
+  //  - 누적 위치를 반올림해 정수 경계를 만든다 → 구간 합이 항상 totalSec (초과·미달 0).
+  //  - 종류/속력 이상값 정리, 퇴화(0초) 구간 제거, 첫 구간 0초부터 연속 보장.
+  function fitToTotal(raw) {
+    var clean = [];
+    var sum = 0;
+    for (var i = 0; i < raw.length; i++) {
+      var seg = raw[i] || {};
+      var type = ALLOWED_TYPES[seg.type] ? seg.type : 'walk';
+      var sec = Number(seg.sec);
+      if (!isFinite(sec) || sec <= 0) continue;
+      clean.push({
+        type: type,
+        sec: sec,
+        speed: cleanSpeed(seg.speed, type),
+        label: (typeof seg.label === 'string' && seg.label.trim()) ? seg.label.trim() : (DEFAULT_LABEL[type] || '구간')
+      });
+      sum += sec;
+    }
+    if (!clean.length || sum <= 0) return null;
+
+    var out = [];
+    var prev = 0;
+    var cum = 0;
+    for (var j = 0; j < clean.length; j++) {
+      cum += clean[j].sec * totalSec / sum;               // 스케일된 누적 위치(실수)
+      var end = (j === clean.length - 1) ? totalSec : Math.round(cum);
+      if (end < prev) end = prev;
+      if (end > totalSec) end = totalSec;
+      if (end - prev <= 0) continue;                       // 퇴화 구간 스킵(누적은 유지)
+      out.push({
+        startSec: prev,
+        endSec: end,
+        type: clean[j].type,
+        speed: clean[j].speed,
+        label: clean[j].label
+      });
+      prev = end;
+    }
+    if (!out.length) return null;
+    // 마지막 구간이 정확히 끝(totalSec)까지 덮게 보정
+    if (out[out.length - 1].endSec !== totalSec) out[out.length - 1].endSec = totalSec;
+    return out;
+  }
+
+  // 지난 유산소 기록 요약 → 점진·게이트 컨텍스트. 기록 없으면 첫 회 안내.
+  function cardioHistoryContext() {
+    var log = (state.data && Array.isArray(state.data.cardioLog)) ? state.data.cardioLog : [];
+    if (!log.length) return '기록 없음 — 첫 회입니다. 위 "첫 회 처방"을 그대로 적용하고, 속력 욕심 없이 완주를 목표로 보수적으로 짜세요.';
+
+    var sorted = log.slice().sort(function(a, b) {
+      var da = (a && a.date) ? String(a.date) : '';
+      var db = (b && b.date) ? String(b.date) : '';
+      if (da === db) return 0;
+      return da < db ? 1 : -1;                             // 최근이 앞으로
+    });
+    var recent = sorted.slice(0, 3);
+
+    function avg(arr, pick) {
+      var vals = [];
+      arr.forEach(function(g) {
+        var v = Number(pick(g));
+        if (isFinite(v) && v > 0) vals.push(v);
+      });
+      if (!vals.length) return null;
+      var s = 0; vals.forEach(function(v) { s += v; });
+      return s / vals.length;
+    }
+
+    var lines = [];
+    recent.forEach(function(s, idx) {
+      if (!s) return;
+      var m = s.totalSec ? Math.round(s.totalSec / 60) : '?';
+      var segs = Array.isArray(s.segments) ? s.segments : [];
+      var runs = segs.filter(function(g) { return g && g.type === 'run'; });
+      var walks = segs.filter(function(g) { return g && g.type === 'walk'; });
+      var runSpeed = avg(runs, function(g) { return (typeof g.actualSpeed === 'number' ? g.actualSpeed : g.targetSpeed); });
+      var runSec = avg(runs, function(g) { return g.sec; });
+      var walkSec = avg(walks, function(g) { return g.sec; });
+      var done = s.completed ? '완주O' : '미완주X';
+      var rpe = (typeof s.rpe === 'number') ? ('RPE ' + s.rpe) : 'RPE기록없음';
+      var detail = '뛰기 ' + runs.length + '회' +
+        (runSec ? ' 각 ~' + Math.round(runSec) + '초' : '') +
+        (runSpeed ? ' ~' + (Math.round(runSpeed * 10) / 10) + 'km/h' : '') +
+        (walkSec ? ' / 걷기 각 ~' + Math.round(walkSec) + '초' : '');
+      var tag = idx === 0 ? '지난 회(기준선)' : (s.date || '이전');
+      lines.push('- ' + tag + ': ' + m + '분 · ' + done + ' · ' + rpe + ' · ' + detail);
+    });
+
+    // 코드가 완주+RPE로 향상/유지/하향을 1차 판정(참고). 최종 축·폭은 프롬프트 규칙대로.
+    var last = recent[0] || {};
+    var gate;
+    if (!last.completed) gate = '지난 회 미완주 → 이번엔 하향(걷기 +30초 또는 뛰기 -15초, 통증 있었으면 더 보수적으로).';
+    else if (typeof last.rpe === 'number' && last.rpe <= 7) gate = '지난 회 완주 + RPE≤7 → 향상 우선순위에서 "한 축만" 소폭 상향(먼저 걷기 단축/비율↑, 그다음 뛰기 시간↑, 속력·경사는 맨 마지막).';
+    else if (typeof last.rpe === 'number' && last.rpe >= 8) gate = '지난 회 완주지만 RPE 높음(8~9) → 이번엔 유지(그대로).';
+    else gate = '지난 회 완주(RPE 미기록) → 유지하거나 아주 소폭만 상향(보수적).';
+
+    return lines.join('\n') + '\n\n코드 판정(참고): ' + gate;
+  }
+
+  // 파싱 실패/네트워크 오류 시 폴백: 연구 첫 회 템플릿을 시간에 맞춰 스케일(기능이 항상 동작하도록).
+  function fallbackPlan() {
+    var warm = Math.min(300, Math.max(120, Math.round(totalSec * 0.2)));
+    var cool = warm;
+    var mid = totalSec - warm - cool;
+    var raw = [{ type: 'warmup', sec: warm, speed: 3.5, label: '워밍업 걷기' }];
+    if (mid < 120) {
+      raw.push({ type: 'walk', sec: Math.max(1, mid), speed: 5, label: '빠르게 걷기' });
+    } else {
+      var reps = Math.max(1, Math.floor(mid / 180));       // [뛰기 60초 + 걷기 120초] 반복
+      for (var i = 0; i < reps; i++) {
+        raw.push({ type: 'run', sec: 60, speed: 7, label: '뛰기' });
+        raw.push({ type: 'walk', sec: 120, speed: 4, label: '걷기 회복' });
+      }
+    }
+    raw.push({ type: 'cooldown', sec: cool, speed: 3.5, label: '쿨다운 걷기' });
+    var segs = fitToTotal(raw);
+    if (!segs) return null;
+    return {
+      headline: mins + '분 걷기·뛰기 인터벌 (완주 목표)',
+      totalSec: totalSec,
+      segments: segs,
+      note: '오늘은 무리 말고 완주가 목표예요. 뛰기는 "짧은 말은 되는데 대화는 벅찬" 정도로 편하게. 인터벌이 지방을 특별히 더 태우는 건 아니에요 — 꾸준한 총 운동량과 식사가 핵심입니다. 근육 지키려면 웨이트도 같이 하세요.'
+    };
+  }
+
+  var systemPrompt =
+`당신은 초보자의 러닝머신 인터벌 유산소(걷기·뛰기)를 안전하게 설계하는 코치다. 사용자가 준 '운동 시간' 안에 워밍업 + 인터벌 본운동 + 쿨다운을 빠짐없이 채우되 그 시간을 절대 넘기지 않게 구간을 짠다. 반드시 JSON으로만 응답한다(설명 문장 없이 JSON 하나).
+
+## ⏱️ 시간 규칙 (가장 중요)
+- 모든 구간 sec(초)의 합 = 정확히 ${totalSec}초 (= ${mins}분). 절대 초과 금지, 모자라게도 하지 말 것.
+- 반드시 warmup(걷기)로 시작하고 cooldown(걷기)로 끝낸다.
+- 시간이 짧으면 워밍업/쿨다운을 각각 최소 2~3분(120~180초)으로 압축하고, 인터벌(뛰기) 반복 횟수부터 줄인다.
+
+## 🐣 첫 회(기록 없음) 처방 — 보수적, 목표 = 완주
+- 워밍업 걷기 약 5분(3~4km/h) → [뛰기 60초 + 걷기 120초] 6~8회 반복 → 쿨다운 걷기 약 5분(3~4km/h).
+- 뛰기 속력 = "짧은 말은 되지만 대화는 벅찬" 편한 조깅(대략 6~8km/h, 첫 회는 6~7 권장). 속력 욕심 금지.
+- 주어진 시간이 위 템플릿보다 짧으면 뛰기 반복 횟수를 줄여 시간에 맞춘다.
+
+## 📈 향상 우선순위 (★속력이 아니다 — 한 번에 "한 축만")
+1. 걷기 구간 단축 / 뛰기:걷기 비율↑  (최우선, 속력은 그대로)
+2. 뛰기 구간 시간↑  (+15~30초)
+3. 속력·경사↑  (맨 마지막, +0.5km/h 정도)
+- 주당 총량은 이전 대비 +10% 이내. 한 세션에 여러 축을 동시에 올리지 말 것(정강이통증 예방).
+
+## ✅ 향상 게이트 (지난 기록 기반)
+- 지난 회 완주 AND 뛰기 RPE ≤ 7 → 위 우선순위에서 한 축만 소폭 상향.
+- 완주했지만 RPE 8~9(매우 힘듦) → 유지(그대로).
+- 미완주/통증 → 하향(걷기 +30초 또는 뛰기 -15초).
+- 지난 회 "실제 뛴 속력·구간"을 이번 기준선(anchor)으로 삼되, 올릴 때는 반드시 위 축 순서로.
+
+## 🗣️ 강도 지표 (초보용)
+- 대화 테스트 1순위: 뛰기 = "짧은 단어만 가능", 걷기 = "노래도 될 만큼 편함".
+- RPE 보조: 뛰기 6~7 / 걷기 2~3 (첫 회 뛰기 상한 6).
+
+## 🙅 정직한 톤 (note에 반영)
+- "인터벌 = 지방 순삭/애프터번 폭발" 같은 과장 금지. 체지방은 총에너지소비 × 식이 적자 × 꾸준함 × 근육보존이 핵심이다.
+- 인터벌 걷기·뛰기가 좋은 이유는 "지방연소 마법"이 아니라 안전·지속가능·총량이다.
+- 유산소만 하면 근육도 빠진다 → 웨이트 병행 + 단백질 확보를 짧게 권한다(근손실 방지 넛지).
+- 안전: 워밍업·쿨다운 필수, 주 3회+회복일, 통증 시 하향·휴식.
+
+## 📒 사용자 지난 유산소 기록
+${cardioHistoryContext()}
+
+## 📤 응답 형식 (JSON만)
+{
+  "headline": "한 줄 요약 (예: 첫 회 · 완주 목표 걷기·뛰기 / 또는 지난 회보다 걷기 10초 단축)",
+  "note": "정직한 안내 1~2문장 + 오늘의 포인트(향상/유지/하향 이유). 과장 금지, 근손실 넛지 한 조각.",
+  "segments": [
+    {"type":"warmup","sec":300,"speed":3.5,"label":"워밍업 걷기"},
+    {"type":"run","sec":60,"speed":7,"label":"뛰기"},
+    {"type":"walk","sec":120,"speed":4,"label":"걷기 회복"},
+    {"type":"cooldown","sec":300,"speed":3.5,"label":"쿨다운 걷기"}
+  ]
+}
+- type은 warmup|run|walk|cooldown 넷 중 하나. sec는 정수 초, speed는 km/h 숫자, label은 짧은 한국어.
+- 걷기 속력 3~5, 뛰기 속력 6~8 권장(첫 회 뛰기 6~7). sec의 합은 정확히 ${totalSec}.`;
+
+  try {
+    var response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': state.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 1500,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: mins + '분(= ' + totalSec + '초)짜리 러닝머신 인터벌을 만들어줘. 구간 sec 합이 정확히 ' + totalSec + '이 되게, JSON으로만.' }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      console.error('유산소 인터벌 생성 실패:', response.status);
+      return fallbackPlan();                                // API 오류여도 기능은 동작하게(연구 첫 회 템플릿)
+    }
+
+    var data = await response.json();
+    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+      return fallbackPlan();
+    }
+    var content = data.content[0].text;
+
+    var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    var parsed = null;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (e) {
+      var jsonStr = extractBalancedJson(cleaned);
+      if (jsonStr) { try { parsed = JSON.parse(jsonStr); } catch (e2) { parsed = null; } }
+    }
+
+    if (!parsed || !Array.isArray(parsed.segments) || parsed.segments.length === 0) {
+      return fallbackPlan();
+    }
+
+    // ★AI가 준 구간을 totalSec에 정확히 맞춘다(초과·미달 코드에서 원천 차단).
+    var segments = fitToTotal(parsed.segments);
+    if (!segments) return fallbackPlan();
+
+    return {
+      headline: (typeof parsed.headline === 'string' && parsed.headline.trim()) ? parsed.headline.trim() : (mins + '분 걷기·뛰기 인터벌'),
+      totalSec: totalSec,
+      segments: segments,
+      note: (typeof parsed.note === 'string' && parsed.note.trim()) ? parsed.note.trim() : '무리 말고 완주가 목표예요. 인터벌이 지방을 특별히 더 태우진 않아요 — 꾸준함과 식사, 그리고 근육 지키는 웨이트가 핵심입니다.'
+    };
+  } catch (error) {
+    console.error('유산소 인터벌 호출 실패:', error);
+    return fallbackPlan();                                  // 네트워크 예외에도 유산소 시작 가능하게
+  }
+}

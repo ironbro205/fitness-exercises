@@ -6,6 +6,7 @@
 var KEYS = {
   PROFILE: 'fitness_profile',
   WORKOUT_LOG: 'fitness_workout_log',
+  CARDIO_LOG: 'fitness_cardio_log',
   BODY_LOG: 'fitness_body_log',
   PERSONAL_RECORDS: 'fitness_personal_records',
   INITIALIZED: 'fitness_initialized',
@@ -21,6 +22,7 @@ var KEYS = {
   ONE_RM_INITIALIZED: 'fitness_one_rm_initialized',
   CONDITION_LOG: 'fitness_condition_log',
   ACTIVE_SESSION: 'fitness_active_session',
+  ACTIVE_CARDIO_RUN: 'fitness_active_cardio_run',
   REST_TIMER: 'fitness_rest_timer',
   WORKOUT_WIZARD: 'fitness_workout_wizard',
   CYCLE_HISTORY: 'fitness_cycle_history',
@@ -52,6 +54,32 @@ var storage = {
 function saveActiveSession() {
   storage.set(KEYS.ACTIVE_SESSION, state.activeSession);
 }
+// 진행 중인 유산소(러닝) 세션을 localStorage에 저장 — 백그라운드 메모리 회수·새로고침에도 진행이 남도록.
+// 정밀 타이머는 performance.now(startPerf) 기준이라 세션 간 이어지지 않으므로, 복원 기준이 되는
+// 벽시계 시작시각(startedAtWall)과 거리·적분위치·구간·소리 상태를 함께 스냅샷한다.
+// (런타임 핸들 audioCtx/타이머/웨이크락은 직렬화 대상 아님 — 복원 때 새로 만든다.)
+// running/rpe 단계만 저장한다. 삭제는 완주/종료 저장 시점에 localStorage.removeItem 으로 직접 한다.
+function saveActiveCardio() {
+  var c = state.cardio;
+  var run = c && c.run;
+  if (!run || !Array.isArray(run.segs) || !run.segs.length) return;
+  if (c.phase !== 'running' && c.phase !== 'rpe') return;
+  var snap = {
+    phase: c.phase,
+    startedAtWall: run.startedAtWall,
+    totalSec: run.totalSec,
+    curIdx: run.curIdx,
+    distanceKm: run.distanceKm,
+    lastIntegrateElapsed: run.lastIntegrateElapsed,
+    soundOn: run.soundOn,
+    completed: !!run.completed,
+    elapsedAtEnd: (run.elapsedAtEnd == null ? null : run.elapsedAtEnd),
+    segs: run.segs.map(function(s) {
+      return { type: s.type, targetSpeed: s.targetSpeed, actualSpeed: s.actualSpeed, startSec: s.startSec, endSec: s.endSec, sec: s.sec, label: s.label };
+    })
+  };
+  storage.set(KEYS.ACTIVE_CARDIO_RUN, snap);
+}
 function saveRestTimer() {
   storage.set(KEYS.REST_TIMER, state.restTimer);
 }
@@ -69,6 +97,18 @@ function clearWizard() {
   storage.set(KEYS.WORKOUT_WIZARD, null);
 }
 
+// 유산소(러닝머신 인터벌) 세션 저장 — 2단계 RUNNING 탭.
+// session = { id, date, totalSec, totalDistKm, segments:[{type,targetSpeed,actualSpeed,sec}], completed(bool), rpe(1~10|null) }
+// cardioLog 에 push → localStorage 저장 → 화면 재렌더.
+// CARDIO_LOG 는 BACKUP_EXCLUDE_KEYS 에 없으므로 KEYS 순회 백업/복원에 자동 포함된다(운동 데이터).
+window.saveCardioSession = function(session) {
+  if (!session) return;
+  if (!Array.isArray(state.data.cardioLog)) state.data.cardioLog = [];
+  state.data.cardioLog.push(session);
+  storage.set(KEYS.CARDIO_LOG, state.data.cardioLog);
+  if (typeof render === 'function') render();
+};
+
 // ═══════════════════════════════════════════════
 // 데이터 백업 / 복원 (묶음1)
 // "운동 데이터만" 백업: API 키·코치 대화·임시 진행상태·AI 캐시는 제외.
@@ -78,7 +118,7 @@ var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v27';
+var APP_VERSION = 'v31';
 // 백업에 담지 않는 키. 두 부류:
 // (1) 로컬 전용·민감 → 복원해도 그대로 보존 (API 키·코치 대화)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
@@ -88,6 +128,7 @@ var BACKUP_LOCAL_ONLY_KEYS = [
 ];
 var BACKUP_TRANSIENT_KEYS = [
   KEYS.ACTIVE_SESSION,     // 진행 중 세션
+  KEYS.ACTIVE_CARDIO_RUN,  // 진행 중 유산소(러닝) 세션
   KEYS.REST_TIMER,
   KEYS.WORKOUT_WIZARD,
   KEYS.EXERCISES_CACHE,    // 재생성 가능
@@ -223,7 +264,7 @@ function icon(name, size) {
 var state = {
   currentTab: 'home',
   profile: null,
-  data: { workoutLog: [], personalRecords: [], bodyLog: [], conditionLog: [], cycleHistory: [] },
+  data: { workoutLog: [], cardioLog: [], personalRecords: [], bodyLog: [], conditionLog: [], cycleHistory: [] },
   // 운동 세션 진행 중 상태
   activeSession: null,
   editingSet: null,
@@ -413,6 +454,7 @@ function init() {
   state.profile = storage.get(KEYS.PROFILE, DEFAULT_PROFILE);
   state.data = {
     workoutLog: storage.get(KEYS.WORKOUT_LOG, []),
+    cardioLog: storage.get(KEYS.CARDIO_LOG, []),
     personalRecords: storage.get(KEYS.PERSONAL_RECORDS, []),
     bodyLog: storage.get(KEYS.BODY_LOG, []),
     conditionLog: storage.get(KEYS.CONDITION_LOG, []),
@@ -482,6 +524,58 @@ function init() {
     } else {
       // 자리비운 사이 휴식 시간 종료된 경우 정리
       storage.set(KEYS.REST_TIMER, null);
+    }
+  }
+
+  // 진행 중이던 유산소(러닝) 세션 복원 — performance.now 는 세션 간 이어지지 않으므로,
+  // 저장된 벽시계 시작시각(startedAtWall)으로 경과를 다시 계산하고 startPerf 를 지금 기준으로
+  // 재설정해 이어간다. (관련 런타임 함수는 screens.js — init() 는 그 파일 끝에서 호출되므로 안전.)
+  var savedCardio = storage.get(KEYS.ACTIVE_CARDIO_RUN);
+  if (savedCardio && Array.isArray(savedCardio.segs) && savedCardio.segs.length &&
+      typeof savedCardio.startedAtWall === 'number' && savedCardio.totalSec > 0 &&
+      typeof ensureCardioState === 'function') {
+    var elapsedC = (Date.now() - savedCardio.startedAtWall) / 1000;
+    if (!(elapsedC >= 0)) elapsedC = 0;
+    if (elapsedC > savedCardio.totalSec + 6 * 3600) {
+      // 너무 오래된 세션(계획 시간 + 6시간 초과)은 버림(좀비 복원 방지)
+      try { localStorage.removeItem(KEYS.ACTIVE_CARDIO_RUN); } catch (e) {}
+    } else {
+      var cst = ensureCardioState();
+      var nowPerf = cardioNow();
+      var lastIntEl = (typeof savedCardio.lastIntegrateElapsed === 'number') ? savedCardio.lastIntegrateElapsed : elapsedC;
+      if (lastIntEl < 0) lastIntEl = 0;
+      if (lastIntEl > elapsedC) lastIntEl = elapsedC;
+      cst.run = {
+        startPerf: nowPerf - elapsedC * 1000,                    // 지금 기준으로 경과를 이어붙임
+        startedAtWall: savedCardio.startedAtWall,
+        lastIntegratePerf: nowPerf - (elapsedC - lastIntEl) * 1000,
+        lastIntegrateElapsed: lastIntEl,
+        segs: savedCardio.segs,
+        totalSec: savedCardio.totalSec,
+        curIdx: (typeof savedCardio.curIdx === 'number') ? savedCardio.curIdx : 0,
+        distanceKm: (typeof savedCardio.distanceKm === 'number') ? savedCardio.distanceKm : 0,
+        soundOn: savedCardio.soundOn !== false,
+        completed: !!savedCardio.completed,
+        elapsedAtEnd: (typeof savedCardio.elapsedAtEnd === 'number') ? savedCardio.elapsedAtEnd : null
+      };
+      state.currentTab = 'running';
+      if (savedCardio.phase === 'rpe') {
+        // RPE 입력 중 회수됨 → 그대로 RPE 단계로 복원(런타임 없음, 사용자가 평가만 제출)
+        cst.phase = 'rpe';
+      } else if (elapsedC >= savedCardio.totalSec) {
+        // 자리 비운 사이 계획 시간이 끝남 → 완주로 마무리하고 RPE 입력 단계로
+        cst.phase = 'rpe';
+        cardioIntegrate();                                       // 완주 지점(totalSec)까지 구간별 적분
+        cst.run.completed = true;
+        cst.run.elapsedAtEnd = savedCardio.totalSec;
+        saveActiveCardio();                                      // rpe 스냅샷으로 갱신
+      } else {
+        // 아직 진행 중 → 경과분 즉시 반영 + 런타임 재가동해 이어서 실행
+        cst.phase = 'running';
+        cst.run.curIdx = cardioSegIndexAt(cst.run.segs, elapsedC);
+        cardioIntegrate();                                       // 자리 비운 사이 경과분 구간별 적분
+        cardioStartRuntime(elapsedC);
+      }
     }
   }
 

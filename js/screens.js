@@ -4045,7 +4045,10 @@ function renderStats() {
           partsHtml +
         '</div>' +
       '</div>' +
-      
+
+      // 유산소 요약(기록 있을 때만)
+      cardioSummaryCardHtml(period) +
+
       // PR 히스토리
       '<div class="card mb-4">' +
         '<div class="flex items-center justify-between mb-3">' +
@@ -4136,18 +4139,725 @@ function renderPlaceholder(title, label, iconName) {
 }
 
 // ═══════════════════════════════════════════════
-// 러닝(유산소) 화면 — 2단계에서 러닝머신 인터벌 유산소 구현 예정 (지금은 빈 껍데기)
+// 러닝(유산소) 화면 — 러닝머신 인터벌 유산소 (2단계)
+//   흐름: 시간(분) 입력 → generateCardioInterval(AI) 구성 → 미리보기 → 시작
+//        → 실행화면(정밀 타이머·소리 알림·속력 조정) → 종료 → RPE 입력 → saveCardioSession
+//   ⓐ 시간 측정은 performance.now() 절대시각 기준(setInterval 드리프트 금지, 백그라운드 복귀 시 재동기화).
+//   ⓑ 소리는 Web Audio 오실레이터(파일 없이). 구간 경계 3초 전 예고음 + 경계 전환음(올림/내림 톤 구분).
+//   ⓒ 백그라운드(안드로이드): 무음 오디오 루프 + Wake Lock으로 화면 꺼짐/유튜브 중에도 소리 유지 시도(실패해도 안죽음).
 // ═══════════════════════════════════════════════
+
+// 런타임 핸들(직렬화 대상 아님 — 오디오 컨텍스트·타이머·웨이크락). state 밖 모듈 변수.
+var cardioRuntime = { intervalId: null, audioCtx: null, keepAlive: null, scheduled: [], wakeLock: null, visHandler: null };
+
+// 단조 증가 시계(performance.now 우선, 없으면 Date.now). start/elapsed 를 같은 시계로 통일.
+function cardioNow() {
+  return (typeof performance !== 'undefined' && performance && performance.now) ? performance.now() : Date.now();
+}
+
+// state.cardio 지연 초기화(core.js state 에 없으므로 여기서 안전하게 확보).
+function ensureCardioState() {
+  if (!state.cardio) state.cardio = { phase: 'idle', inputMin: '', loading: false, error: null, plan: null, run: null };
+  return state.cardio;
+}
+
+// 초 → "MM:SS"(1시간+면 "H:MM:SS")
+function cardioFmtClock(totalSec) {
+  totalSec = Math.max(0, Math.floor(totalSec || 0));
+  var h = Math.floor(totalSec / 3600);
+  var m = Math.floor((totalSec % 3600) / 60);
+  var s = totalSec % 60;
+  if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+function cardioTypeLabel(type) {
+  return type === 'run' ? '뛰기' : type === 'walk' ? '걷기' : type === 'warmup' ? '워밍업' : type === 'cooldown' ? '쿨다운' : '구간';
+}
+function cardioTypeIcon(type) {
+  return type === 'run' ? '🏃' : type === 'warmup' ? '🔥' : type === 'cooldown' ? '🧊' : '🚶';
+}
+
+// RUNNING 탭 아이콘 이름 — data.js 에 러닝 아이콘이 추가되면 자동 사용, 없으면 clock 로 안전 폴백
+// (icon() 은 미등록 이름에서 예외를 던지므로 반드시 존재 확인 후 반환).
+function cardioTabIconName() {
+  var cand = ['running', 'run', 'runner', 'shoe', 'footsteps', 'sneaker', 'treadmill'];
+  if (typeof ICONS !== 'undefined' && ICONS) {
+    for (var i = 0; i < cand.length; i++) { if (ICONS[cand[i]]) return cand[i]; }
+  }
+  return 'clock';
+}
+
+// ── AI 응답 정규화 & 로컬 폴백 구성 ─────────────────────────────
+// generateCardioInterval 결과를 안전한 구간 배열로 정규화(연속·정렬 보장, 속력 숫자화).
+function cardioNormalizePlan(res, min) {
+  var segsIn = (res && res.segments) ? res.segments : [];
+  var segs = [];
+  var cursor = 0;
+  for (var i = 0; i < segsIn.length; i++) {
+    var s = segsIn[i] || {};
+    var type = (s.type === 'run' || s.type === 'walk' || s.type === 'warmup' || s.type === 'cooldown') ? s.type : 'walk';
+    var start = (typeof s.startSec === 'number') ? s.startSec : cursor;
+    var end = (typeof s.endSec === 'number') ? s.endSec : (start + 60);
+    if (end <= start) end = start + 30;
+    var speed = Number(s.speed);
+    if (!isFinite(speed) || speed < 0) speed = (type === 'run' ? 7 : type === 'walk' ? 5 : type === 'warmup' ? 4 : 3.5);
+    segs.push({ startSec: Math.round(start), endSec: Math.round(end), type: type, speed: Math.round(speed * 10) / 10, label: s.label || cardioTypeLabel(type) });
+    cursor = end;
+  }
+  // 정렬 후 0 부터 연속으로 재배치(겹침·구멍 제거) → 총시간 명확
+  segs.sort(function(a, b) { return a.startSec - b.startSec; });
+  var t = 0;
+  for (var j = 0; j < segs.length; j++) {
+    var dur = Math.max(5, segs[j].endSec - segs[j].startSec);
+    segs[j].startSec = t; segs[j].endSec = t + dur; t += dur;
+  }
+  if (!segs.length) return buildFallbackInterval(min, !state.apiKey);
+  return { headline: res.headline || (Math.round(t / 60) + '분 인터벌'), totalSec: t, segments: segs, note: res.note || '', source: 'ai' };
+}
+
+// AI 미사용(키 없음·함수 없음·오류) 시 로컬 보수적 구성 — cardio-research.md 첫 회 처방 기반.
+// 워밍업 걷기 → [뛰기 1분 + 걷기 2분] 반복 → 쿨다운 걷기. 시간 짧으면 워밍업/쿨다운 압축(최소 2분).
+function buildFallbackInterval(min, noKey) {
+  var T = Math.max(5, Math.min(120, Math.round(min || 30)));
+  var totalSec = T * 60;
+  var wu = Math.min(300, Math.max(120, Math.round(totalSec * 0.15)));
+  var cd = Math.min(300, Math.max(120, Math.round(totalSec * 0.15)));
+  if (wu + cd > totalSec - 60) { // 본 인터벌 최소 60초 확보
+    wu = Math.max(60, Math.floor((totalSec - 60) / 2));
+    cd = Math.max(60, totalSec - 60 - wu);
+    if (wu + cd > totalSec) { wu = Math.floor(totalSec * 0.3); cd = totalSec - wu; }
+  }
+  var midSec = Math.max(0, totalSec - wu - cd);
+  var segs = [];
+  var t = 0;
+  function push(type, dur, speed) { if (dur <= 0) return; segs.push({ startSec: t, endSec: t + dur, type: type, speed: speed, label: cardioTypeLabel(type) }); t += dur; }
+  push('warmup', wu, 4.0);
+  var remaining = midSec;
+  var RUN = 60, WALK = 120, RUNSPD = 6.5, WALKSPD = 5.0;
+  while (remaining >= RUN + WALK) { push('run', RUN, RUNSPD); push('walk', WALK, WALKSPD); remaining -= (RUN + WALK); }
+  if (remaining >= RUN) { push('run', RUN, RUNSPD); remaining -= RUN; if (remaining > 0) { push('walk', remaining, WALKSPD); remaining = 0; } }
+  else if (remaining > 0) { push('walk', remaining, WALKSPD); remaining = 0; }
+  push('cooldown', cd, 3.5);
+  var tot = segs.length ? segs[segs.length - 1].endSec : totalSec;
+  var note = '완주가 목표예요. 힘들면 속력을 낮추세요. 뛰기는 "짧은 말은 되는데 대화는 벅찬" 정도가 적당해요.';
+  if (noKey) note += ' (더보기에서 AI 키를 넣으면 기록 기반 맞춤 구성을 받아요.)';
+  return { headline: '오늘 ' + T + '분 · 몸풀기 → 걷기·뛰기 반복 → 정리', totalSec: tot, segments: segs, note: note, source: 'fallback' };
+}
+
+// ── 시간(분) 입력 → 구성 만들기 ─────────────────────────────
+window.buildCardioPlan = function(explicitMin) {
+  ensureCardioState();
+  var c = state.cardio;
+  var min = explicitMin;
+  if (min == null) {
+    var el = (typeof document !== 'undefined' && document.getElementById) ? document.getElementById('cardio-min-input') : null;
+    min = el ? parseInt(el.value, 10) : NaN;
+  }
+  if (!min || isNaN(min) || min < 5) { showToast('5분 이상 입력해 주세요', true); return; }
+  if (min > 120) min = 120;
+  c.inputMin = min; c.loading = true; c.error = null; c.plan = null; c.phase = 'idle';
+  render();
+
+  function usefallback() { c.loading = false; c.plan = buildFallbackInterval(min, !state.apiKey); c.phase = 'preview'; render(); }
+  try {
+    if (typeof generateCardioInterval === 'function') {
+      Promise.resolve(generateCardioInterval(min)).then(function(res) {
+        if (res && res.segments && res.segments.length) {
+          c.loading = false; c.plan = cardioNormalizePlan(res, min); c.phase = 'preview'; render();
+        } else {
+          usefallback(); // null(키 없음) 또는 형식 이상 → 로컬 폴백
+        }
+      }).catch(function() { usefallback(); });
+    } else {
+      usefallback();
+    }
+  } catch (e) { usefallback(); }
+};
+
+window.resetCardioPlan = function() {
+  ensureCardioState();
+  state.cardio.plan = null; state.cardio.phase = 'idle';
+  render();
+};
+
+// ── 실행 시작 ─────────────────────────────
+window.startCardio = function() {
+  ensureCardioState();
+  var c = state.cardio;
+  if (!c.plan || !c.plan.segments || !c.plan.segments.length) { showToast('먼저 구성을 만들어 주세요', true); return; }
+  if (state.activeSession) { showToast('웨이트 세션 중에는 시작할 수 없어요', true); return; }
+  var segs = c.plan.segments.map(function(s) {
+    return {
+      type: s.type,
+      targetSpeed: Number(s.speed) || 0,
+      actualSpeed: Number(s.speed) || 0,   // 실제 속력 = 목표에서 시작, 구간별로 조정 가능
+      startSec: s.startSec, endSec: s.endSec,
+      sec: Math.max(0, Math.round(s.endSec - s.startSec)),
+      label: s.label || cardioTypeLabel(s.type)
+    };
+  });
+  var totalSec = segs.length ? segs[segs.length - 1].endSec : (c.plan.totalSec || 0);
+  var now = cardioNow();
+  c.run = {
+    startPerf: now,               // 경과 기준(단조 시계)
+    startedAtWall: Date.now(),    // 복원 기준 벽시계(performance.now 는 세션 간 이어지지 않음)
+    lastIntegratePerf: now,       // 거리 적분 기준점(단조 시계)
+    lastIntegrateElapsed: 0,      // 거리 적분 기준점(경과초) — 구간별 정확 적분·복원용
+    segs: segs, totalSec: totalSec, curIdx: 0,
+    distanceKm: 0, soundOn: true, completed: false, elapsedAtEnd: null
+  };
+  c.phase = 'running';
+  saveActiveCardio();             // 시작 즉시 저장(백그라운드 회수·새로고침에도 진행 유지)
+
+  // 오디오·웨이크락·가시성핸들러·정밀타이머 기동. 사용자 탭 제스처(이 함수) 안이라 안드로이드에서 소리가 난다.
+  cardioStartRuntime(0);
+  render();
+};
+
+// 런타임(오디오·톤·웨이크락·가시성핸들러·정밀타이머) 기동 — 새 시작과 복원(이어하기) 공용.
+// fromElapsed: 톤 예약 시작 기준 경과초(새 시작=0, 복원=현재 경과). 복원 경로는 사용자 제스처가 없어
+// 오디오가 suspended 로 시작될 수 있으나, 이후 탭(속력조정)·가시성 복귀에서 resume 된다.
+function cardioStartRuntime(fromElapsed) {
+  fromElapsed = fromElapsed || 0;
+  cardioStartAudio();
+  cardioScheduleTones(fromElapsed);
+  cardioRequestWakeLock();
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    cardioRuntime.visHandler = function() {
+      if (!(state.cardio && state.cardio.phase === 'running' && state.cardio.run)) return;
+      var run = state.cardio.run;
+      if (document.visibilityState !== 'visible') {
+        // 백그라운드로 감 — 경과분 적분 후 최신 진행 저장(메모리 회수 대비)
+        cardioIntegrate();
+        saveActiveCardio();
+        return;
+      }
+      // 복귀: 웨이크락 재획득 + 오디오 재개 + 경과분 정확 적분 + 현재 구간 재계산 + 톤 재예약 + 화면 재동기화
+      cardioRequestWakeLock();
+      if (cardioRuntime.audioCtx && cardioRuntime.audioCtx.resume) { try { cardioRuntime.audioCtx.resume(); } catch (e) {} }
+      var el = (cardioNow() - run.startPerf) / 1000; if (el < 0) el = 0;
+      cardioIntegrate();                             // 자리 비운 사이 경과분을 구간별 실제속력으로 정확히 적분
+      if (el >= run.totalSec) { finishCardio(); return; }   // 자리 비운 사이 완주됨
+      run.curIdx = cardioSegIndexAt(run.segs, el);   // 복귀 즉시 현재 구간 재계산(최대 250ms 스테일 표시 방지)
+      cardioScheduleTones(el);
+      cardioPaintDynamic(el);
+      saveActiveCardio();
+    };
+    document.addEventListener('visibilitychange', cardioRuntime.visHandler);
+  }
+  cardioStartInterval();
+}
+
+// ── 정밀 타이머 ─────────────────────────────
+function cardioStartInterval() {
+  cardioClearInterval();
+  if (typeof setInterval === 'undefined') return;
+  cardioRuntime.intervalId = setInterval(cardioTick, 250);
+}
+function cardioClearInterval() {
+  if (cardioRuntime.intervalId) { try { clearInterval(cardioRuntime.intervalId); } catch (e) {} cardioRuntime.intervalId = null; }
+}
+// 현재 시각 t(초)가 속한 구간 인덱스
+function cardioSegIndexAt(segs, t) {
+  for (var i = 0; i < segs.length; i++) { if (t < segs[i].endSec) return i; }
+  return segs.length - 1;
+}
+// 이동거리 적분: 마지막 적분 지점(경과초)부터 현재 경과초까지를 "구간 경계로 쪼개어" 각 구간의
+// 실제속력으로 더한다. 백그라운드로 여러 구간 경계를 지나 복귀해도(공백이 커도) 구간별 속력으로
+// 정확히 적분된다(옛 버전은 공백 전체를 현재 한 구간 속력으로 곱해 과·과소 계상됐다).
+// 매 틱·속력변경·구간전환·복귀·종료 시 호출. 경과는 performance.now 기준(startPerf)으로 계산.
+function cardioIntegrate() {
+  var run = state.cardio && state.cardio.run; if (!run) return;
+  var now = cardioNow();
+  var toEl = (now - run.startPerf) / 1000;
+  if (toEl < 0) toEl = 0;
+  if (toEl > run.totalSec) toEl = run.totalSec;
+  var fromEl = (typeof run.lastIntegrateElapsed === 'number')
+    ? run.lastIntegrateElapsed
+    : ((run.lastIntegratePerf - run.startPerf) / 1000);
+  if (!(fromEl >= 0)) fromEl = 0;
+  if (toEl > fromEl) {
+    var segs = run.segs;
+    for (var i = 0; i < segs.length; i++) {
+      var lo = Math.max(fromEl, segs[i].startSec);
+      var hi = Math.min(toEl, segs[i].endSec);
+      if (hi > lo) run.distanceKm += (segs[i].actualSpeed || 0) * (hi - lo) / 3600;
+    }
+  }
+  run.lastIntegratePerf = now;
+  run.lastIntegrateElapsed = toEl;
+}
+// 매 250ms: 경과를 performance.now 절대차로 재계산(드리프트 0). 화면은 부분 갱신(전체 render 아님).
+function cardioTick() {
+  if (!(state.cardio && state.cardio.phase === 'running' && state.cardio.run)) { cardioClearInterval(); return; }
+  var run = state.cardio.run;
+  var elapsed = (cardioNow() - run.startPerf) / 1000; if (elapsed < 0) elapsed = 0;
+  cardioIntegrate();
+  if (elapsed >= run.totalSec) { finishCardio(); return; }
+  var idx = cardioSegIndexAt(run.segs, elapsed);
+  var segChanged = (idx !== run.curIdx);
+  if (segChanged) {
+    run.curIdx = idx;
+    if (typeof navigator !== 'undefined' && navigator.vibrate) { try { navigator.vibrate(120); } catch (e) {} }
+  }
+  cardioPaintDynamic(elapsed);
+  // 진행 저장: 구간 전환 시 즉시, 그 외엔 ~3초마다(백그라운드 회수·새로고침 대비 · 저장 폭주 방지)
+  var nowWall = Date.now();
+  if (segChanged || !run._lastSaveWall || (nowWall - run._lastSaveWall) >= 3000) {
+    run._lastSaveWall = nowWall;
+    saveActiveCardio();
+  }
+}
+// 실행화면의 동적 요소만 id 로 직접 갱신(전체 재렌더 없이 → 깜빡임·포커스 손실 방지).
+function cardioPaintDynamic(elapsed) {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var run = state.cardio && state.cardio.run; if (!run) return;
+  var idx = run.curIdx;
+  var seg = run.segs[idx]; if (!seg) return;
+  var next = run.segs[idx + 1] || null;
+  function set(id, txt) { var el = document.getElementById(id); if (el) el.textContent = txt; }
+  set('cardio-elapsed', cardioFmtClock(elapsed));
+  set('cardio-seg-icon', cardioTypeIcon(seg.type));
+  set('cardio-seg-label', cardioTypeLabel(seg.type));
+  set('cardio-seg-remain', '남은 ' + cardioFmtClock(Math.max(0, Math.ceil(seg.endSec - elapsed))));
+  set('cardio-target', (seg.targetSpeed || 0).toFixed(1));
+  set('cardio-actual', (seg.actualSpeed || 0).toFixed(1));
+  set('cardio-dist', run.distanceKm.toFixed(2));
+  set('cardio-segcount', (idx + 1) + ' / ' + run.segs.length);
+  set('cardio-next', next ? (cardioTypeIcon(next.type) + ' ' + cardioTypeLabel(next.type) + ' ' + (next.targetSpeed || 0).toFixed(1)) : '마지막 구간');
+  var pf = document.getElementById('cardio-progress-fill');
+  if (pf) { var pct = run.totalSec > 0 ? Math.min(100, (elapsed / run.totalSec) * 100) : 0; pf.style.width = pct.toFixed(1) + '%'; }
+  var pc = document.getElementById('cardio-precue');
+  if (pc) {
+    var ttl = seg.endSec - elapsed;
+    if (ttl > 0 && ttl <= 3) {
+      pc.style.display = '';
+      pc.textContent = next ? ('곧 ' + cardioTypeIcon(next.type) + ' ' + cardioTypeLabel(next.type) + ' ' + (next.targetSpeed || 0).toFixed(1) + '! (' + Math.ceil(ttl) + ')') : ('곧 완주! (' + Math.ceil(ttl) + ')');
+    } else { pc.style.display = 'none'; pc.textContent = ''; }
+  }
+}
+
+// 속력 −/+ 조정: 현재 구간의 실제속력 변경 → 그 값이 기록됨. 부분 갱신만.
+window.adjustCardioSpeed = function(delta) {
+  var run = state.cardio && state.cardio.run; if (!run) return;
+  cardioIntegrate(); // 바뀌기 전 속력으로 지금까지 거리 적분
+  var seg = run.segs[run.curIdx]; if (!seg) return;
+  var v = (seg.actualSpeed || 0) + delta;
+  if (v < 0.5) v = 0.5; if (v > 25) v = 25;
+  seg.actualSpeed = Math.round(v * 10) / 10;
+  if (typeof document !== 'undefined' && document.getElementById) {
+    var el = document.getElementById('cardio-actual'); if (el) el.textContent = seg.actualSpeed.toFixed(1);
+  }
+  // 실제속력이 바뀌면 다가올 경계음(올림/내림 판정)이 달라지므로 재예약한다. 진행도 즉시 저장.
+  if (cardioRuntime.audioCtx && cardioRuntime.audioCtx.resume) { try { cardioRuntime.audioCtx.resume(); } catch (e) {} }
+  var elNow = (cardioNow() - run.startPerf) / 1000; if (elNow < 0) elNow = 0;
+  cardioScheduleTones(elNow);
+  saveActiveCardio();
+};
+
+// 소리 켜기/끄기
+window.toggleCardioSound = function() {
+  var run = state.cardio && state.cardio.run; if (!run) return;
+  run.soundOn = !run.soundOn;
+  if (run.soundOn) {
+    if (cardioRuntime.audioCtx && cardioRuntime.audioCtx.resume) { try { cardioRuntime.audioCtx.resume(); } catch (e) {} }
+    var el = (cardioNow() - run.startPerf) / 1000; if (el < 0) el = 0;
+    cardioScheduleTones(el);
+  } else {
+    try { (cardioRuntime.scheduled || []).forEach(function(nd) { try { nd.stop(); } catch (e) {} }); } catch (e) {}
+    cardioRuntime.scheduled = [];
+  }
+  render();
+};
+
+// ── Web Audio: 오실레이터 알림음(파일 없이) ─────────────────────────────
+function cardioStartAudio() {
+  if (typeof window === 'undefined') return;
+  var AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  try {
+    var ctx = new AC();
+    cardioRuntime.audioCtx = ctx;
+    if (ctx.resume) { try { ctx.resume(); } catch (e) {} }
+    // 무음 루프(1샘플) — 오디오 세션을 살려 백그라운드에서도 예약음이 울리도록 시도(안드로이드 베스트에포트).
+    var buf = ctx.createBuffer(1, 1, 22050);
+    var src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+    var g = ctx.createGain(); g.gain.value = 0.0001;
+    src.connect(g); g.connect(ctx.destination); src.start(0);
+    cardioRuntime.keepAlive = src;
+  } catch (e) { cardioRuntime.audioCtx = null; }
+}
+function cardioStopAudio() {
+  try { (cardioRuntime.scheduled || []).forEach(function(n) { try { n.stop(); } catch (e) {} try { n.disconnect(); } catch (e) {} }); } catch (e) {}
+  cardioRuntime.scheduled = [];
+  if (cardioRuntime.keepAlive) { try { cardioRuntime.keepAlive.stop(); } catch (e) {} try { cardioRuntime.keepAlive.disconnect(); } catch (e) {} cardioRuntime.keepAlive = null; }
+  if (cardioRuntime.audioCtx) { try { cardioRuntime.audioCtx.close(); } catch (e) {} cardioRuntime.audioCtx = null; }
+}
+// 톤 시퀀스 예약: kind = pre(예고·부드러운 2블립) / up(올림·상승 2음) / down(내림·하강 2음) / finish(완주·상승 3음).
+function cardioSchedSeq(ctx, at, kind) {
+  var seqs = {
+    pre:    { freqs: [880, 880],       dur: 0.09, gap: 0.07, gain: 0.14, type: 'sine' },
+    up:     { freqs: [660, 990],       dur: 0.13, gap: 0.04, gain: 0.22, type: 'square' },
+    down:   { freqs: [660, 440],       dur: 0.13, gap: 0.04, gain: 0.22, type: 'square' },
+    finish: { freqs: [523, 659, 784],  dur: 0.16, gap: 0.03, gain: 0.22, type: 'triangle' }
+  };
+  var spec = seqs[kind] || seqs.pre;
+  var nodes = [];
+  for (var i = 0; i < spec.freqs.length; i++) {
+    var t0 = at + i * (spec.dur + spec.gap);
+    try {
+      var osc = ctx.createOscillator(); var g = ctx.createGain();
+      osc.type = spec.type; osc.frequency.value = spec.freqs[i];
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(spec.gain, t0 + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + spec.dur);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start(t0); osc.stop(t0 + spec.dur + 0.02);
+      nodes.push(osc);
+    } catch (e) {}
+  }
+  return nodes;
+}
+function cardioPushTones(nodes) { if (nodes && nodes.length) cardioRuntime.scheduled = cardioRuntime.scheduled.concat(nodes); }
+// fromElapsed(초) 이후의 모든 구간 경계에 대해 예고음(-3s)+전환음을 예약. 기존 예약은 취소 후 재예약(재개·무음전환 대응).
+function cardioScheduleTones(fromElapsed) {
+  try { (cardioRuntime.scheduled || []).forEach(function(n) { try { n.stop(); } catch (e) {} }); } catch (e) {}
+  cardioRuntime.scheduled = [];
+  var ctx = cardioRuntime.audioCtx;
+  var run = state.cardio && state.cardio.run;
+  if (!ctx || !run || !run.soundOn) return;
+  var base = ctx.currentTime;
+  var segs = run.segs;
+  for (var i = 0; i < segs.length; i++) {
+    var b = segs[i].endSec;              // 구간 경계(마지막은 완주 지점)
+    if (b <= fromElapsed + 0.05) continue;
+    var isFinal = (i === segs.length - 1);
+    var pre = b - 3;
+    if (pre > fromElapsed + 0.05) cardioPushTones(cardioSchedSeq(ctx, base + (pre - fromElapsed), 'pre'));
+    if (isFinal) {
+      cardioPushTones(cardioSchedSeq(ctx, base + (b - fromElapsed), 'finish'));
+    } else {
+      var cur = segs[i].actualSpeed, nxt = segs[i + 1].targetSpeed;
+      var harder = (nxt > cur) || (segs[i + 1].type === 'run' && segs[i].type !== 'run');
+      cardioPushTones(cardioSchedSeq(ctx, base + (b - fromElapsed), harder ? 'up' : 'down'));
+    }
+  }
+}
+
+// ── Wake Lock(화면 유지) ─────────────────────────────
+function cardioRequestWakeLock() {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.wakeLock && navigator.wakeLock.request) {
+      navigator.wakeLock.request('screen').then(function(wl) { cardioRuntime.wakeLock = wl; }).catch(function() {});
+    }
+  } catch (e) {}
+}
+function cardioReleaseWakeLock() {
+  try { if (cardioRuntime.wakeLock && cardioRuntime.wakeLock.release) cardioRuntime.wakeLock.release(); } catch (e) {}
+  cardioRuntime.wakeLock = null;
+}
+// 세션 종료 시 모든 런타임 자원 정리
+function teardownCardioRuntime() {
+  cardioClearInterval();
+  cardioStopAudio();
+  cardioReleaseWakeLock();
+  if (cardioRuntime.visHandler && typeof document !== 'undefined' && document.removeEventListener) {
+    try { document.removeEventListener('visibilitychange', cardioRuntime.visHandler); } catch (e) {}
+  }
+  cardioRuntime.visHandler = null;
+}
+
+// ── 종료(완주 / 중단) → RPE ─────────────────────────────
+function finishCardio() {
+  var run = state.cardio && state.cardio.run; if (!run) return;
+  cardioIntegrate();
+  run.completed = true; run.elapsedAtEnd = run.totalSec;
+  teardownCardioRuntime();
+  if (typeof navigator !== 'undefined' && navigator.vibrate) { try { navigator.vibrate([200, 100, 200]); } catch (e) {} }
+  state.cardio.phase = 'rpe';
+  saveActiveCardio();          // rpe 단계로 저장(RPE 입력 중 회수돼도 복원 가능)
+  render();
+}
+// 화면 종료 버튼 / 폰 뒤로가기(fromBack) — 둘 다 확인 팝업(1단계 endSession 패턴).
+window.stopCardio = function(fromBack) {
+  var c = state.cardio; var run = c && c.run; if (!run) return;
+  if (typeof confirm === 'function' && !confirm('운동을 종료하시겠어요?')) return;
+  cardioIntegrate();
+  var elapsed = (cardioNow() - run.startPerf) / 1000; if (elapsed < 0) elapsed = 0; if (elapsed > run.totalSec) elapsed = run.totalSec;
+  run.elapsedAtEnd = elapsed; run.completed = false;
+  teardownCardioRuntime();
+  // 시작 직후 실수 종료(거의 안 뛴 경우)는 저장 안 함
+  if (elapsed < 20 && run.distanceKm < 0.02) {
+    c.phase = 'idle'; c.run = null;
+    try { localStorage.removeItem(KEYS.ACTIVE_CARDIO_RUN); } catch (e) {}   // 진행 저장 삭제
+    render(); showToast('기록 없이 종료했어요');
+    return;
+  }
+  c.phase = 'rpe';
+  saveActiveCardio();          // rpe 단계로 저장(RPE 입력 중 회수 대비)
+  render();
+};
+// RPE(1~10 또는 null=건너뛰기) → 세션 저장(saveCardioSession) 후 초기화
+window.submitCardioRpe = function(rpe) {
+  var c = state.cardio; var run = c && c.run;
+  if (!run) { if (c) { c.phase = 'idle'; } try { localStorage.removeItem(KEYS.ACTIVE_CARDIO_RUN); } catch (e) {} render(); return; }
+  var endSec = (run.elapsedAtEnd != null) ? run.elapsedAtEnd : run.totalSec;
+  // 실제 수행한 구간만 기록(중단 시 진행중 구간은 실제 경과분만)
+  var outSegs = [];
+  for (var i = 0; i < run.segs.length; i++) {
+    var s = run.segs[i];
+    if (s.startSec >= endSec - 0.5) break;
+    var segEnd = Math.min(s.endSec, endSec);
+    var sec = Math.max(0, Math.round(segEnd - s.startSec));
+    if (sec <= 0) continue;
+    outSegs.push({ type: s.type, targetSpeed: s.targetSpeed, actualSpeed: s.actualSpeed, sec: sec });
+  }
+  if (!outSegs.length) outSegs = run.segs.map(function(s) { return { type: s.type, targetSpeed: s.targetSpeed, actualSpeed: s.actualSpeed, sec: s.sec }; });
+  var session = {
+    id: 'cardio_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+    date: getTodayStr(),
+    totalSec: Math.round(endSec),
+    totalDistKm: Math.round(run.distanceKm * 100) / 100,
+    segments: outSegs,
+    completed: !!run.completed,
+    rpe: (rpe == null ? null : rpe)
+  };
+  c.run = null; c.plan = null; c.phase = 'idle';
+  try { localStorage.removeItem(KEYS.ACTIVE_CARDIO_RUN); } catch (e) {}   // 진행 저장 삭제(세션이 CARDIO_LOG 로 확정됨)
+  state.currentTab = 'running';
+  if (typeof window.saveCardioSession === 'function') { window.saveCardioSession(session); } else { render(); }
+  showToast(session.completed ? '완주! 유산소 기록 저장 완료 💪' : '유산소 기록 저장 완료');
+};
+
+// ── 화면: 러닝 탭(입력/구성 미리보기) ─────────────────────────────
 function renderRunning() {
+  ensureCardioState();
+  var c = state.cardio;
+  var accent = '#00d4ff';
+
+  // 정직한 톤 배너(cardio-research.md) + 근손실 넛지
+  var banner =
+    '<div class="card mb-4" style="margin-top:16px;border-color:rgba(0,212,255,0.15);">' +
+      '<p class="text-xs font-display" style="line-height:1.65;">인터벌이 지방을 <b>순삭</b>하진 않아요. 핵심은 <b>총 소비 × 식사 × 꾸준함</b> — 안전하게 총량을 쌓는 방식이에요.</p>' +
+      '<p class="text-[10px] font-mono text-stone-500 mt-2">💡 유산소만 하면 근육도 빠져요. 웨이트 병행 + 단백질을 함께 챙기세요.</p>' +
+    '</div>';
+
+  // 시간 입력 + 구성 버튼 + 빠른 선택 칩
+  var quickChips = [15, 20, 30, 40, 50].map(function(m) {
+    return '<button class="option-card" style="flex:1;padding:9px 0;text-align:center;" onclick="buildCardioPlan(' + m + ')"><p class="text-xs font-mono">' + m + '</p></button>';
+  }).join('');
+  var input =
+    '<div class="card mb-4">' +
+      '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-2">운동 시간</p>' +
+      '<div class="flex items-center gap-2">' +
+        '<input id="cardio-min-input" type="number" inputmode="numeric" min="5" max="120" step="1" value="' + (c.inputMin || '') + '" placeholder="예: 30"' + (c.loading ? ' disabled' : '') + ' style="flex:1;min-width:0;background:#0d1424;border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px 14px;color:#fff;font-family:Bebas Neue,sans-serif;font-size:26px;" onkeydown="if(event.key===\'Enter\')buildCardioPlan()" />' +
+        '<span class="text-sm font-mono text-stone-400">분</span>' +
+        '<button class="sheet-submit" style="width:auto;padding:12px 20px;margin:0;flex-shrink:0;" onclick="buildCardioPlan()"' + (c.loading ? ' disabled' : '') + '>구성</button>' +
+      '</div>' +
+      '<div class="flex gap-2 mt-3">' + quickChips + '</div>' +
+    '</div>';
+
+  // 로딩 / 미리보기
+  var mid = '';
+  if (c.loading) {
+    mid = '<div class="card mb-4 text-center" style="padding:28px 0;"><p class="text-sm font-mono accent">AI가 구성 중…</p><p class="text-[10px] font-mono text-stone-500 mt-2">시간에 딱 맞게 워밍업·인터벌·쿨다운을 짜요</p></div>';
+  } else if (c.plan) {
+    var plan = c.plan;
+    var segList = plan.segments.map(function(s) {
+      var dur = s.endSec - s.startSec;
+      return '<div class="flex items-center justify-between" style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,0.06);">' +
+          '<div class="flex items-center gap-2">' +
+            '<span style="font-size:17px;">' + cardioTypeIcon(s.type) + '</span>' +
+            '<div><p class="text-xs font-display">' + cardioTypeLabel(s.type) + '</p>' +
+            '<p class="text-[10px] font-mono text-stone-500">' + cardioFmtClock(dur) + '</p></div>' +
+          '</div>' +
+          '<p class="font-bebas text-xl' + (s.type === 'run' ? ' accent' : '') + '">' + (Number(s.speed) || 0).toFixed(1) + '<span class="text-[10px] text-stone-500"> km/h</span></p>' +
+        '</div>';
+    }).join('');
+    mid =
+      '<div class="card mb-4">' +
+        '<div class="flex items-center justify-between mb-1">' +
+          '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono">오늘 구성</p>' +
+          '<p class="font-bebas text-2xl accent">' + cardioFmtClock(plan.totalSec) + '</p>' +
+        '</div>' +
+        (plan.headline ? '<p class="text-sm font-display mb-2">' + escapeHtml(plan.headline) + '</p>' : '') +
+        (plan.source === 'fallback' ? '<p class="text-[10px] font-mono" style="color:#fbbf24;">AI 키가 없어 기본 구성을 사용했어요</p>' : '') +
+        '<div class="mt-2">' + segList + '</div>' +
+        (plan.note ? '<p class="text-[10px] font-mono text-stone-400 mt-3" style="line-height:1.6;">' + escapeHtml(plan.note) + '</p>' : '') +
+        '<button class="sheet-submit" style="margin-top:14px;" onclick="startCardio()">▶ 시작</button>' +
+        '<button class="option-card" style="width:100%;margin-top:8px;text-align:center;" onclick="resetCardioPlan()"><p class="text-xs font-mono text-stone-400">다시 구성</p></button>' +
+      '</div>';
+  }
+
+  // 최근 유산소 한 줄
+  var all = (state.data && state.data.cardioLog) ? state.data.cardioLog : [];
+  var recent = all.length
+    ? '<p class="text-[10px] font-mono text-stone-500 text-center mt-6">최근: ' + all[all.length - 1].date + ' · ' + cardioFmtClock(all[all.length - 1].totalSec || 0) + ' · ' + ((all[all.length - 1].totalDistKm || 0).toFixed(2)) + 'km' + (all[all.length - 1].completed ? ' · 완주' : '') + '</p>'
+    : '<p class="text-[10px] font-mono text-stone-600 text-center mt-6">첫 세션은 보수적으로 · 완주가 목표예요</p>';
+
   return '' +
     '<div class="px-5 pt-12 pb-32">' +
       '<p class="text-xs uppercase font-mono text-stone-500 mb-2" style="letter-spacing: 0.3em;">RUNNING</p>' +
       '<h1 class="font-bebas text-4xl">러닝</h1>' +
-      '<div class="mt-20 text-center">' +
-        '<div class="placeholder-icon">' + icon('clock', 36) + '</div>' +
-        '<p class="text-sm text-stone-400 font-mono mt-4">유산소 기능 준비 중</p>' +
-        '<p class="text-xs text-stone-600 mt-2 leading-relaxed">러닝머신 인터벌 유산소가<br/>다음 단계에서 추가됩니다</p>' +
+      '<p class="text-xs font-mono text-stone-400 mt-1">러닝머신 인터벌 · 시간만 정하면 AI가 구성</p>' +
+      banner + input + mid + recent +
+    '</div>';
+}
+
+// ── 화면: 실행 중(경과·목표속력 크게 + 보조 정보) ─────────────────────────────
+function renderCardioSession() {
+  var c = state.cardio; var run = c && c.run;
+  if (!run) return '<div class="px-5 pt-12">세션 없음</div>';
+  var elapsed = (cardioNow() - run.startPerf) / 1000; if (elapsed < 0) elapsed = 0; if (elapsed > run.totalSec) elapsed = run.totalSec;
+  var idx = cardioSegIndexAt(run.segs, elapsed);
+  var seg = run.segs[idx] || run.segs[run.segs.length - 1];
+  var next = run.segs[idx + 1] || null;
+  var progPct = run.totalSec > 0 ? Math.min(100, (elapsed / run.totalSec) * 100) : 0;
+  var accent = '#00d4ff';
+  var round = 'width:52px;height:52px;border-radius:50%;border:1px solid rgba(255,255,255,0.14);background:#111a2e;color:#fff;font-family:Bebas Neue,sans-serif;font-size:26px;line-height:1;display:flex;align-items:center;justify-content:center;';
+  var chip = 'padding:6px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:#0d1424;color:#9fb0c9;font-family:JetBrains Mono,monospace;font-size:12px;';
+
+  return '' +
+    // 헤더
+    '<div class="px-5 pt-12" style="padding-bottom:14px;">' +
+      '<div class="flex items-center justify-between mb-3">' +
+        '<button class="session-header-btn" onclick="stopCardio(false)">' + icon('close', 18) + '</button>' +
+        '<div class="text-center">' +
+          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">러닝 · 인터벌</p>' +
+          '<p class="text-xs font-mono accent mt-0\\.5">총 ' + cardioFmtClock(run.totalSec) + '</p>' +
+        '</div>' +
+        '<button class="session-header-btn" onclick="toggleCardioSound()" title="소리">' + (run.soundOn ? '🔊' : '🔇') + '</button>' +
       '</div>' +
+      '<div class="session-progress"><div id="cardio-progress-fill" class="session-progress-fill" style="width:' + progPct.toFixed(1) + '%"></div></div>' +
+    '</div>' +
+
+    '<div class="px-5" style="padding-bottom:120px;">' +
+
+      // 현재 구간
+      '<div class="text-center" style="margin-top:6px;">' +
+        '<p class="text-sm" style="color:#9fb0c9;"><span id="cardio-seg-icon">' + cardioTypeIcon(seg.type) + '</span> <span id="cardio-seg-label" class="font-display">' + cardioTypeLabel(seg.type) + '</span></p>' +
+        '<p id="cardio-seg-remain" class="text-[10px] font-mono text-stone-500 mt-1">남은 ' + cardioFmtClock(Math.max(0, Math.ceil(seg.endSec - elapsed))) + '</p>' +
+      '</div>' +
+
+      // 경과시간(히어로)
+      '<div class="text-center" style="margin-top:10px;">' +
+        '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">경과 시간</p>' +
+        '<p id="cardio-elapsed" class="font-bebas" style="font-size:76px;line-height:1;letter-spacing:1px;">' + cardioFmtClock(elapsed) + '</p>' +
+      '</div>' +
+
+      // 예고 배너(3초 전)
+      '<div id="cardio-precue" class="text-center" style="display:none;margin-top:8px;color:#fbbf24;font-family:Space Grotesk,sans-serif;font-weight:700;font-size:15px;"></div>' +
+
+      // 목표 속력 + 실제 속력 조정
+      '<div class="card" style="margin-top:16px;">' +
+        '<div class="flex items-center justify-between mb-1">' +
+          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">목표 속력</p>' +
+          '<p class="font-bebas text-2xl accent"><span id="cardio-target">' + (seg.targetSpeed || 0).toFixed(1) + '</span><span class="text-xs text-stone-400"> km/h</span></p>' +
+        '</div>' +
+        '<div class="flex items-center justify-between" style="margin-top:10px;">' +
+          '<button style="' + round + '" onclick="adjustCardioSpeed(-0.5)">−</button>' +
+          '<div class="text-center">' +
+            '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">실제 속력</p>' +
+            '<p class="font-bebas" style="font-size:46px;line-height:1;"><span id="cardio-actual">' + (seg.actualSpeed || 0).toFixed(1) + '</span><span class="text-sm text-stone-400"> km/h</span></p>' +
+          '</div>' +
+          '<button style="' + round + '" onclick="adjustCardioSpeed(0.5)">+</button>' +
+        '</div>' +
+        '<div class="flex items-center justify-center gap-2" style="margin-top:10px;">' +
+          '<button class="option-card" style="padding:6px 14px;" onclick="adjustCardioSpeed(-0.1)"><p class="text-xs font-mono text-stone-400">−0.1</p></button>' +
+          '<button class="option-card" style="padding:6px 14px;" onclick="adjustCardioSpeed(0.1)"><p class="text-xs font-mono text-stone-400">+0.1</p></button>' +
+        '</div>' +
+      '</div>' +
+
+      // 보조 정보(거리·다음·구간)
+      '<div class="flex gap-2" style="margin-top:12px;">' +
+        '<div style="flex:1;' + chip + '"><p class="text-[10px] text-stone-500">이동거리</p><p class="font-bebas text-xl" style="color:#34d399;"><span id="cardio-dist">' + run.distanceKm.toFixed(2) + '</span> km</p></div>' +
+        '<div style="flex:1;' + chip + '"><p class="text-[10px] text-stone-500">구간</p><p class="font-bebas text-xl"><span id="cardio-segcount">' + (idx + 1) + ' / ' + run.segs.length + '</span></p></div>' +
+      '</div>' +
+      '<div style="' + chip + 'margin-top:8px;"><p class="text-[10px] text-stone-500">다음 구간</p><p class="text-sm font-display" style="color:#fff;"><span id="cardio-next">' + (next ? (cardioTypeIcon(next.type) + ' ' + cardioTypeLabel(next.type) + ' ' + (next.targetSpeed || 0).toFixed(1)) : '마지막 구간') + '</span></p></div>' +
+
+      '<button class="option-card" style="width:100%;margin-top:18px;text-align:center;padding:14px 0;" onclick="stopCardio(false)"><p class="text-sm font-mono accent">운동 종료 ✓</p></button>' +
+
+    '</div>';
+}
+
+// ── 화면: 종료 후 RPE 입력 ─────────────────────────────
+function renderCardioRPE() {
+  var c = state.cardio; var run = c && c.run;
+  if (!run) return '<div class="px-5 pt-12">기록 없음</div>';
+  var endSec = (run.elapsedAtEnd != null) ? run.elapsedAtEnd : run.totalSec;
+  var completed = !!run.completed;
+  var btns = '';
+  for (var n = 1; n <= 10; n++) {
+    var col = n <= 3 ? '#10b981' : n <= 6 ? '#00d4ff' : n <= 8 ? '#fbbf24' : '#ef4444';
+    btns += '<button onclick="submitCardioRpe(' + n + ')" style="width:52px;height:52px;border-radius:14px;border:1.5px solid ' + col + ';background:#0d1424;color:' + col + ';font-family:Bebas Neue,sans-serif;font-size:24px;">' + n + '</button>';
+  }
+  return '' +
+    '<div class="px-5 pt-12 pb-32">' +
+      '<div class="text-center" style="margin-top:8px;">' +
+        '<div style="font-size:44px;">' + (completed ? '🎉' : '👏') + '</div>' +
+        '<h1 class="font-bebas text-4xl mt-1">' + (completed ? '완주!' : '수고했어요') + '</h1>' +
+        '<p class="text-sm font-mono text-stone-400 mt-2">' + cardioFmtClock(endSec) + ' · ' + run.distanceKm.toFixed(2) + 'km</p>' +
+      '</div>' +
+
+      '<div class="card" style="margin-top:22px;">' +
+        '<p class="text-sm font-display text-center mb-1">오늘 세션, 얼마나 힘들었나요?</p>' +
+        '<p class="text-[10px] font-mono text-stone-500 text-center mb-4">1~3 쉬움 · 4~6 적당 · 7~8 힘듦 · 9~10 매우 힘듦</p>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;">' + btns + '</div>' +
+        '<p class="text-[10px] font-mono text-stone-500 text-center mt-4" style="line-height:1.6;">뛰기가 7 이하로 완주했다면 다음엔 걷기를 조금 줄여 볼게요. 통증이 있으면 쉬어 주세요.</p>' +
+        '<button class="option-card" style="width:100%;margin-top:12px;text-align:center;" onclick="submitCardioRpe(null)"><p class="text-xs font-mono text-stone-400">평가 건너뛰기</p></button>' +
+      '</div>' +
+    '</div>';
+}
+
+// ── 기록 탭용: 유산소 요약 카드 ─────────────────────────────
+function cardioAvgRunSpeed(session) {
+  var segs = (session && session.segments) ? session.segments : [];
+  var tsec = 0, tdist = 0;
+  segs.forEach(function(s) { if (s.type === 'run') { tsec += (s.sec || 0); tdist += (s.actualSpeed || 0) * (s.sec || 0); } });
+  return tsec > 0 ? (tdist / tsec) : 0;
+}
+function cardioSummaryCardHtml(period) {
+  var all = (state.data && state.data.cardioLog) ? state.data.cardioLog : [];
+  if (!all.length) return '';
+  var list = filterByPeriod(all, period);
+  var sorted = list.slice().sort(function(a, b) { return String(a.date).localeCompare(String(b.date)); });
+  var n = sorted.length;
+  if (!n) return '';
+  var totalKm = sorted.reduce(function(s, x) { return s + (x.totalDistKm || 0); }, 0);
+  var completedN = sorted.filter(function(x) { return x.completed; }).length;
+  var rpes = sorted.filter(function(x) { return typeof x.rpe === 'number'; }).map(function(x) { return x.rpe; });
+  var avgRpe = rpes.length ? (rpes.reduce(function(s, x) { return s + x; }, 0) / rpes.length) : null;
+  var recent = sorted.slice(-8);
+  var maxKm = Math.max.apply(null, recent.map(function(x) { return x.totalDistKm || 0; }).concat([0.1]));
+  var bars = recent.map(function(x, i) {
+    var h = Math.max(6, Math.round(((x.totalDistKm || 0) / maxKm) * 70));
+    var isLast = i === recent.length - 1;
+    return '<div style="flex:1;display:flex;justify-content:center;align-items:flex-end;height:76px;"><div style="width:60%;height:' + h + 'px;border-radius:4px;background:' + (isLast ? '#00d4ff' : '#1a2540') + ';"></div></div>';
+  }).join('');
+  var rows = sorted.slice(-5).reverse().map(function(x) {
+    var runSpd = cardioAvgRunSpeed(x);
+    return '<div class="workout-history-row">' +
+        '<div class="flex items-center gap-3">' +
+          '<div class="workout-history-dot" style="background:#34d399;box-shadow:0 0 6px rgba(52,211,153,0.5);"></div>' +
+          '<div>' +
+            '<p class="text-xs font-display font-bold">' + cardioFmtClock(x.totalSec || 0) + ' · ' + ((x.totalDistKm || 0).toFixed(2)) + 'km</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + x.date + ' · ' + (x.completed ? '완주' : '중단') + (typeof x.rpe === 'number' ? (' · RPE ' + x.rpe) : '') + (runSpd ? (' · 뛰기 ' + runSpd.toFixed(1)) : '') + '</p>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }).join('');
+  return '<div class="card mb-4">' +
+      '<div class="flex items-center justify-between mb-4">' +
+        '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono">유산소</p>' +
+        '<p class="text-xs font-mono accent">' + n + '회</p>' +
+      '</div>' +
+      '<div class="flex items-baseline gap-4 mb-3">' +
+        '<div><p class="font-bebas text-3xl accent">' + totalKm.toFixed(1) + '</p><p class="text-[10px] font-mono text-stone-500">총 km</p></div>' +
+        '<div><p class="font-bebas text-3xl">' + completedN + '</p><p class="text-[10px] font-mono text-stone-500">완주</p></div>' +
+        (avgRpe != null ? '<div><p class="font-bebas text-3xl">' + avgRpe.toFixed(1) + '</p><p class="text-[10px] font-mono text-stone-500">평균 RPE</p></div>' : '') +
+      '</div>' +
+      (recent.length >= 2 ? '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest mb-2">거리 추이</p><div style="display:flex;align-items:flex-end;gap:4px;margin-bottom:12px;">' + bars + '</div>' : '') +
+      '<div>' + rows + '</div>' +
     '</div>';
 }
 
@@ -4158,7 +4868,7 @@ function renderTabbar() {
   var tabs = [
     { id: 'home', label: 'HOME', iconName: 'home' },
     { id: 'workout', label: 'WORKOUT', iconName: 'dumbbell' },
-    { id: 'running', label: 'RUNNING', iconName: 'clock' },
+    { id: 'running', label: 'RUNNING', iconName: cardioTabIconName() },
     { id: 'stats', label: 'STATS', iconName: 'chart' },
     { id: 'more', label: 'MORE', iconName: 'more' }
   ];
@@ -4220,7 +4930,18 @@ function render() {
     document.getElementById('app').innerHTML = renderWorkoutSession();
     return;
   }
-  
+
+  // 유산소(러닝) — 종료 후 RPE 입력 / 진행 중(웨이트 세션과 상호배타)
+  if (state.cardio && state.cardio.phase === 'rpe') {
+    document.getElementById('app').innerHTML = renderCardioRPE();
+    window.scrollTo(0, 0);
+    return;
+  }
+  if (state.cardio && state.cardio.phase === 'running') {
+    document.getElementById('app').innerHTML = renderCardioSession();
+    return;
+  }
+
   var content = '';
   switch (state.currentTab) {
     case 'home': content = renderHome(); break;
@@ -4343,6 +5064,9 @@ function getTopLayer() {
   // 완료 화면 / 진행 중 세션
   if (state.completedSession) return 'completed';
   if (state.activeSession) return 'session';
+  // 유산소(러닝) 세션 — RPE 입력 / 진행 중
+  if (state.cardio && state.cardio.phase === 'rpe') return 'cardioRpe';
+  if (state.cardio && state.cardio.phase === 'running') return 'cardioSession';
   // 루틴 만들기 마법사 (운동 탭 내부 단계). STEP1은 탭 자체라 'tab'으로 처리.
   if (state.currentTab === 'workout' && state.workoutWizardStep === 3) return 'wizard3';
   if (state.currentTab === 'workout' && state.workoutWizardStep === 2) return 'wizard2';
@@ -4377,6 +5101,9 @@ function navBack() {
     // 완료 화면 / 진행 세션
     case 'completed': goHome(); break;
     case 'session': endSession(true); break;        // 운동 중 뒤로 = 항상 "종료할까요?" 팝업
+    // 유산소 — 진행 중 뒤로 = "종료할까요?" 팝업 / RPE 화면 뒤로 = 평가 건너뛰고 저장
+    case 'cardioSession': window.stopCardio(true); break;
+    case 'cardioRpe': window.submitCardioRpe(null); break;
     // 마법사 단계
     case 'wizard3': backToStep2(); break;           // FREE면 backToStep2가 STEP1로 직행
     case 'wizard2': backToStep1(); break;
