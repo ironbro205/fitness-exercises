@@ -724,7 +724,7 @@ function generateLinePath(data, width, height, padding) {
     }
     
     var isLast = i === data.length - 1;
-    pointsData += '<circle cx="' + x + '" cy="' + y + '" r="' + (isLast ? 4 : 3) + '" fill="#00d4ff"' + (isLast ? ' stroke="white" stroke-width="2"' : '') + '/>';
+    pointsData += '<circle cx="' + x + '" cy="' + y + '" r="' + (isLast ? 4 : 3) + '" fill="#F68460"' + (isLast ? ' stroke="white" stroke-width="2"' : '') + '/>';
   });
   
   areaData += ' L ' + width + ',' + height + ' Z';

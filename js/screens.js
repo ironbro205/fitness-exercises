@@ -45,7 +45,7 @@ function renderHome() {
   for (var i = 0; i < CYCLE_LENGTH; i++) {
     var isCur = i === profile.currentWeek - 1;
     var isDeloadDot = i === CYCLE_LENGTH - 1;
-    var dotStyle = (!isCur && isDeloadDot) ? ' style="border:1px solid #3a4663;background:transparent;"' : '';
+    var dotStyle = (!isCur && isDeloadDot) ? ' style="border:1px solid var(--bg-4);background:transparent;"' : '';
     weekDots += '<div class="dot ' + (isCur ? 'dot-ideal' : 'dot-pending') + '"' + dotStyle + '></div>';
     if (i < CYCLE_LENGTH - 1) weekDots += '<div class="flex-1 h-px bg-stone-800"></div>';
   }
@@ -67,7 +67,7 @@ function renderHome() {
     var completed = weekMap[idx];
     var isToday = idx === todayDayIdx;
     var boxClass = completed ? 'day-box-done' : (isToday ? 'day-box-today' : 'day-box-empty');
-    var dayColor = isToday ? '#00d4ff' : '#6b7a99';
+    var dayColor = isToday ? 'var(--accent)' : 'var(--text-muted)';
     
     weekBoxes += '<div class="text-center">' +
       '<div class="day-box ' + boxClass + '">' +
@@ -140,7 +140,7 @@ function renderHome() {
         
         // 최근 운동 리스트 (있을 시)
         (thisWeekWorkouts.length > 0 ? 
-          '<div style="margin-top: 16px; padding-top: 14px; border-top: 1px dashed #1a2540;">' +
+          '<div style="margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--bg-3);">' +
             '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest mb-2">최근 운동 (클릭하여 상세)</p>' +
             thisWeekWorkouts.slice(-3).reverse().map(function(w) {
               var d = new Date(w.date);
@@ -153,7 +153,7 @@ function renderHome() {
                     '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + w.date.substring(5) + ' (' + dStr + ') · ' + (w.duration || 0) + '분 · ' + (w.sets || 0) + '세트</p>' +
                   '</div>' +
                 '</div>' +
-                '<div style="color: #6b7a99;">' + icon('chevron', 14) + '</div>' +
+                '<div style="color: var(--text-muted);">' + icon('chevron', 14) + '</div>' +
               '</div>';
             }).join('') +
           '</div>' : '') +
@@ -168,8 +168,8 @@ function renderHome() {
               '<p class="text-[10px] font-mono text-stone-500">' + state.weeklyReview.monday.substring(5) + ' ~ ' + state.weeklyReview.sunday.substring(5) + '</p>' +
             '</div>' +
             '<div class="flex items-baseline gap-3 mb-2">' +
-              '<p class="font-bebas text-5xl" style="color: ' + ({S:'#00d4ff',A:'#00d4ff',B:'#a78bfa',C:'#fbbf24',D:'#ef4444'}[state.weeklyReview.grade] || '#a78bfa') + ';">' + state.weeklyReview.grade + '</p>' +
-              '<p class="text-sm font-display font-bold leading-tight">' + state.weeklyReview.headline + '</p>' +
+              '<p class="font-bebas text-5xl" style="color: ' + ({S:'var(--accent)',A:'var(--accent)',B:'#a78bfa',C:'#fbbf24',D:'#ef4444'}[state.weeklyReview.grade] || '#a78bfa') + ';">' + state.weeklyReview.grade + '</p>' +
+              '<p class="text-sm font-display font-bold leading-tight">' + escapeHtml(state.weeklyReview.headline) + '</p>' +
             '</div>' +
             '<p class="text-[11px] font-mono accent">자세히 보기 →</p>' +
           '</div>' +
@@ -196,7 +196,7 @@ function renderHome() {
                 '<p class="text-xs font-display font-bold" style="color: #fbbf24;">⚠️ 정체기 신호 감지</p>' +
                 '<p class="text-[10px] font-mono text-stone-500">' + state.plateauCheck.signals.length + '개 신호</p>' +
               '</div>' +
-              '<p class="text-sm text-stone-200 leading-relaxed mb-2">' + (state.plateauCheck.primary_cause || '진행이 정체되고 있어요.') + '</p>' +
+              '<p class="text-sm text-stone-200 leading-relaxed mb-2">' + escapeHtml(state.plateauCheck.primary_cause || '진행이 정체되고 있어요.') + '</p>' +
               '<p class="text-[11px] font-mono" style="color: #fbbf24;">분석 보기 →</p>' +
             '</div>' +
           '</div>' +
@@ -286,14 +286,16 @@ function renderWorkout() {
   function partCard(key, name, koreanName, desc, count) {
     var isRecommended = key === recommended;
     var cardClass = 'body-part-card' + (isRecommended ? ' recommended' : '') + (count >= 2 ? ' completed' : '');
-    var countClass = count === 0 ? 'zero' : (count >= 2 ? 'done' : '');
+    var countClass = count >= 2 ? 'done' : '';
+    // '안 한 부위'(0회)는 은은한 중립으로 — 경고 노랑(zero 클래스)은 진짜 경고에만.
+    var countStyle = count === 0 ? ' style="color: var(--text-faint);"' : '';
     
     return '<div class="' + cardClass + '" onclick="selectBodyPart(\'' + key + '\')">' +
       (isRecommended ? '<span class="recommend-badge">✨ 추천</span>' : '') +
       '<div class="body-part-header">' +
         '<p class="body-part-name' + (isRecommended ? ' recommended' : '') + '">' + name + '</p>' +
         '<div class="body-part-count">' +
-          '<p class="body-part-count-num ' + countClass + '">' + count + '</p>' +
+          '<p class="body-part-count-num ' + countClass + '"' + countStyle + '>' + count + '</p>' +
           '<p class="body-part-count-label">이번 주</p>' +
         '</div>' +
       '</div>' +
@@ -672,7 +674,7 @@ function renderWorkoutStep3() {
       var weight = ex.weight ? ex.weight + 'kg × ' : '';
       previewExHtml += 
         '<div class="routine-preview-ex">' +
-          '<span class="flex-1"><strong>' + (idx + 1) + '. ' + ex.name + '</strong></span>' +
+          '<span class="flex-1"><strong>' + (idx + 1) + '. ' + escapeHtml(ex.name) + '</strong></span>' +
           '<span class="text-stone-400 font-mono text-[10px]">' + weight + ex.reps + ' · ' + ex.sets + '세트</span>' +
         '</div>';
     });
@@ -694,7 +696,7 @@ function renderWorkoutStep3() {
             var sym = c.type === 'add' ? '+' : c.type === 'remove' ? '−' : '~';
             return '<div class="change-line">' +
               '<div class="change-icon ' + iconCls + '">' + sym + '</div>' +
-              '<span class="text-stone-200"><strong>' + c.exercise + '</strong> ' + c.detail + '</span>' +
+              '<span class="text-stone-200"><strong>' + escapeHtml(c.exercise) + '</strong> ' + escapeHtml(c.detail) + '</span>' +
             '</div>';
           }).join('');
         }
@@ -798,7 +800,7 @@ function renderWorkoutStep3() {
     '<div class="routine-chat-screen">' +
       
       // 헤더
-      '<div class="px-5 pt-12 pb-3" style="border-bottom: 1px solid #1a2540;">' +
+      '<div class="px-5 pt-12 pb-3" style="border-bottom: 1px solid var(--bg-3);">' +
         '<div class="flex items-center justify-between">' +
           '<button onclick="backToStep2()" class="session-header-btn" title="뒤로">' + icon('arrowLeft', 18) + '</button>' +
           '<div class="text-center">' +
@@ -821,11 +823,11 @@ function renderWorkoutStep3() {
           '<div class="flex items-center gap-2">' +
             '<span class="ai-badge">' + partName + '</span>' +
             '<div>' +
-              '<p class="text-xs font-display font-bold">' + (isEmpty ? '아직 종목이 없어요' : routine.headline) + '</p>' +
+              '<p class="text-xs font-display font-bold">' + (isEmpty ? '아직 종목이 없어요' : escapeHtml(routine.headline)) + '</p>' +
               '<p class="text-[10px] font-mono text-stone-500">' + (isEmpty ? '대화로 종목을 추가해주세요' : exCount + '개 종목 · ' + routine.totalSets + '세트 · ' + routine.duration + '분' + (routine.wasModified ? ' · ✨수정됨' : '')) + '</p>' +
             '</div>' +
           '</div>' +
-          (isEmpty ? '' : '<div class="chevron-icon ' + (state.routinePreviewExpanded ? 'expanded' : '') + '" style="color: #6b7a99;">' + icon('chevron', 16) + '</div>') +
+          (isEmpty ? '' : '<div class="chevron-icon ' + (state.routinePreviewExpanded ? 'expanded' : '') + '" style="color: var(--text-muted);">' + icon('chevron', 16) + '</div>') +
         '</div>' +
         (state.routinePreviewExpanded && !isEmpty ? '<div class="routine-preview-expanded">' + previewExHtml + '</div>' : '') +
       '</div>' +
@@ -838,7 +840,7 @@ function renderWorkoutStep3() {
         quickHtml +
         '<div class="routine-chat-input-row">' +
           '<div class="routine-chat-input-bar">' +
-            '<input type="text" id="rc-input" placeholder="' + (state.apiKey ? (isFree ? '원하는 운동을 말해주세요...' : '수정 요청...') : 'API 키 필요') + '" value="' + state.routineChatInput + '" oninput="updateRoutineChatInput(this.value)" onkeydown="if(event.key===\'Enter\') sendRoutineModification()" ' + (state.routineChatThinking ? 'disabled' : '') + ' />' +
+            '<input type="text" id="rc-input" placeholder="' + (state.apiKey ? (isFree ? '원하는 운동을 말해주세요...' : '수정 요청...') : 'API 키 필요') + '" value="' + escapeHtml(state.routineChatInput) + '" oninput="updateRoutineChatInput(this.value)" onkeydown="if(event.key===\'Enter\') sendRoutineModification()" ' + (state.routineChatThinking ? 'disabled' : '') + ' />' +
           '</div>' +
           '<button class="rc-send-btn" id="rc-send-btn" onclick="sendRoutineModification()"' + (sendDisabled ? ' disabled' : '') + '>' +
             '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
@@ -967,7 +969,7 @@ function renderWorkoutStep2() {
     return headerHtml +
       '<div class="routine-loading-card">' +
         '<div class="loading-spinner"></div>' +
-        '<p class="font-bebas text-3xl mb-1" style="color: #00d4ff;">' + partNames[part] + '</p>' +
+        '<p class="font-bebas text-3xl mb-1" style="color: var(--accent);">' + partNames[part] + '</p>' +
         '<p class="text-xs text-stone-400 mb-1">' + partKor[part] + '</p>' +
         '<p class="text-sm text-stone-300 mt-4">AI가 맞춤 루틴 분석 중...</p>' +
       '</div>' +
@@ -1005,8 +1007,8 @@ function renderWorkoutStep2() {
           '<div class="flex items-start gap-3 flex-1">' +
             '<div class="' + numCls + '">' + (idx + 1) + '</div>' +
             '<div class="flex-1">' +
-              '<p class="routine-ex-name">' + ex.name + typeTag + '</p>' +
-              '<p class="routine-ex-type">' + ex.type + (ex.note ? ' · ' + ex.note : '') + '</p>' +
+              '<p class="routine-ex-name">' + escapeHtml(ex.name) + typeTag + '</p>' +
+              '<p class="routine-ex-type">' + escapeHtml(ex.type) + (ex.note ? ' · ' + escapeHtml(ex.note) : '') + '</p>' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -1047,10 +1049,10 @@ function renderWorkoutStep2() {
           '<span class="ai-badge">✨ AI 분석 완료</span>' +
           '' +
         '</div>' +
-        '<button onclick="regenerateRoutine()" style="color: #00d4ff; opacity: 0.6;" title="다시 분석">' + icon('refresh', 14) + '</button>' +
+        '<button onclick="regenerateRoutine()" style="color: var(--accent); opacity: 0.6;" title="다시 분석">' + icon('refresh', 14) + '</button>' +
       '</div>' +
-      '<p class="font-bebas text-4xl mb-1 relative" style="color: #00d4ff;">' + partNames[part] + '</p>' +
-      '<p class="text-sm text-stone-300 leading-relaxed mb-1 relative">' + routine.headline + '</p>' +
+      '<p class="font-bebas text-4xl mb-1 relative" style="color: var(--accent);">' + partNames[part] + '</p>' +
+      '<p class="text-sm text-stone-300 leading-relaxed mb-1 relative">' + escapeHtml(routine.headline) + '</p>' +
       '<p class="text-xs text-stone-500 relative">' + partKor[part] + '</p>' +
       
       '<div class="routine-meta-grid">' +
@@ -1072,14 +1074,14 @@ function renderWorkoutStep2() {
     // AI 이유 / 주의사항
     (routine.reason ? 
       '<div class="routine-insight">' +
-        '<p class="routine-insight-label accent">💡 왜 이렇게 구성했나</p>' +
-        '<p class="text-sm text-stone-200 leading-relaxed">' + routine.reason + '</p>' +
+        '<p class="routine-insight-label accent">왜 이렇게 구성했나</p>' +
+        '<p class="text-sm text-stone-200 leading-relaxed">' + escapeHtml(routine.reason) + '</p>' +
       '</div>' : '') +
     
     (routine.caution ? 
       '<div class="routine-insight warning">' +
         '<p class="routine-insight-label" style="color: #fbbf24;">⚠️ 주의사항</p>' +
-        '<p class="text-sm text-stone-200 leading-relaxed">' + routine.caution + '</p>' +
+        '<p class="text-sm text-stone-200 leading-relaxed">' + escapeHtml(routine.caution) + '</p>' +
       '</div>' : '') +
     
     // 강도 + 종목 헤더
@@ -1241,7 +1243,7 @@ function renderItemDetailSheet() {
         } else if (ex.weight) {
           setSummary = ex.weight + 'kg × ' + (ex.reps || '?') + ' · ' + (ex.completedSets || ex.setsCount || '?') + '세트';
         }
-        return '<div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #1a2540; font-size: 12px;">' +
+        return '<div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--bg-3); font-size: 12px;">' +
           '<span><strong>' + (idx + 1) + '.</strong> ' + exName + '</span>' +
           '<span class="font-mono text-stone-400">' + setSummary + '</span>' +
         '</div>';
@@ -1250,7 +1252,7 @@ function renderItemDetailSheet() {
     
     bodyHtml = 
       '<div class="text-center mb-5">' +
-        '<p class="font-bebas text-4xl mb-1" style="color: #00d4ff;">' + sessionLabel + '</p>' +
+        '<p class="font-bebas text-4xl mb-1" style="color: var(--accent);">' + sessionLabel + '</p>' +
         '<p class="text-xs font-mono text-stone-400">' + dateStr + '</p>' +
       '</div>' +
       
@@ -1279,7 +1281,7 @@ function renderItemDetailSheet() {
     headerLabel = '체중 기록';
     bodyHtml = 
       '<div class="text-center mb-5">' +
-        '<p class="font-bebas text-5xl mb-1" style="color: #00d4ff;">' + data.weight + '<span class="text-lg text-stone-400">kg</span></p>' +
+        '<p class="font-bebas text-5xl mb-1" style="color: var(--accent);">' + data.weight + '<span class="text-lg text-stone-400">kg</span></p>' +
         '<p class="text-xs font-mono text-stone-400">' + data.date + '</p>' +
       '</div>';
   }
@@ -1951,7 +1953,7 @@ function renderWorkoutSession() {
       setClass += ' completed';
       labelClass += ' done';
       valueClass += ' done';
-      status = '<div style="color: #00d4ff;">' + icon('check', 16) + '</div>';
+      status = '<div style="color: var(--accent);">' + icon('check', 16) + '</div>';
     } else if (idx === activeSetIdx) {
       setClass += ' active';
       labelClass += ' active-label';
@@ -2109,7 +2111,7 @@ function renderWorkoutSession() {
           '<div class="flex items-center justify-between mb-5">' +
             '<div>' +
               '<p id="sheet-set-label" class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">' + setLabel + ' 편집</p>' +
-              '<p class="font-bebas text-2xl mt-1">' + ex.name + '</p>' +
+              '<p class="font-bebas text-2xl mt-1">' + escapeHtml(ex.name) + '</p>' +
             '</div>' +
             '<button class="session-header-btn" onclick="closeSetEditor()">' + icon('close', 18) + '</button>' +
           '</div>' +
@@ -2178,11 +2180,11 @@ function renderWorkoutSession() {
     
     var dotStyle = '';
     if (dotDone) {
-      dotStyle = 'background: #00d4ff; box-shadow: 0 0 6px #00d4ff;';
+      dotStyle = 'background: var(--accent); box-shadow: 0 0 6px var(--accent);';
     } else if (dotActive) {
-      dotStyle = 'background: #00d4ff; box-shadow: 0 0 8px #00d4ff, inset 0 0 0 2px white;';
+      dotStyle = 'background: var(--accent); box-shadow: 0 0 8px var(--accent), inset 0 0 0 2px white;';
     } else {
-      dotStyle = 'background: #1a2540;';
+      dotStyle = 'background: var(--bg-3);';
     }
     
     exerciseDots += '<div onclick="goToExercise(' + i + ')" style="width: 8px; height: 8px; border-radius: 50%; cursor: pointer;' + dotStyle + '"></div>';
@@ -2227,7 +2229,7 @@ function renderWorkoutSession() {
         // 새 카드가 같은 정보를 더 정확히 보여주므로, prog가 실 수행 기록이면 옛 prev-record는 생략
         var fallbackPrevHtml = (!prog || prog.source === 'rm_estimate')
           ? '<div class="prev-record">' +
-              '<div class="flex items-center gap-2" style="color: #6b7a99;">' +
+              '<div class="flex items-center gap-2" style="color: var(--text-muted);">' +
                 icon('clock', 14) +
                 '<p class="text-[10px] font-mono uppercase">지난 기록</p>' +
               '</div>' +
@@ -2241,14 +2243,14 @@ function renderWorkoutSession() {
         if (prog && prog.source !== 'rm_estimate' && prog.previousWeight !== undefined) {
           // 실제 수행 기록이 있는 경우
           var prevRepsStr = (prog.previousReps || []).join(', ') + '회';
-          var color = prog.source === 'progress' ? '#10b981' : '#00d4ff';
+          var color = prog.source === 'progress' ? '#10b981' : 'var(--accent)';
           var label = prog.source === 'progress' ? '🎯 도전 권장' : '🔁 동일 무게';
           html +=
             '<div class="flex items-center justify-between mb-2">' +
               '<p class="text-[10px] font-mono uppercase tracking-widest text-stone-400">지난 기록</p>' +
               '<p class="font-mono text-xs text-stone-300">' + prog.previousWeight + 'kg × ' + prevRepsStr + '</p>' +
             '</div>' +
-            '<div class="flex items-center justify-between pt-3 border-t" style="border-color: rgba(0, 212, 255, 0.15);">' +
+            '<div class="flex items-center justify-between pt-3 border-t" style="border-color: rgba(var(--accent-rgb), 0.15);">' +
               '<div>' +
                 '<p class="text-[10px] font-mono uppercase tracking-widest" style="color: ' + color + ';">' + label + '</p>' +
                 '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + prog.note + '</p>' +
@@ -2364,7 +2366,7 @@ function renderWorkoutComplete() {
   // 컨페티(색종이) — reduced-motion에서는 CSS가 숨김
   var confettiHtml = '';
   if (celebrate) {
-    var confettiColors = ['#00d4ff', '#fbbf24', '#34d399', '#f472b6', '#a78bfa'];
+    var confettiColors = ['var(--accent)', '#fbbf24', '#34d399', '#f472b6', '#a78bfa'];
     confettiHtml = '<div class="confetti-layer" aria-hidden="true">';
     for (var ci = 0; ci < 16; ci++) {
       confettiHtml +=
@@ -2509,13 +2511,13 @@ window.saveApiKey = function() {
   render();
   // 토스트 대체
   setTimeout(function() {
-    alert('API 키가 저장되었습니다. 이제 DB에 없는 음식도 AI가 분석합니다.');
+    alert('API 키를 저장했어요. 이제 코치 대화·맞춤 루틴·주간 리뷰를 쓸 수 있어요.');
   }, 100);
 };
 
 // API 키 삭제
 window.deleteApiKey = function() {
-  if (!confirm('API 키를 삭제하시겠습니까? 이후 음식 분석은 DB만 사용합니다.')) return;
+  if (!confirm('API 키를 삭제할까요? 삭제하면 코치 대화·맞춤 루틴·주간 리뷰를 쓸 수 없어요.')) return;
   state.apiKey = null;
   storage.set(KEYS.API_KEY, null);
   state.apiKeyModalOpen = false;
@@ -2603,7 +2605,7 @@ function renderProfileEditModal() {
       field('체중', 'weight', 'kg', '0.1') +
       field('주간 운동 횟수', 'workoutFreq', '회 / 주', '1') +
       '<button class="sheet-submit mt-2" onclick="saveProfileEdit()">저장</button>' +
-      '<button class="mt-2" onclick="closeProfileEditModal()" style="width:100%;padding:12px;border-radius:14px;background:transparent;border:1px solid #2a3550;color:#9aa7c0;font-family:Space Grotesk,sans-serif;font-weight:700;font-size:13px;">취소</button>' +
+      '<button class="mt-2" onclick="closeProfileEditModal()" style="width:100%;padding:12px;border-radius:14px;background:transparent;border:1px solid var(--bg-4);color:var(--text-soft);font-family:var(--font);font-weight:700;font-size:13px;">취소</button>' +
     '</div>' +
   '</div>';
 }
@@ -2809,9 +2811,9 @@ function renderMore() {
           '</div>' +
           
           // 안내
-          '<div class="card mb-4" style="padding: 14px; background: rgba(0, 212, 255, 0.06); border-color: rgba(0, 212, 255, 0.25);">' +
+          '<div class="card mb-4" style="padding: 14px; background: rgba(var(--accent-rgb), 0.06); border-color: rgba(var(--accent-rgb), 0.25);">' +
             '<div class="flex items-start gap-2">' +
-              '<div style="color: #00d4ff; flex-shrink: 0; margin-top: 2px;">' + icon('info', 16) + '</div>' +
+              '<div style="color: var(--accent); flex-shrink: 0; margin-top: 2px;">' + icon('info', 16) + '</div>' +
               '<div>' +
                 '<p class="text-xs accent font-mono uppercase tracking-widest mb-1">왜 필요한가요?</p>' +
                 '<p class="text-xs text-stone-300 leading-relaxed">AI 코치 채팅·루틴 생성·주간 리뷰·정체기 분석에 Anthropic Claude를 씁니다. 본인 키를 넣어 직접 사용하며, 없으면 해당 AI 기능만 비활성화됩니다.</p>' +
@@ -2872,7 +2874,7 @@ function renderMore() {
               (apiKey ? '운동·식단·컨디션 질문하기' : 'API 키 설정 후 사용 가능') +
             '</p>' +
           '</div>' +
-          '<div style="color: #00d4ff;">' + icon('chevron', 18) + '</div>' +
+          '<div style="color: var(--accent);">' + icon('chevron', 18) + '</div>' +
         '</div>' +
       '</button>' +
       
@@ -2885,7 +2887,7 @@ function renderMore() {
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold">Anthropic API 키</p>' +
               '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + 
-                (apiKey ? maskApiKey(apiKey) : 'AI 음식 분석/코칭 활성화') + 
+                (apiKey ? maskApiKey(apiKey) : 'AI 코치·맞춤 루틴·주간 리뷰 켜기') +
               '</p>' +
             '</div>' +
             '<span class="api-status-badge ' + (apiKey ? 'active' : 'inactive') + '">' +
@@ -2969,7 +2971,7 @@ function renderMore() {
               '</svg>' +
             '</div>' +
             '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold" style="color: #00d4ff;">홈 화면에 설치</p>' +
+              '<p class="text-sm font-display font-bold" style="color: var(--accent);">홈 화면에 설치</p>' +
               '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">앱처럼 사용 · 오프라인 지원</p>' +
             '</div>' +
             '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
@@ -3101,7 +3103,7 @@ window.openCoachChat = function() {
   if (saved.length === 0) {
     // 첫 인사
     var profile = state.profile;
-    var greeting = '안녕하세요! 사용자의 개인 피트니스 코치입니다.\n\n' +
+    var greeting = '안녕하세요, 개인 코치예요.\n\n' +
       '현재 **Cycle ' + profile.currentCycle + ' · ' + profile.cyclePhase + '** 진행 중이시네요. ' +
       '운동·식단·컨디션 뭐든 물어보세요.\n\n' +
       '예: "오늘 어떤 운동 해야 해?", "정체기 같은데 어떻게 해?", "단백질 어떻게 더 늘려?"';
@@ -3295,7 +3297,7 @@ function renderCoachMemory() {
           '<div class="flex-1"><p class="text-sm">' + escapeHtml(m.text) + '</p>' +
             '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">정말 삭제할까요?</p></div>' +
           '<div style="display:flex; gap:6px;">' +
-            '<button onclick="cancelMemoryDelete()" style="padding:6px 12px; border-radius:10px; background:transparent; border:1px solid #2a3550; color:#9aa7c0; font-size:12px;">취소</button>' +
+            '<button onclick="cancelMemoryDelete()" style="padding:6px 12px; border-radius:10px; background:transparent; border:1px solid var(--bg-4); color:var(--text-soft); font-size:12px;">취소</button>' +
             '<button class="btn-danger" style="padding:6px 12px; width:auto;" onclick="executeDeleteMemory(\'' + m.id + '\')">삭제</button>' +
           '</div>' +
         '</div>';
@@ -3321,7 +3323,7 @@ function renderCoachMemory() {
     var meta = MEMORY_CATEGORY_META[cat];
     var on = state.coachMemoryCategory === cat;
     var style = 'padding:5px 10px; border-radius:999px; font-size:11px; font-family:monospace; cursor:pointer; border:1px solid ' +
-      (on ? '#00d4ff' : '#2a3550') + '; background:' + (on ? 'rgba(0,212,255,0.15)' : 'transparent') + '; color:' + (on ? '#00d4ff' : '#9aa7c0') + ';';
+      (on ? 'var(--accent)' : 'var(--bg-4)') + '; background:' + (on ? 'rgba(var(--accent-rgb),0.15)' : 'transparent') + '; color:' + (on ? 'var(--accent)' : 'var(--text-soft)') + ';';
     return '<button style="' + style + '" onclick="setMemoryCategory(\'' + cat + '\')">' + meta.emoji + ' ' + meta.kr + '</button>';
   }).join('');
 
@@ -3333,7 +3335,7 @@ function renderCoachMemory() {
       '<div style="width:36px;"></div>' +
     '</div>' +
     '<div class="px-5 pt-5" style="padding-bottom:160px;">' + groups + '</div>' +
-    '<div style="position:fixed; left:0; right:0; bottom:0; padding:12px 16px calc(14px + env(safe-area-inset-bottom)); background:#0a0e1a; border-top:1px solid #1a2540; z-index:50;">' +
+    '<div style="position:fixed; left:0; right:0; bottom:0; padding:12px 16px calc(14px + env(safe-area-inset-bottom)); background:var(--bg-0); border-top:1px solid var(--bg-3); z-index:50;">' +
       '<div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">' + chips + '</div>' +
       '<div style="display:flex; gap:8px;">' +
         '<input type="text" id="memory-input" class="api-key-input" style="flex:1;" placeholder="' + (state.coachMemoryEditingId ? '수정 내용...' : '기억할 내용 추가...') + '" value="' + escapeHtml(state.coachMemoryInput || '') + '" oninput="updateMemoryInput(this.value)" onkeydown="if(event.key===\'Enter\'){saveMemoryNote();}" />' +
@@ -3455,7 +3457,7 @@ function renderCoachChat() {
       '<div class="coach-input-bottom">' +
         quickHtml +
         '<div class="chat-input-bar">' +
-          '<input type="text" id="coach-chat-input" placeholder="' + (hasApiKey ? '코치에게 물어보기...' : 'API 키 설정 후 사용 가능') + '" value="' + state.coachInputText + '" oninput="updateCoachInput(this.value)" onkeydown="if(event.key===\'Enter\') sendCoachMessage()" ' + (state.coachThinking ? 'disabled' : '') + ' />' +
+          '<input type="text" id="coach-chat-input" placeholder="' + (hasApiKey ? '코치에게 물어보기...' : 'API 키 설정 후 사용 가능') + '" value="' + escapeHtml(state.coachInputText) + '" oninput="updateCoachInput(this.value)" onkeydown="if(event.key===\'Enter\') sendCoachMessage()" ' + (state.coachThinking ? 'disabled' : '') + ' />' +
           '<button class="chat-send-btn" id="coach-send-btn" onclick="sendCoachMessage()"' + (sendDisabled ? ' disabled' : '') + '>' +
             '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
               '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>' +
@@ -3516,13 +3518,13 @@ function renderWeeklyReviewDetail() {
   }
   
   // 등급 색상
-  var gradeColors = { 'S': '#00d4ff', 'A': '#00d4ff', 'B': '#a78bfa', 'C': '#fbbf24', 'D': '#ef4444' };
+  var gradeColors = { 'S': 'var(--accent)', 'A': 'var(--accent)', 'B': '#a78bfa', 'C': '#fbbf24', 'D': '#ef4444' };
   var gradeColor = gradeColors[review.grade] || '#a78bfa';
   
   // 잘한 점
   var winsHtml = review.wins.map(function(w) {
     return '<div class="review-bullet">' +
-      '<div class="review-bullet-dot" style="background: #00d4ff;"></div>' +
+      '<div class="review-bullet-dot" style="background: var(--accent);"></div>' +
       '<p>' + w + '</p>' +
     '</div>';
   }).join('');
@@ -3538,7 +3540,7 @@ function renderWeeklyReviewDetail() {
   // 다음 주
   var nextWeekHtml = review.nextWeek.map(function(n) {
     return '<div class="review-bullet">' +
-      '<div class="review-bullet-dot" style="background: #00d4ff;"></div>' +
+      '<div class="review-bullet-dot" style="background: var(--accent);"></div>' +
       '<p>' + n + '</p>' +
     '</div>';
   }).join('');
@@ -3561,7 +3563,7 @@ function renderWeeklyReviewDetail() {
         
         // 등급 + 헤드라인
         '<div class="text-center mb-6">' +
-          '<div style="display: inline-block; font-family: \'Bebas Neue\', sans-serif; font-size: 80px; line-height: 1; color: ' + gradeColor + '; text-shadow: 0 0 30px ' + gradeColor + '40;">' + review.grade + '</div>' +
+          '<div style="display: inline-block; font-family: var(--font); font-weight: 800; font-size: 80px; line-height: 1; color: ' + gradeColor + '; text-shadow: 0 0 30px ' + gradeColor + '40;">' + review.grade + '</div>' +
           '<p class="text-xs font-mono text-stone-500 uppercase tracking-widest mt-1 mb-3">이번 주 평가</p>' +
           '<p class="text-base font-display font-bold leading-relaxed">' + review.headline + '</p>' +
         '</div>' +
@@ -3610,7 +3612,7 @@ function renderWeeklyReviewDetail() {
               '<div class="coach-icon accent">' + icon('msg', 18) + '</div>' +
               '<div class="flex-1">' +
                 '<p class="text-xs font-mono accent uppercase tracking-widest mb-1\\.5">COACH</p>' +
-                '<p class="text-sm text-stone-200 leading-relaxed">' + review.coachNote + '</p>' +
+                '<p class="text-sm text-stone-200 leading-relaxed">' + escapeHtml(review.coachNote) + '</p>' +
               '</div>' +
             '</div>' +
           '</div>' : '') +
@@ -3623,7 +3625,7 @@ function renderWeeklyReviewDetail() {
               '<p class="font-display font-bold text-sm">이번 주에 대해 코치와 상담</p>' +
               '<p class="text-[10px] font-mono text-stone-400 mt-0\\.5">개선 전략 짜기</p>' +
             '</div>' +
-            '<div style="color: #00d4ff;">' + icon('chevron', 16) + '</div>' +
+            '<div style="color: var(--accent);">' + icon('chevron', 16) + '</div>' +
           '</div>' +
         '</button>' +
 
@@ -3670,7 +3672,7 @@ function renderPlateauDetail() {
   // 권장사항
   var recsHtml = p.recommendations.map(function(r) {
     return '<div class="review-bullet">' +
-      '<div class="review-bullet-dot" style="background: #00d4ff;"></div>' +
+      '<div class="review-bullet-dot" style="background: var(--accent);"></div>' +
       '<p>' + r + '</p>' +
     '</div>';
   }).join('');
@@ -3698,7 +3700,7 @@ function renderPlateauDetail() {
         
         // 진단
         '<div class="text-center mb-6">' +
-          '<div style="display: inline-block; padding: 6px 14px; border-radius: 9999px; background: ' + sevColor + '20; border: 1px solid ' + sevColor + '60; color: ' + sevColor + '; font-size: 10px; font-family: \'JetBrains Mono\', monospace; text-transform: uppercase; letter-spacing: 0.1em;">심각도 ' + sevLabel + '</div>' +
+          '<div style="display: inline-block; padding: 6px 14px; border-radius: 9999px; background: ' + sevColor + '20; border: 1px solid ' + sevColor + '60; color: ' + sevColor + '; font-size: 10px; font-family: var(--font); font-weight: 700;">심각도 ' + sevLabel + '</div>' +
           '<p class="font-bebas text-3xl mt-4 mb-2">정체기 신호 감지</p>' +
           '<p class="text-sm text-stone-300 leading-relaxed">' + p.diagnosis + '</p>' +
         '</div>' +
@@ -3743,7 +3745,7 @@ function renderPlateauDetail() {
               '<p class="font-display font-bold text-sm">코치와 더 자세히 상담</p>' +
               '<p class="text-[10px] font-mono text-stone-400 mt-0\\.5">맞춤 계획 세우기</p>' +
             '</div>' +
-            '<div style="color: #00d4ff;">' + icon('chevron', 16) + '</div>' +
+            '<div style="color: var(--accent);">' + icon('chevron', 16) + '</div>' +
           '</div>' +
         '</button>' +
         
@@ -3867,22 +3869,22 @@ function renderStats() {
         '<svg style="position: absolute; left: 28px; right: 0; top: 0; bottom: 20px; width: calc(100% - 28px); height: calc(100% - 20px);" viewBox="0 0 ' + chartW + ' ' + chartH + '" preserveAspectRatio="none">' +
           '<defs>' +
             '<linearGradient id="weightGrad" x1="0" y1="0" x2="0" y2="1">' +
-              '<stop offset="0%" stop-color="#00d4ff" stop-opacity="0.3"/>' +
-              '<stop offset="100%" stop-color="#00d4ff" stop-opacity="0"/>' +
+              '<stop offset="0%" stop-color="var(--accent)" stop-opacity="0.3"/>' +
+              '<stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>' +
             '</linearGradient>' +
           '</defs>' +
           '<path d="' + line.area + '" fill="url(#weightGrad)"/>' +
-          '<path d="' + line.path + '" stroke="#00d4ff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>' +
+          '<path d="' + line.path + '" stroke="var(--accent)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>' +
           line.points +
         '</svg>' +
         '<div class="chart-x-labels">' +
           '<p>' + (period === '1week' ? '1주전' : period === '1month' ? '4주전' : '시작') + '</p>' +
-          '<p style="color: #00d4ff;">오늘</p>' +
+          '<p style="color: var(--accent);">오늘</p>' +
         '</div>' +
       '</div>';
   } else {
     chartHtml = 
-      '<div style="height: 140px; display: flex; align-items: center; justify-content: center; color: #4a5568; font-family: \'JetBrains Mono\', monospace; font-size: 12px;">' +
+      '<div style="height: 140px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-family: var(--font); font-size: 12px;">' +
         '데이터가 없습니다' +
       '</div>';
   }
@@ -3912,7 +3914,7 @@ function renderStats() {
   weekWorkoutData.forEach(function(w) {
     var height = w.count > 0 ? Math.max(15, (w.count / maxWeekCount) * weekBarHeight) : 4;
     var cls = w.count === 0 ? 'bar-shape' : (w.isCurrent ? 'bar-shape partial' : 'bar-shape active');
-    var labelStyle = w.isCurrent ? 'color: #00d4ff;' : '';
+    var labelStyle = w.isCurrent ? 'color: var(--accent);' : '';
     weekBarsHtml += 
       '<div class="bar-col">' +
         '<p class="bar-value" style="' + labelStyle + '">' + w.count + '</p>' +
@@ -3925,8 +3927,9 @@ function renderStats() {
   var pushCount = workoutLog.filter(function(w) { return w.sessionKr === 'PUSH'; }).length;
   var pullCount = workoutLog.filter(function(w) { return w.sessionKr === 'PULL'; }).length;
   var legsCount = workoutLog.filter(function(w) { return w.sessionKr === 'LEGS'; }).length;
+  var upperCount = workoutLog.filter(function(w) { return w.sessionKr === 'UPPER'; }).length;
   var freeCount = workoutLog.filter(function(w) { return w.sessionKr === 'FREE'; }).length;
-  var totalCount = pushCount + pullCount + legsCount + freeCount;
+  var totalCount = pushCount + pullCount + legsCount + upperCount + freeCount;
   
   function partRow(name, count) {
     var pct = totalCount > 0 ? Math.round((count / totalCount) * 100) : 0;
@@ -3939,7 +3942,7 @@ function renderStats() {
     '</div>';
   }
   
-  var partsHtml = partRow('PUSH', pushCount) + partRow('PULL', pullCount) + partRow('LEGS', legsCount) + partRow('FREE', freeCount);
+  var partsHtml = partRow('PUSH', pushCount) + partRow('PULL', pullCount) + partRow('LEGS', legsCount) + partRow('UPPER', upperCount) + partRow('FREE', freeCount);
   
   // PR 히스토리
   var prListHtml = '';
@@ -3961,7 +3964,7 @@ function renderStats() {
         '<div class="pr-history-item" style="margin-bottom: 8px;">' +
           '<div class="flex items-center justify-between mb-2">' +
             '<div class="flex items-center gap-2">' +
-              '<div style="color: #00d4ff;">' + icon('trophy', 14) + '</div>' +
+              '<div style="color: var(--accent);">' + icon('trophy', 14) + '</div>' +
               '<p class="text-sm font-display font-bold">' + pr.exerciseName + '</p>' +
             '</div>' +
             '<p class="text-[10px] font-mono text-stone-500">' + daysAgo(pr.date) + '</p>' +
@@ -4001,7 +4004,7 @@ function renderStats() {
             '<p class="stat-mini-unit">kg</p>' +
           '</div>' +
           (weightChange != 0 ? 
-            '<p class="stat-mini-change" style="color: ' + (weightChange < 0 ? '#00d4ff' : '#fbbf24') + ';">' + weightChangeSign + weightChange + 'kg / ' + getPeriodLabel(period) + '</p>'
+            '<p class="stat-mini-change" style="color: ' + (weightChange < 0 ? 'var(--accent)' : '#fbbf24') + ';">' + weightChangeSign + weightChange + 'kg / ' + getPeriodLabel(period) + '</p>'
             : '<p class="stat-mini-change text-stone-500">변동 없음</p>') +
         '</div>' +
         '<div class="stat-mini-card">' +
@@ -4077,7 +4080,7 @@ function renderStats() {
                     '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + w.date + ' (' + dStr + ') · ' + (w.duration || 0) + '분 · ' + (w.sets || 0) + '세트</p>' +
                   '</div>' +
                 '</div>' +
-                '<div style="color: #6b7a99;">' + icon('chevron', 14) + '</div>' +
+                '<div style="color: var(--text-muted);">' + icon('chevron', 14) + '</div>' +
               '</div>';
             }).join('') +
           '</div>' +
@@ -4096,13 +4099,13 @@ function renderStats() {
             state.data.bodyLog.slice(-10).reverse().map(function(b) {
               return '<div class="workout-history-row" onclick="openItemDetail(\'body\', \'' + b.date + '\')">' +
                 '<div class="flex items-center gap-3">' +
-                  '<div class="workout-history-dot" style="background: #a78bfa; box-shadow: 0 0 6px rgba(167, 139, 250, 0.5);"></div>' +
+                  '<div class="workout-history-dot" style="background: var(--text-muted); box-shadow: 0 0 6px rgba(var(--muted-rgb), 0.45);"></div>' +
                   '<div>' +
                     '<p class="text-xs font-display font-bold">' + b.weight + 'kg</p>' +
                     '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + b.date + '</p>' +
                   '</div>' +
                 '</div>' +
-                '<div style="color: #6b7a99;">' + icon('chevron', 14) + '</div>' +
+                '<div style="color: var(--text-muted);">' + icon('chevron', 14) + '</div>' +
               '</div>';
             }).join('') +
           '</div>' +
@@ -4221,8 +4224,8 @@ function buildFallbackInterval(min, noKey) {
   var T = Math.max(5, Math.min(120, Math.round(min || 30)));
   var totalSec = T * 60;                                 // 항상 60의 배수(=30의 배수)
   function snap30(x) { return Math.round(x / 30) * 30; } // 30초 격자에 맞춤(구간 길이 30초 단위)
-  var wu = Math.min(300, Math.max(120, snap30(totalSec * 0.15)));
-  var cd = Math.min(300, Math.max(120, snap30(totalSec * 0.15)));
+  var wu = Math.min(300, Math.max(120, snap30(totalSec * 0.2)));
+  var cd = Math.min(300, Math.max(120, snap30(totalSec * 0.2)));
   if (wu + cd > totalSec - 60) { // 본 인터벌 최소 60초 확보
     wu = Math.max(60, snap30((totalSec - 60) / 2));
     cd = Math.max(60, totalSec - 60 - wu);
@@ -4563,10 +4566,26 @@ function cardioReleaseWakeLock() {
   try { if (cardioRuntime.wakeLock && cardioRuntime.wakeLock.release) cardioRuntime.wakeLock.release(); } catch (e) {}
   cardioRuntime.wakeLock = null;
 }
-// 세션 종료 시 모든 런타임 자원 정리
-function teardownCardioRuntime() {
+// 세션 종료 시 모든 런타임 자원 정리.
+// delayAudioMs > 0 이면 '오디오 정리'만 그만큼 미룬다(완주 팡파레가 끝까지 울리도록). 나머지(타이머·웨이크락·이벤트)는 즉시.
+function teardownCardioRuntime(delayAudioMs) {
   cardioClearInterval();
-  cardioStopAudio();
+  if (delayAudioMs > 0) {
+    // 지연 중 새 세션이 시작될 수 있으니, 지금 오디오 노드/컨텍스트를 캡처해 그것만 뒤늦게 정리한다.
+    var nodes = cardioRuntime.scheduled || [];
+    var keepAlive = cardioRuntime.keepAlive;
+    var ctx = cardioRuntime.audioCtx;
+    cardioRuntime.scheduled = [];
+    cardioRuntime.keepAlive = null;
+    cardioRuntime.audioCtx = null;
+    setTimeout(function() {
+      try { nodes.forEach(function(n) { try { n.stop(); } catch (e) {} try { n.disconnect(); } catch (e) {} }); } catch (e) {}
+      if (keepAlive) { try { keepAlive.stop(); } catch (e) {} try { keepAlive.disconnect(); } catch (e) {} }
+      if (ctx) { try { ctx.close(); } catch (e) {} }
+    }, delayAudioMs);
+  } else {
+    cardioStopAudio();
+  }
   cardioReleaseWakeLock();
   if (cardioRuntime.visHandler && typeof document !== 'undefined' && document.removeEventListener) {
     try { document.removeEventListener('visibilitychange', cardioRuntime.visHandler); } catch (e) {}
@@ -4579,7 +4598,7 @@ function finishCardio() {
   var run = state.cardio && state.cardio.run; if (!run) return;
   cardioIntegrate();
   run.completed = true; run.elapsedAtEnd = run.totalSec;
-  teardownCardioRuntime();
+  teardownCardioRuntime(800);   // 완주 팡파레(약 0.6초)가 끝까지 울리도록 오디오 정리만 지연
   if (typeof navigator !== 'undefined' && navigator.vibrate) { try { navigator.vibrate([200, 100, 200]); } catch (e) {} }
   state.cardio.phase = 'rpe';
   saveActiveCardio();          // rpe 단계로 저장(RPE 입력 중 회수돼도 복원 가능)
@@ -4640,13 +4659,13 @@ window.submitCardioRpe = function(rpe) {
 function renderRunning() {
   ensureCardioState();
   var c = state.cardio;
-  var accent = '#00d4ff';
+  var accent = 'var(--accent)';
 
   // 정직한 톤 배너(cardio-research.md) + 근손실 넛지
   var banner =
-    '<div class="card mb-4" style="margin-top:16px;border-color:rgba(0,212,255,0.15);">' +
-      '<p class="text-xs font-display" style="line-height:1.65;">인터벌이 지방을 <b>순삭</b>하진 않아요. 핵심은 <b>총 소비 × 식사 × 꾸준함</b> — 안전하게 총량을 쌓는 방식이에요.</p>' +
-      '<p class="text-[10px] font-mono text-stone-500 mt-2">💡 유산소만 하면 근육도 빠져요. 웨이트 병행 + 단백질을 함께 챙기세요.</p>' +
+    '<div class="card mb-4" style="margin-top:16px;border-color:rgba(var(--accent-rgb),0.15);">' +
+      '<p class="text-xs font-display" style="line-height:1.65;">살 빠짐은 <b>총 소비와 식사</b>로 정해져요. 유산소는 소비를 안전하게 늘리는 방법이에요.</p>' +
+      '<p class="text-[10px] font-mono text-stone-500 mt-2">유산소만 하면 근육이 빠질 수 있어요. 웨이트와 단백질을 함께 챙기세요.</p>' +
     '</div>';
 
   // 시간 입력 + 구성 버튼 + 빠른 선택 칩
@@ -4657,7 +4676,7 @@ function renderRunning() {
     '<div class="card mb-4">' +
       '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-2">운동 시간</p>' +
       '<div class="flex items-center gap-2">' +
-        '<input id="cardio-min-input" type="number" inputmode="numeric" min="5" max="120" step="1" value="' + (c.inputMin || '') + '" placeholder="예: 30"' + (c.loading ? ' disabled' : '') + ' style="flex:1;min-width:0;background:#0d1424;border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px 14px;color:#fff;font-family:Bebas Neue,sans-serif;font-size:26px;" onkeydown="if(event.key===\'Enter\')buildCardioPlan()" />' +
+        '<input id="cardio-min-input" type="number" inputmode="numeric" min="5" max="120" step="1" value="' + (c.inputMin || '') + '" placeholder="예: 30"' + (c.loading ? ' disabled' : '') + ' style="flex:1;min-width:0;background:var(--bg-1);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px 14px;color:#fff;font-family:var(--font);font-weight:800;font-size:26px;" onkeydown="if(event.key===\'Enter\')buildCardioPlan()" />' +
         '<span class="text-sm font-mono text-stone-400">분</span>' +
         '<button class="sheet-submit" style="width:auto;padding:12px 20px;margin:0;flex-shrink:0;" onclick="buildCardioPlan()"' + (c.loading ? ' disabled' : '') + '>구성</button>' +
       '</div>' +
@@ -4720,9 +4739,9 @@ function renderCardioSession() {
   var seg = run.segs[idx] || run.segs[run.segs.length - 1];
   var next = run.segs[idx + 1] || null;
   var progPct = run.totalSec > 0 ? Math.min(100, (elapsed / run.totalSec) * 100) : 0;
-  var accent = '#00d4ff';
-  var round = 'width:52px;height:52px;border-radius:50%;border:1px solid rgba(255,255,255,0.14);background:#111a2e;color:#fff;font-family:Bebas Neue,sans-serif;font-size:26px;line-height:1;display:flex;align-items:center;justify-content:center;';
-  var chip = 'padding:6px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:#0d1424;color:#9fb0c9;font-family:JetBrains Mono,monospace;font-size:12px;';
+  var accent = 'var(--accent)';
+  var round = 'width:52px;height:52px;border-radius:50%;border:1px solid rgba(255,255,255,0.14);background:var(--bg-2);color:#fff;font-family:var(--font);font-weight:800;font-size:26px;line-height:1;display:flex;align-items:center;justify-content:center;';
+  var chip = 'padding:6px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:var(--bg-1);color:var(--text-soft);font-family:var(--font);font-size:12px;';
 
   return '' +
     // 헤더
@@ -4742,7 +4761,7 @@ function renderCardioSession() {
 
       // 현재 구간
       '<div class="text-center" style="margin-top:6px;">' +
-        '<p class="text-sm" style="color:#9fb0c9;"><span id="cardio-seg-icon">' + cardioTypeIcon(seg.type) + '</span> <span id="cardio-seg-label" class="font-display">' + cardioTypeLabel(seg.type) + '</span></p>' +
+        '<p class="text-sm" style="color:var(--text-soft);"><span id="cardio-seg-icon">' + cardioTypeIcon(seg.type) + '</span> <span id="cardio-seg-label" class="font-display">' + cardioTypeLabel(seg.type) + '</span></p>' +
         '<p id="cardio-seg-remain" class="text-[10px] font-mono text-stone-500 mt-1">남은 ' + cardioFmtClock(Math.max(0, Math.ceil(seg.endSec - elapsed))) + '</p>' +
       '</div>' +
 
@@ -4753,7 +4772,7 @@ function renderCardioSession() {
       '</div>' +
 
       // 예고 배너(3초 전)
-      '<div id="cardio-precue" class="text-center" style="display:none;margin-top:8px;color:#fbbf24;font-family:Space Grotesk,sans-serif;font-weight:700;font-size:15px;"></div>' +
+      '<div id="cardio-precue" class="text-center" style="display:none;margin-top:8px;color:#fbbf24;font-family:var(--font);font-weight:700;font-size:15px;"></div>' +
 
       // 목표 속력 + 실제 속력 조정
       '<div class="card" style="margin-top:16px;">' +
@@ -4795,8 +4814,8 @@ function renderCardioRPE() {
   var completed = !!run.completed;
   var btns = '';
   for (var n = 1; n <= 10; n++) {
-    var col = n <= 3 ? '#10b981' : n <= 6 ? '#00d4ff' : n <= 8 ? '#fbbf24' : '#ef4444';
-    btns += '<button onclick="submitCardioRpe(' + n + ')" style="width:52px;height:52px;border-radius:14px;border:1.5px solid ' + col + ';background:#0d1424;color:' + col + ';font-family:Bebas Neue,sans-serif;font-size:24px;">' + n + '</button>';
+    var col = n <= 3 ? '#10b981' : n <= 6 ? 'var(--accent)' : n <= 8 ? '#fbbf24' : '#ef4444';
+    btns += '<button onclick="submitCardioRpe(' + n + ')" style="width:52px;height:52px;border-radius:14px;border:1.5px solid ' + col + ';background:var(--bg-1);color:' + col + ';font-family:var(--font);font-weight:800;font-size:24px;">' + n + '</button>';
   }
   return '' +
     '<div class="px-5 pt-12 pb-32">' +
@@ -4810,7 +4829,7 @@ function renderCardioRPE() {
         '<p class="text-sm font-display text-center mb-1">오늘 세션, 얼마나 힘들었나요?</p>' +
         '<p class="text-[10px] font-mono text-stone-500 text-center mb-4">1~3 쉬움 · 4~6 적당 · 7~8 힘듦 · 9~10 매우 힘듦</p>' +
         '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;">' + btns + '</div>' +
-        '<p class="text-[10px] font-mono text-stone-500 text-center mt-4" style="line-height:1.6;">뛰기가 7 이하로 완주했다면 다음엔 걷기를 조금 줄여 볼게요. 통증이 있으면 쉬어 주세요.</p>' +
+        '<p class="text-[10px] font-mono text-stone-500 text-center mt-4" style="line-height:1.6;">뛰기가 7 이하로 완주했다면 다음 구성은 걷기가 조금 줄어들어요. 통증이 있으면 쉬세요.</p>' +
         '<button class="option-card" style="width:100%;margin-top:12px;text-align:center;" onclick="submitCardioRpe(null)"><p class="text-xs font-mono text-stone-400">평가 건너뛰기</p></button>' +
       '</div>' +
     '</div>';
@@ -4839,7 +4858,7 @@ function cardioSummaryCardHtml(period) {
   var bars = recent.map(function(x, i) {
     var h = Math.max(6, Math.round(((x.totalDistKm || 0) / maxKm) * 70));
     var isLast = i === recent.length - 1;
-    return '<div style="flex:1;display:flex;justify-content:center;align-items:flex-end;height:76px;"><div style="width:60%;height:' + h + 'px;border-radius:4px;background:' + (isLast ? '#00d4ff' : '#1a2540') + ';"></div></div>';
+    return '<div style="flex:1;display:flex;justify-content:center;align-items:flex-end;height:76px;"><div style="width:60%;height:' + h + 'px;border-radius:4px;background:' + (isLast ? 'var(--accent)' : 'var(--bg-3)') + ';"></div></div>';
   }).join('');
   var rows = sorted.slice(-5).reverse().map(function(x) {
     var runSpd = cardioAvgRunSpeed(x);
@@ -5276,17 +5295,17 @@ if ('serviceWorker' in navigator) {
       if (updateBannerShown) return;
       updateBannerShown = true;
       var bar = document.createElement('div');
-      bar.style.cssText = 'position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; background: #00d4ff; color: #050810; padding: 11px 14px 11px 16px; border-radius: 100px; font-family: Space Grotesk, sans-serif; font-size: 13px; font-weight: 700; z-index: 9999; box-shadow: 0 8px 24px rgba(0,212,255,0.45); max-width: 92vw;';
+      bar.style.cssText = 'position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; background: var(--accent); color: var(--bg-0); padding: 11px 14px 11px 16px; border-radius: 100px; font-family: var(--font); font-size: 13px; font-weight: 700; z-index: 9999; box-shadow: 0 8px 24px rgba(var(--accent-rgb),0.45); max-width: 92vw;';
       var label = document.createElement('span');
       label.textContent = '🆕 새 버전이 있어요';
       var reloadBtn = document.createElement('button');
       reloadBtn.textContent = '새로고침';
-      reloadBtn.style.cssText = 'background: #050810; color: #00d4ff; border: none; border-radius: 100px; padding: 6px 12px; font-weight: 700; font-size: 12px; font-family: inherit; cursor: pointer;';
+      reloadBtn.style.cssText = 'background: var(--bg-0); color: var(--accent); border: none; border-radius: 100px; padding: 6px 12px; font-weight: 700; font-size: 12px; font-family: inherit; cursor: pointer;';
       reloadBtn.addEventListener('click', function() { window.location.reload(); });
       var closeBtn = document.createElement('button');
       closeBtn.textContent = '✕';
       closeBtn.setAttribute('aria-label', '닫기');
-      closeBtn.style.cssText = 'background: transparent; color: #050810; border: none; font-size: 14px; font-weight: 700; cursor: pointer; padding: 2px 4px; line-height: 1;';
+      closeBtn.style.cssText = 'background: transparent; color: var(--bg-0); border: none; font-size: 14px; font-weight: 700; cursor: pointer; padding: 2px 4px; line-height: 1;';
       closeBtn.addEventListener('click', function() { bar.remove(); });
       bar.appendChild(label);
       bar.appendChild(reloadBtn);
