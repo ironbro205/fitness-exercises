@@ -21,12 +21,6 @@ function renderHome() {
     loadPlateauCheckIfNeeded();
   }
   
-  var todayMeals = data.nutritionLog.filter(function(m) { return m.date === tdStr; });
-  var todayProtein = todayMeals.reduce(function(s, m) { return s + m.protein; }, 0);
-  var proteinPercent = Math.round((todayProtein / profile.proteinTarget) * 100);
-  var proteinRemaining = Math.max(0, profile.proteinTarget - todayProtein);
-  var thresholdPassed = todayMeals.filter(function(m) { return m.thresholdPassed; }).length;
-  
   var monday = new Date(today);
   monday.setDate(today.getDate() - (dayOfWeek - 1));
   monday.setHours(0,0,0,0);
@@ -66,19 +60,6 @@ function renderHome() {
     : (doneTowardWeek >= weekGoal
         ? '이번 주차 목표 달성 — 다음 운동이면 다음 주차로'
         : '이번 주차 ' + weekGoal + '회 중 ' + doneTowardWeek + '회 · 다 하면 다음 주차로');
-  
-  // 끼니별
-  var meals = '';
-  ['아침','점심','저녁','간식'].forEach(function(meal, idx) {
-    var key = ['breakfast','lunch','dinner','snack'][idx];
-    var m = todayMeals.find(function(x) { return x.meal === key; });
-    var passed = m && m.thresholdPassed;
-    meals += '<div class="text-center">' +
-      '<div class="flex justify-center mb-1\\.5"><div class="dot ' + (passed ? 'dot-passed' : 'dot-pending') + '"></div></div>' +
-      '<p class="text-[10px] font-mono text-stone-400">' + meal + '</p>' +
-      '<p class="text-[11px] font-mono text-stone-300 mt-0\\.5">' + (m ? m.protein + 'g' : '—') + '</p>' +
-    '</div>';
-  });
   
   // 주간 요일 박스
   var weekBoxes = '';
@@ -143,21 +124,6 @@ function renderHome() {
         '</div>' +
       '</div>' +
       
-      // 단백질 카드
-      '<div class="card mb-4">' +
-        '<div class="flex items-baseline justify-between mb-4">' +
-          '<div>' +
-            '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">오늘 단백질</p>' +
-            '<p class="font-bebas text-4xl">' + todayProtein + '<span class="text-xl text-stone-500">/' + profile.proteinTarget + 'g</span></p>' +
-          '</div>' +
-          '<div class="text-right">' +
-            '<p class="text-xs text-stone-500 font-mono">남은 양</p>' +
-            '<p class="font-bebas text-2xl accent">' + proteinRemaining + 'g</p>' +
-          '</div>' +
-        '</div>' +
-        '<div class="progress-bg"><div class="progress-fill" style="width: ' + Math.min(100, proteinPercent) + '%"></div></div>' +
-      '</div>' +
-
       // 이번 주 운동
       '<div class="card mb-4">' +
         '<div class="flex items-baseline justify-between mb-4">' +
@@ -1151,8 +1117,6 @@ window.openItemDetail = function(type, identifier) {
     data = state.data.workoutLog.find(function(w) { 
       return String(w.startTime) === idStr || String(w.id) === idStr; 
     });
-  } else if (type === 'meal') {
-    data = state.data.nutritionLog.find(function(m) { return String(m.id) === idStr; });
   } else if (type === 'body') {
     data = (state.data.bodyLog || []).find(function(b) { return String(b.date) === idStr; });
   }
@@ -1221,18 +1185,6 @@ window.executeDelete = function() {
     afterCount = state.data.workoutLog.length;
     storage.set(KEYS.WORKOUT_LOG, state.data.workoutLog);
     console.log('[삭제] 운동 ' + beforeCount + ' → ' + afterCount);
-  } else if (type === 'meal') {
-    beforeCount = state.data.nutritionLog.length;
-    console.log('[executeDelete] 대상 음식:', JSON.stringify({id: data.id, date: data.date, meal: data.meal}));
-    state.data.nutritionLog = state.data.nutritionLog.filter(function(m) {
-      if (data.id !== undefined && m.id !== undefined && String(m.id) === String(data.id)) return false;
-      // id 없으면 date+meal로 매칭 (폴백)
-      if (data.id === undefined && m.date === data.date && m.meal === data.meal) return false;
-      return true;
-    });
-    afterCount = state.data.nutritionLog.length;
-    storage.set(KEYS.NUTRITION_LOG, state.data.nutritionLog);
-    console.log('[삭제] 영양 ' + beforeCount + ' → ' + afterCount);
   } else if (type === 'body') {
     beforeCount = (state.data.bodyLog || []).length;
     state.data.bodyLog = (state.data.bodyLog || []).filter(function(b) {
@@ -1323,57 +1275,6 @@ function renderItemDetailSheet() {
           exercisesList +
         '</div>' : '');
         
-  } else if (type === 'meal') {
-    headerLabel = '음식 기록';
-    var mealKrLabel = data.mealKr || ({ breakfast: '아침', lunch: '점심', dinner: '저녁', snack: '간식' }[data.meal] || data.meal);
-    
-    // foods 리스트 (있으면)
-    var foodsListHtml = '';
-    if (data.foods && data.foods.length > 0) {
-      foodsListHtml = '<div class="card mb-4" style="padding: 14px;">' +
-        '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest mb-2">음식 목록</p>' +
-        data.foods.map(function(f, idx) {
-          return '<div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: ' + (idx < data.foods.length - 1 ? '1px solid #1a2540' : 'none') + ';">' +
-            '<div>' +
-              '<p class="text-xs font-display font-bold">' + (f.name || '음식') + '</p>' +
-              (f.amount ? '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + f.amount + '</p>' : '') +
-            '</div>' +
-            '<div class="text-right">' +
-              '<p class="text-xs font-mono accent">' + (f.protein || 0) + 'g</p>' +
-              '<p class="text-[9px] font-mono text-stone-500">' + (f.kcal || f.calories || 0) + 'kcal</p>' +
-            '</div>' +
-          '</div>';
-        }).join('') +
-      '</div>';
-    }
-    
-    bodyHtml = 
-      '<div class="text-center mb-5">' +
-        '<p class="font-display font-bold text-xl mb-1">' + mealKrLabel + '</p>' +
-        '<p class="text-xs font-mono text-stone-400">' + data.date + (data.time ? ' · ' + data.time : '') + '</p>' +
-      '</div>' +
-      
-      '<div class="grid grid-cols-4 gap-2 mb-4">' +
-        '<div class="stat-sheet-card">' +
-          '<p class="stat-sheet-label">단백질</p>' +
-          '<p class="stat-sheet-value accent">' + (data.protein || 0) + '<span class="stat-sheet-unit">g</span></p>' +
-        '</div>' +
-        '<div class="stat-sheet-card">' +
-          '<p class="stat-sheet-label">탄수</p>' +
-          '<p class="stat-sheet-value">' + (data.carbs || 0) + '<span class="stat-sheet-unit">g</span></p>' +
-        '</div>' +
-        '<div class="stat-sheet-card">' +
-          '<p class="stat-sheet-label">지방</p>' +
-          '<p class="stat-sheet-value">' + (data.fat || 0) + '<span class="stat-sheet-unit">g</span></p>' +
-        '</div>' +
-        '<div class="stat-sheet-card">' +
-          '<p class="stat-sheet-label">칼로리</p>' +
-          '<p class="stat-sheet-value">' + (data.kcal || data.calories || 0) + '</p>' +
-        '</div>' +
-      '</div>' +
-      
-      foodsListHtml;
-      
   } else if (type === 'body') {
     headerLabel = '체중 기록';
     bodyHtml = 
@@ -1467,18 +1368,17 @@ window.startSession = function(sessionType) {
 };
 
 // 세션 종료
-window.endSession = function() {
-  // 종료 확인 (운동 중인 세트 있으면)
+window.endSession = function(fromBack) {
+  // 완료한 본 세트가 있는지
   var hasCompleted = false;
   if (state.activeSession) {
     state.activeSession.exercises.forEach(function(ex) {
       ex.sets.forEach(function(s) { if (s.completed && !s.isWarmup) hasCompleted = true; });
     });
   }
-  
-  if (!hasCompleted) {
-    // 완료한 본 세트가 없으면 그냥 취소
-    if (!confirm('운동을 취소하시겠어요? 기록이 저장되지 않습니다.')) return;
+
+  // 세션 취소(기록 저장 안 함) 공통 처리
+  function cancelSession() {
     state.activeSession = null;
     state.restTimer = null;
     state.editingSet = null;
@@ -1486,10 +1386,21 @@ window.endSession = function() {
     saveRestTimer();
     if (restTickerInterval) { clearInterval(restTickerInterval); restTickerInterval = null; }
     render();
+  }
+
+  if (fromBack) {
+    // 폰 뒤로가기 = 완료 세트 유무와 무관하게 항상 "종료할까요?" 팝업
+    if (!confirm('운동을 종료하시겠어요?')) return;
+    if (hasCompleted) finalizeSession(); else cancelSession();
     return;
   }
-  
-  // 완료 화면 표시 (저장 + PR 감지는 화면 진입 시)
+
+  // 화면 안 종료 버튼: 완료 본세트 없으면 취소 확인, 있으면 완료 화면으로
+  if (!hasCompleted) {
+    if (!confirm('운동을 취소하시겠어요? 기록이 저장되지 않습니다.')) return;
+    cancelSession();
+    return;
+  }
   finalizeSession();
 };
 
@@ -2553,678 +2464,6 @@ function renderWorkoutComplete() {
 }
 
 // ═══════════════════════════════════════════════
-// 영양 메인 화면
-// ═══════════════════════════════════════════════
-function renderFuel() {
-  var profile = state.profile;
-  var tdStr = getTodayStr();
-  var today = new Date();
-  var dayNames = ['일','월','화','수','목','금','토'];
-  var monthDay = (today.getMonth() + 1) + '월 ' + today.getDate() + '일';
-  
-  // 오늘 끼니
-  var todayMeals = state.data.nutritionLog.filter(function(m) { return m.date === tdStr; });
-  
-  // 총합 계산
-  var totalProtein = todayMeals.reduce(function(s, m) { return s + (m.protein || 0); }, 0);
-  var totalCarbs = todayMeals.reduce(function(s, m) { return s + (m.carbs || 0); }, 0);
-  var totalFat = todayMeals.reduce(function(s, m) { return s + (m.fat || 0); }, 0);
-  var totalKcal = todayMeals.reduce(function(s, m) { return s + (m.kcal || 0); }, 0);
-  
-  var proteinPercent = Math.min(100, Math.round((totalProtein / profile.proteinTarget) * 100));
-  var carbPercent = Math.min(100, Math.round((totalCarbs / profile.carbTarget) * 100));
-  var fatPercent = Math.min(100, Math.round((totalFat / profile.fatTarget) * 100));
-  var kcalRemaining = Math.max(0, profile.calorieTarget - totalKcal);
-  var proteinRemaining = Math.max(0, profile.proteinTarget - totalProtein);
-  
-  // 임계점 통과 끼니 수
-  var thresholdPassed = todayMeals.filter(function(m) { return m.thresholdPassed; }).length;
-  
-  // 도넛 차트 (conic-gradient 각도)
-  var donutDeg = Math.round((proteinPercent / 100) * 360);
-  
-  // 임계점 도트
-  var thresholdDots = '';
-  for (var i = 0; i < 4; i++) {
-    var dotCls = i < thresholdPassed ? 'dot dot-passed' : 'dot dot-pending';
-    thresholdDots += '<div class="' + dotCls + '"></div>';
-  }
-  
-  // 끼니별 카드
-  var mealKeys = ['breakfast', 'lunch', 'dinner', 'snack'];
-  var mealNames = ['아침', '점심', '저녁', '간식 / 야식'];
-  var mealCardsHtml = '';
-  
-  mealKeys.forEach(function(key, idx) {
-    var m = todayMeals.find(function(x) { return x.meal === key; });
-    var name = mealNames[idx];
-    
-    if (m) {
-      var passed = m.thresholdPassed;
-      var cardClass = passed ? 'meal-card passed' : 'meal-card';
-      var dotCls = passed ? 'dot dot-passed' : 'dot dot-pending';
-      var pillHtml = passed 
-        ? '<span class="meal-status-pill passed">통과</span>'
-        : '<span class="meal-status-pill warning">부족</span>';
-      var proteinColor = passed ? '#00d4ff' : '#d6d3d1';
-      
-      // 음식 표시 (끼니 안의 foods 배열)
-      var foodsHtml = '';
-      if (m.foods && m.foods.length > 0) {
-        foodsHtml = '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #1a2540;">' +
-          m.foods.map(function(f) {
-            return '<div class="food-item-row" style="cursor: default;">' +
-              '<div class="flex-1">' +
-                '<p class="text-xs font-display">' + (f.name || '음식') + '</p>' +
-                (f.amount ? '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + f.amount + '</p>' : '') +
-              '</div>' +
-              '<div class="text-right">' +
-                '<p class="text-xs font-mono accent">' + (f.protein || 0) + 'g</p>' +
-                '<p class="text-[9px] font-mono text-stone-500">' + (f.kcal || f.calories || 0) + 'kcal</p>' +
-              '</div>' +
-            '</div>';
-          }).join('') +
-        '</div>';
-      }
-      
-      // 부족 시 보조 안내
-      var subInfo = '';
-      if (!passed && m.protein < 30) {
-        var needed = 30 - m.protein;
-        subInfo = '<p class="text-[10px] font-mono mt-1\\.5" style="color: #fbbf24;">+ ' + needed + 'g 더 추가하면 임계점 통과</p>';
-      }
-      
-      mealCardsHtml += 
-        '<div class="' + cardClass + '" onclick="openItemDetail(\'meal\', \'' + m.id + '\')" style="cursor: pointer;">' +
-          '<div class="flex items-center justify-between mb-2">' +
-            '<div class="flex items-center gap-2">' +
-              '<div class="' + dotCls + '"></div>' +
-              '<p class="font-display font-bold text-sm">' + name + '</p>' +
-              pillHtml +
-            '</div>' +
-            '<p class="font-bebas text-xl" style="color: ' + proteinColor + ';">' + m.protein + '<span class="text-xs text-stone-400">g</span></p>' +
-          '</div>' +
-          foodsHtml +
-          subInfo +
-        '</div>';
-    } else {
-      mealCardsHtml += 
-        '<div class="meal-card empty">' +
-          '<div class="flex items-center justify-between">' +
-            '<div class="flex items-center gap-2">' +
-              '<div class="dot dot-pending"></div>' +
-              '<p class="font-display font-bold text-sm text-stone-500">' + name + '</p>' +
-            '</div>' +
-          '</div>' +
-        '</div>';
-    }
-  });
-  
-  return '' +
-    // 헤더
-    '<div class="px-5 pt-12 pb-5">' +
-      '<div class="flex items-center justify-between mb-2">' +
-        '<p class="text-xs uppercase font-mono text-stone-500" style="letter-spacing: 0.3em;">FUEL</p>' +
-        '<p class="text-xs font-mono text-stone-500">' + monthDay + ' ' + dayNames[today.getDay()] + '</p>' +
-      '</div>' +
-      '<h1 class="font-bebas text-4xl">영양</h1>' +
-    '</div>' +
-    
-    '<div class="px-5 pb-32">' +
-      
-      // 단백질 메인 카드 (도넛)
-      '<div class="card-accent mb-4">' +
-        '<div class="relative flex items-center gap-5">' +
-          '<div class="donut-chart" style="background: conic-gradient(#00d4ff 0deg ' + donutDeg + 'deg, #1a2540 ' + donutDeg + 'deg 360deg);">' +
-            '<div class="donut-content">' +
-              '<p class="donut-main">' + totalProtein + '</p>' +
-              '<p class="donut-sub">/ ' + profile.proteinTarget + 'g</p>' +
-            '</div>' +
-          '</div>' +
-          '<div class="flex-1">' +
-            '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest mb-2">단백질</p>' +
-            '<p class="font-bebas text-2xl mb-1">' + proteinPercent + '<span class="text-base text-stone-500">%</span></p>' +
-            '<p class="text-xs text-stone-400 mb-3">목표까지 <span class="accent font-bold">' + proteinRemaining + 'g</span></p>' +
-            '<div>' +
-              '<div class="flex items-center justify-between mb-1\\.5">' +
-                '<p class="text-[10px] font-mono text-stone-500 uppercase">임계점</p>' +
-                '<p class="text-[10px] font-mono accent">' + thresholdPassed + ' / 4</p>' +
-              '</div>' +
-              '<div class="flex gap-1\\.5">' + thresholdDots + '</div>' +
-            '</div>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-      
-      // 칼로리 + 매크로
-      '<div class="card mb-4">' +
-        '<div class="flex items-baseline justify-between mb-4">' +
-          '<div>' +
-            '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">칼로리</p>' +
-            '<p class="font-bebas text-3xl">' + totalKcal.toLocaleString() + '<span class="text-sm text-stone-500">/' + profile.calorieTarget.toLocaleString() + '</span></p>' +
-          '</div>' +
-          '<p class="text-xs font-mono accent">남은 ' + kcalRemaining + ' kcal</p>' +
-        '</div>' +
-        '<div class="border-t pt-4" style="display: flex; flex-direction: column; gap: 12px;">' +
-          '<div>' +
-            '<div class="flex items-center justify-between mb-1\\.5">' +
-              '<p class="text-[10px] font-mono text-stone-400 uppercase">탄수화물</p>' +
-              '<p class="text-[10px] font-mono text-stone-300">' + totalCarbs + ' / ' + profile.carbTarget + 'g</p>' +
-            '</div>' +
-            '<div class="macro-bg"><div class="macro-fill" style="width: ' + carbPercent + '%; background: #fbbf24;"></div></div>' +
-          '</div>' +
-          '<div>' +
-            '<div class="flex items-center justify-between mb-1\\.5">' +
-              '<p class="text-[10px] font-mono text-stone-400 uppercase">지방</p>' +
-              '<p class="text-[10px] font-mono text-stone-300">' + totalFat + ' / ' + profile.fatTarget + 'g</p>' +
-            '</div>' +
-            '<div class="macro-bg"><div class="macro-fill" style="width: ' + fatPercent + '%; background: #a78bfa;"></div></div>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-      
-      // 끼니별
-      '<div class="mb-4">' +
-        '<div class="flex items-center justify-between mb-3 px-1">' +
-          '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono">끼니별 기록</p>' +
-          '<p class="text-xs font-mono text-stone-500">' + todayMeals.length + ' / 4</p>' +
-        '</div>' +
-        '<div style="display: flex; flex-direction: column; gap: 10px;">' + mealCardsHtml + '</div>' +
-      '</div>' +
-      
-    '</div>' +
-    
-    // FAB
-    '<button class="fab" onclick="openFoodInput()">' +
-      '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
-        '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>' +
-      '</svg>' +
-    '</button>';
-}
-
-// ═══════════════════════════════════════════════
-// 음식 입력 화면 - 핸들러
-// ═══════════════════════════════════════════════
-
-// 음식 입력 화면 열기
-window.openFoodInput = function() {
-  state.foodInputOpen = true;
-  var hasAI = !!state.apiKey;
-  state.foodChatHistory = [
-    { 
-      type: 'bot', 
-      text: '뭐 드셨어요? 자연스럽게 적어주세요.', 
-      hint: hasAI 
-        ? '예: 닭가슴살 150g + 현미밥 한 공기 · AI 분석 활성화됨'
-        : '예: 닭가슴살 150g + 현미밥 한 공기 · DB 50+ 음식'
-    }
-  ];
-  state.foodInputText = '';
-  state.pendingResult = null;
-  render();
-  setTimeout(function() {
-    var input = document.getElementById('food-chat-input');
-    if (input) input.focus();
-  }, 100);
-};
-
-// 음식 입력 화면 닫기
-window.closeFoodInput = function() {
-  state.foodInputOpen = false;
-  state.foodChatHistory = [];
-  state.foodInputText = '';
-  state.pendingResult = null;
-  state.manualInputMode = false;
-  state.manualInputData = null;
-  render();
-};
-
-// 입력 텍스트 업데이트
-window.updateFoodInput = function(text) {
-  state.foodInputText = text;
-  // re-render 없이 버튼만 활성화/비활성화
-  var sendBtn = document.getElementById('food-send-btn');
-  if (sendBtn) sendBtn.disabled = !text.trim();
-};
-
-// 프리셋 클릭
-window.applyPreset = function(text) {
-  state.foodInputText = text;
-  var input = document.getElementById('food-chat-input');
-  if (input) input.value = text;
-  sendFoodMessage();
-};
-
-// 메시지 전송
-window.sendFoodMessage = async function() {
-  var text = state.foodInputText.trim();
-  if (!text) {
-    var input = document.getElementById('food-chat-input');
-    if (input) text = input.value.trim();
-    if (!text) return;
-  }
-  
-  // 사용자 메시지 추가
-  state.foodChatHistory.push({ type: 'user', text: text });
-  state.foodInputText = '';
-
-  // API 키 있으면 DB 부분 매칭 비활성 → 정확/별칭 매칭만 신뢰, 나머지는 AI로
-  // (API 키 없으면 기존대로 부분 매칭까지 사용)
-  var strict = !!state.apiKey;
-  var analysis = analyzeFoodInput(text, strict);
-  
-  // DB로 모두 매칭 성공
-  if (analysis.matched.length > 0 && analysis.unmatched.length === 0) {
-    showAnalysisResult(analysis.matched, []);
-    return;
-  }
-  
-  // 부분 매칭 또는 매칭 실패 → API 키 있으면 AI 시도
-  if (state.apiKey) {
-    // 로딩 메시지
-    state.foodChatHistory.push({ type: 'bot', text: '분석 중...', loading: true });
-    render();
-    scrollChatToBottom();
-    
-    // AI 호출 (매칭 안 된 부분만 또는 전체)
-    var aiText;
-    if (analysis.matched.length > 0) {
-      // 부분 매칭 → 매칭 안 된 부분만 AI
-      aiText = analysis.unmatched.join(', ');
-    } else {
-      // 전체 매칭 실패 → 전체 AI
-      aiText = text;
-    }
-    
-    var aiResult = await analyzeFoodWithAI(aiText);
-    
-    // 로딩 메시지 제거
-    state.foodChatHistory = state.foodChatHistory.filter(function(m) { return !m.loading; });
-    
-    if (aiResult && aiResult.foods && aiResult.foods.length > 0) {
-      // AI 분석 성공
-      var allFoods = analysis.matched.concat(aiResult.foods);
-      showAnalysisResult(allFoods, []);
-    } else if (aiResult && aiResult.error) {
-      // AI 호출 실패
-      var errMsg = 'AI 분석 실패: ' + aiResult.error;
-      if (analysis.matched.length > 0) {
-        // 부분 결과라도 표시
-        showAnalysisResult(analysis.matched, analysis.unmatched);
-        state.foodChatHistory.push({
-          type: 'bot',
-          text: errMsg + ' 매칭된 음식만 표시했어요.'
-        });
-      } else {
-        state.foodChatHistory.push({
-          type: 'bot',
-          text: errMsg,
-          hint: '직접 입력하시거나, 더 구체적으로 적어주세요.',
-          manualButton: { name: text }
-        });
-      }
-      render();
-      scrollChatToBottom();
-    } else {
-      // 알 수 없는 오류
-      showFailureMessage(text, analysis);
-    }
-  } else {
-    // API 키 없음
-    if (analysis.matched.length > 0) {
-      showAnalysisResult(analysis.matched, analysis.unmatched);
-    } else {
-      showFailureMessage(text, analysis);
-    }
-  }
-};
-
-// 분석 결과 표시
-function showAnalysisResult(matched, unmatched) {
-  var totalP = matched.reduce(function(s, f) { return s + f.protein; }, 0);
-  var totalKcal = matched.reduce(function(s, f) { return s + f.kcal; }, 0);
-  var totalC = matched.reduce(function(s, f) { return s + f.carbs; }, 0);
-  var totalF = matched.reduce(function(s, f) { return s + f.fat; }, 0);
-  
-  state.pendingResult = {
-    foods: matched,
-    totalProtein: Math.round(totalP * 10) / 10,
-    totalKcal: totalKcal,
-    totalCarbs: Math.round(totalC * 10) / 10,
-    totalFat: Math.round(totalF * 10) / 10,
-    unmatched: unmatched || []
-  };
-  
-  state.foodChatHistory.push({ type: 'result', data: state.pendingResult });
-  render();
-  scrollChatToBottom();
-}
-
-// 매칭 실패 메시지
-function showFailureMessage(text, analysis) {
-  state.foodChatHistory.push({
-    type: 'bot',
-    text: '"' + text + '"을(를) DB에서 찾을 수 없어요.',
-    hint: 'AI 분석을 사용하려면 더보기 > API 키 설정. 또는 직접 입력하세요.',
-    manualButton: { name: text }
-  });
-  render();
-  scrollChatToBottom();
-}
-
-// 끼니 선택 → 저장
-window.addToMeal = function(mealKey, mealKr) {
-  if (!state.pendingResult) return;
-  
-  var pr = state.pendingResult;
-  var tdStr = getTodayStr();
-  
-  // 기존 끼니 확인 (오늘 같은 끼니가 있으면 합치기)
-  var existingIdx = state.data.nutritionLog.findIndex(function(m) {
-    return m.date === tdStr && m.meal === mealKey;
-  });
-  
-  if (existingIdx !== -1) {
-    // 기존 끼니에 합치기
-    var existing = state.data.nutritionLog[existingIdx];
-    existing.protein += pr.totalProtein;
-    existing.carbs += pr.totalCarbs;
-    existing.fat += pr.totalFat;
-    existing.kcal += pr.totalKcal;
-    
-    if (!existing.foods) existing.foods = [];
-    pr.foods.forEach(function(f) {
-      existing.foods.push({
-        name: f.name,
-        amount: f.amount,
-        protein: f.protein,
-        kcal: f.kcal
-      });
-    });
-    
-    // 임계점 재계산
-    existing.thresholdPassed = existing.protein >= 30;
-    
-    // 반올림
-    existing.protein = Math.round(existing.protein * 10) / 10;
-    existing.carbs = Math.round(existing.carbs * 10) / 10;
-    existing.fat = Math.round(existing.fat * 10) / 10;
-  } else {
-    // 새 끼니 추가
-    var now = new Date();
-    state.data.nutritionLog.push({
-      id: 'm_' + Date.now(),
-      date: tdStr,
-      meal: mealKey,
-      mealKr: mealKr,
-      time: String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0'),
-      protein: pr.totalProtein,
-      carbs: pr.totalCarbs,
-      fat: pr.totalFat,
-      kcal: pr.totalKcal,
-      foods: pr.foods.map(function(f) {
-        return {
-          name: f.name,
-          amount: f.amount,
-          protein: f.protein,
-          kcal: f.kcal
-        };
-      }),
-      thresholdPassed: pr.totalProtein >= 30
-    });
-  }
-  
-  // 저장
-  storage.set(KEYS.NUTRITION_LOG, state.data.nutritionLog);
-  
-  // 봇 응답 (성공 메시지)
-  state.foodChatHistory.push({
-    type: 'bot',
-    text: '✓ ' + mealKr + '에 추가됐어요! 단백질 ' + pr.totalProtein + 'g 기록.',
-    success: true
-  });
-  
-  state.pendingResult = null;
-  
-  // 1초 후 닫기
-  setTimeout(function() {
-    closeFoodInput();
-    state.currentTab = 'fuel';
-    state._navTabStack = ['home', 'fuel'];  // 탭 스택 정합(뒤로가기 6-D): 연료 탭에서 뒤로 → 홈
-    render();
-  }, 1500);
-  
-  render();
-};
-
-// 손코딩 입력 모달 열기
-window.openManualInput = function(name) {
-  state.manualInputMode = true;
-  state.manualInputData = { name: name || '', protein: 0, kcal: 0 };
-  render();
-};
-
-// 손코딩 입력 모달 닫기
-window.closeManualInput = function() {
-  state.manualInputMode = false;
-  state.manualInputData = null;
-  render();
-};
-
-// 손코딩 입력 필드 업데이트
-window.updateManualField = function(field, value) {
-  if (!state.manualInputData) return;
-  if (field === 'name') {
-    state.manualInputData.name = value;
-  } else {
-    state.manualInputData[field] = parseFloat(value) || 0;
-  }
-};
-
-// 손코딩 입력 → 분석 결과로 만들기
-window.submitManualInput = function() {
-  var d = state.manualInputData;
-  if (!d || !d.name || d.protein < 0) return;
-  
-  state.pendingResult = {
-    foods: [{
-      name: d.name,
-      amount: '수동 입력',
-      protein: d.protein,
-      kcal: d.kcal,
-      carbs: 0,
-      fat: 0
-    }],
-    totalProtein: d.protein,
-    totalKcal: d.kcal,
-    totalCarbs: 0,
-    totalFat: 0,
-    unmatched: []
-  };
-  
-  state.foodChatHistory.push({ type: 'result', data: state.pendingResult });
-  state.manualInputMode = false;
-  state.manualInputData = null;
-  render();
-};
-
-// ═══════════════════════════════════════════════
-// 음식 입력 화면 - 렌더
-// ═══════════════════════════════════════════════
-function renderFoodInput() {
-  // 채팅 메시지 렌더
-  var messagesHtml = '';
-  state.foodChatHistory.forEach(function(msg) {
-    if (msg.type === 'bot') {
-      // 로딩 메시지
-      if (msg.loading) {
-        messagesHtml += 
-          '<div class="chat-bot">' +
-            '<div class="flex items-center gap-2">' +
-              '<div class="loading-spinner"></div>' +
-              '<p class="text-sm">' + msg.text + '</p>' +
-            '</div>' +
-          '</div>';
-        return;
-      }
-      
-      var hintHtml = msg.hint ? '<p class="text-[10px] font-mono text-stone-400 mt-1\\.5">' + msg.hint + '</p>' : '';
-      var manualBtn = msg.manualButton 
-        ? '<button class="mt-2 px-3 py-1\\.5 rounded-lg text-[11px] font-mono accent" style="background: rgba(0, 212, 255, 0.15); border: 1px solid rgba(0, 212, 255, 0.4);" onclick="openManualInput(\'' + msg.manualButton.name.replace(/'/g, "\\'") + '\')">직접 입력하기</button>'
-        : '';
-      var successStyle = msg.success ? ' style="background: rgba(0, 212, 255, 0.15); border-color: rgba(0, 212, 255, 0.5);"' : '';
-      
-      messagesHtml += 
-        '<div class="chat-bot"' + successStyle + '>' +
-          '<p class="text-sm leading-relaxed">' + msg.text + '</p>' +
-          hintHtml +
-          manualBtn +
-        '</div>';
-    } else if (msg.type === 'user') {
-      messagesHtml += 
-        '<div class="chat-user">' +
-          '<p class="text-sm">' + msg.text + '</p>' +
-        '</div>';
-    } else if (msg.type === 'result') {
-      var d = msg.data;
-      var foodsHtml = '';
-      d.foods.forEach(function(f) {
-        var color = f.protein >= 10 ? '#00d4ff' : '#d6d3d1';
-        var defaultedNote = f.defaulted ? ' <span class="text-[9px] text-amber-400">(기본양)</span>' : '';
-        var aiNote = f.aiAnalyzed ? ' <span class="text-[9px]" style="color: #a78bfa;">AI</span>' : '';
-        foodsHtml += 
-          '<div class="food-analysis-card">' +
-            '<div>' +
-              '<p class="text-sm font-display font-bold">' + f.name + ' ' + f.amount + defaultedNote + aiNote + '</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + f.kcal + 'kcal · 탄' + f.carbs + 'g · 지' + f.fat + 'g</p>' +
-            '</div>' +
-            '<p class="font-bebas text-lg" style="color: ' + color + ';">' + f.protein + '<span class="text-[10px] text-stone-400">g</span></p>' +
-          '</div>';
-      });
-      
-      var unmatchedHtml = '';
-      if (d.unmatched && d.unmatched.length > 0) {
-        unmatchedHtml = 
-          '<div class="food-analysis-card not-found">' +
-            '<div>' +
-              '<p class="text-xs font-mono text-amber-400">매칭 실패: ' + d.unmatched.join(', ') + '</p>' +
-            '</div>' +
-            '<button class="text-[10px] font-mono accent" onclick="openManualInput(\'' + d.unmatched[0].replace(/'/g, "\\'") + '\')">+ 추가</button>' +
-          '</div>';
-      }
-      
-      messagesHtml += 
-        '<div class="chat-bot">' +
-          '<p class="text-sm leading-relaxed mb-3">분석했어요</p>' +
-          '<div style="margin: 4px 0;">' + foodsHtml + unmatchedHtml + '</div>' +
-          '<div class="flex items-center justify-between mt-3 pt-3 border-t" style="border-color: rgba(0, 212, 255, 0.2);">' +
-            '<p class="text-xs font-mono text-stone-400">총합</p>' +
-            '<div class="flex items-center gap-3">' +
-              '<span class="text-xs font-mono text-stone-400">' + d.totalKcal + ' kcal</span>' +
-              '<span class="font-bebas text-xl accent">' + d.totalProtein + 'g</span>' +
-            '</div>' +
-          '</div>' +
-          '<p class="text-[10px] font-mono text-stone-500 mt-2 mb-2">어느 끼니에 추가할까요?</p>' +
-          '<div class="meal-select-grid">' +
-            '<button class="meal-select-btn" onclick="addToMeal(\'breakfast\', \'아침\')">아침</button>' +
-            '<button class="meal-select-btn" onclick="addToMeal(\'lunch\', \'점심\')">점심</button>' +
-            '<button class="meal-select-btn" onclick="addToMeal(\'dinner\', \'저녁\')">저녁</button>' +
-            '<button class="meal-select-btn" onclick="addToMeal(\'snack\', \'간식\')">간식</button>' +
-          '</div>' +
-        '</div>';
-    }
-  });
-  
-  // 손코딩 모달
-  var manualModalHtml = '';
-  if (state.manualInputMode && state.manualInputData) {
-    var d = state.manualInputData;
-    manualModalHtml = 
-      '<div class="manual-input-overlay" onclick="closeManualInput()">' +
-        '<div class="manual-input-sheet" onclick="event.stopPropagation()">' +
-          '<div class="sheet-handle"></div>' +
-          '<div class="flex items-center justify-between mb-5">' +
-            '<div>' +
-              '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">직접 입력</p>' +
-              '<p class="font-bebas text-2xl mt-1">음식 추가</p>' +
-            '</div>' +
-            '<button class="session-header-btn" onclick="closeManualInput()">' + icon('close', 18) + '</button>' +
-          '</div>' +
-          
-          '<div class="input-group">' +
-            '<div class="input-label"><p>음식 이름</p></div>' +
-            '<input type="text" class="input-field" id="manual-name" placeholder="예: 단백질바" value="' + (d.name || '') + '" oninput="updateManualField(\'name\', this.value)" />' +
-          '</div>' +
-          
-          '<div class="input-group">' +
-            '<div class="input-label"><p>단백질</p><p>g</p></div>' +
-            '<input type="number" class="input-field" id="manual-protein" placeholder="0" value="' + (d.protein || '') + '" oninput="updateManualField(\'protein\', this.value)" />' +
-          '</div>' +
-          
-          '<div class="input-group">' +
-            '<div class="input-label"><p>칼로리</p><p>kcal</p></div>' +
-            '<input type="number" class="input-field" id="manual-kcal" placeholder="0" value="' + (d.kcal || '') + '" oninput="updateManualField(\'kcal\', this.value)" />' +
-          '</div>' +
-          
-          '<button class="sheet-submit" onclick="submitManualInput()">분석 결과로 만들기</button>' +
-        '</div>' +
-      '</div>';
-  }
-  
-  // 자주 먹는 음식 프리셋 (DB에서 추출)
-  var presetItems = [
-    { label: '⚡ 닭가슴살 100g', text: '닭가슴살 100g' },
-    { label: '🥚 계란 3개', text: '계란 3개' },
-    { label: '🥛 그릭요거트', text: '그릭요거트 150g' },
-    { label: '🍚 현미밥', text: '현미밥 한 공기' },
-    { label: '🥩 소고기 100g', text: '소고기 100g' },
-    { label: '🍌 바나나', text: '바나나 1개' },
-    { label: '💪 프로틴 1스쿱', text: '웨이프로틴 1스쿱' }
-  ];
-  
-  var presetsHtml = presetItems.map(function(p) {
-    return '<button class="preset-chip" onclick="applyPreset(\'' + p.text + '\')">' + p.label + '</button>';
-  }).join('');
-  
-  var sendDisabled = !state.foodInputText.trim();
-  
-  return '' +
-    '<div class="food-input-screen">' +
-      
-      // 헤더
-      '<div class="food-input-header">' +
-        '<button class="session-header-btn" onclick="closeFoodInput()">' + icon('close', 18) + '</button>' +
-        '<div class="text-center">' +
-          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">기록 추가</p>' +
-          '<p class="text-sm font-display font-bold mt-0\\.5">음식 입력</p>' +
-        '</div>' +
-        (state.apiKey 
-          ? '<div class="api-status-badge active" style="font-size: 9px; padding: 4px 8px;">AI ✓</div>'
-          : '<div style="width: 36px;"></div>') +
-      '</div>' +
-      
-      // 채팅 영역
-      '<div class="chat-area" id="chat-area">' + messagesHtml + '</div>' +
-      
-      // 하단 입력 영역
-      '<div class="food-input-bottom">' +
-        '<div class="preset-row">' + presetsHtml + '</div>' +
-        '<div class="chat-input-bar">' +
-          '<input type="text" id="food-chat-input" placeholder="음식 입력..." value="' + state.foodInputText + '" oninput="updateFoodInput(this.value)" onkeydown="if(event.key===\'Enter\') sendFoodMessage()" />' +
-          '<button class="chat-send-btn" id="food-send-btn" onclick="sendFoodMessage()"' + (sendDisabled ? ' disabled' : '') + '>' +
-            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
-              '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>' +
-            '</svg>' +
-          '</button>' +
-        '</div>' +
-      '</div>' +
-      
-    '</div>' +
-    
-    manualModalHtml;
-}
-
-// ═══════════════════════════════════════════════
 // 더보기 화면 - 핸들러
 // ═══════════════════════════════════════════════
 
@@ -3290,7 +2529,6 @@ window.openProfileEditModal = function() {
   var p = state.profile || {};
   state.profileEdit = {
     age: p.age, height: p.height, weight: p.weight,
-    proteinTarget: p.proteinTarget, calorieTarget: p.calorieTarget,
     workoutFreq: p.workoutFreq
   };
   state.profileEditModalOpen = true;
@@ -3316,8 +2554,6 @@ window.saveProfileEdit = function() {
     { k: 'age', label: '나이', min: 10, max: 120, int: true },
     { k: 'height', label: '키(cm)', min: 100, max: 250 },
     { k: 'weight', label: '체중(kg)', min: 25, max: 300 },
-    { k: 'proteinTarget', label: '목표 단백질(g)', min: 20, max: 500, int: true },
-    { k: 'calorieTarget', label: '목표 칼로리(kcal)', min: 800, max: 8000, int: true },
     { k: 'workoutFreq', label: '주간 운동 횟수', min: 1, max: 14, int: true }
   ];
   for (var i = 0; i < fields.length; i++) {
@@ -3332,8 +2568,6 @@ window.saveProfileEdit = function() {
   state.profile.age = e.age;
   state.profile.height = e.height;
   state.profile.weight = e.weight;
-  state.profile.proteinTarget = e.proteinTarget;
-  state.profile.calorieTarget = e.calorieTarget;
   state.profile.workoutFreq = e.workoutFreq;
   storage.set(KEYS.PROFILE, state.profile);
   state.profileEditModalOpen = false;
@@ -3367,8 +2601,6 @@ function renderProfileEditModal() {
       field('나이', 'age', '세', '1') +
       field('키', 'height', 'cm', '0.1') +
       field('체중', 'weight', 'kg', '0.1') +
-      field('목표 단백질', 'proteinTarget', 'g / 일', '1') +
-      field('목표 칼로리', 'calorieTarget', 'kcal / 일', '10') +
       field('주간 운동 횟수', 'workoutFreq', '회 / 주', '1') +
       '<button class="sheet-submit mt-2" onclick="saveProfileEdit()">저장</button>' +
       '<button class="mt-2" onclick="closeProfileEditModal()" style="width:100%;padding:12px;border-radius:14px;background:transparent;border:1px solid #2a3550;color:#9aa7c0;font-family:Space Grotesk,sans-serif;font-weight:700;font-size:13px;">취소</button>' +
@@ -3502,7 +2734,6 @@ window.executeResetAll = function() {
   // 빈 배열들로 초기화
   localStorage.setItem(KEYS.INITIALIZED, JSON.stringify(true));
   localStorage.setItem(KEYS.WORKOUT_LOG, JSON.stringify([]));
-  localStorage.setItem(KEYS.NUTRITION_LOG, JSON.stringify([]));
   localStorage.setItem(KEYS.PERSONAL_RECORDS, JSON.stringify([]));
   localStorage.setItem(KEYS.BODY_LOG, JSON.stringify([]));
   localStorage.setItem(KEYS.CONDITION_LOG, JSON.stringify([]));
@@ -3571,7 +2802,7 @@ function renderMore() {
           
           '<div class="flex items-center justify-between mb-5">' +
             '<div>' +
-              '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">AI 음식 분석</p>' +
+              '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">AI 코치·루틴</p>' +
               '<p class="font-bebas text-2xl mt-1">Anthropic API 키</p>' +
             '</div>' +
             '<button class="session-header-btn" onclick="closeApiKeyModal()">' + icon('close', 18) + '</button>' +
@@ -3583,7 +2814,7 @@ function renderMore() {
               '<div style="color: #00d4ff; flex-shrink: 0; margin-top: 2px;">' + icon('info', 16) + '</div>' +
               '<div>' +
                 '<p class="text-xs accent font-mono uppercase tracking-widest mb-1">왜 필요한가요?</p>' +
-                '<p class="text-xs text-stone-300 leading-relaxed">DB에 없는 음식(예: "단백질바", "수제 도시락")을 입력하면 Claude Haiku AI가 영양 정보를 분석해줍니다. API 키 없이도 50+ 한국 음식은 DB로 작동합니다.</p>' +
+                '<p class="text-xs text-stone-300 leading-relaxed">AI 코치 채팅·루틴 생성·주간 리뷰·정체기 분석에 Anthropic Claude를 씁니다. 본인 키를 넣어 직접 사용하며, 없으면 해당 AI 기능만 비활성화됩니다.</p>' +
               '</div>' +
             '</div>' +
           '</div>' +
@@ -3624,7 +2855,7 @@ function renderMore() {
             '<p class="font-display font-bold text-base">사용자</p>' +
             '<p class="text-[10px] font-mono text-stone-500 mt-1">' + profile.age + '세 · ' + profile.height + 'cm · ' + profile.weight + 'kg</p>' +
             '<div class="flex items-center gap-2 mt-1">' +
-              '<span class="text-[10px] font-mono text-stone-500">목표 ' + profile.proteinTarget + 'g/일 · 주 ' + (profile.workoutFreq || 4) + '회</span>' +
+              '<span class="text-[10px] font-mono text-stone-500">주 ' + (profile.workoutFreq || 4) + '회 운동</span>' +
             '</div>' +
           '</div>' +
           '<div class="menu-arrow">' + icon('chevron', 18) + '</div>' +
@@ -4342,10 +3573,6 @@ function renderWeeklyReviewDetail() {
             '<p class="stat-mini-value">' + review.stats.workoutCount + '<span class="stat-mini-unit">회</span></p>' +
           '</div>' +
           '<div class="stat-mini-card">' +
-            '<p class="stat-mini-label">단백질 평균</p>' +
-            '<p class="stat-mini-value">' + review.stats.avgProtein + '<span class="stat-mini-unit">g</span></p>' +
-          '</div>' +
-          '<div class="stat-mini-card">' +
             '<p class="stat-mini-label">PR</p>' +
             '<p class="stat-mini-value">' + review.stats.prCount + '<span class="stat-mini-unit">개</span></p>' +
           '</div>' +
@@ -4430,8 +3657,7 @@ function renderPlateauDetail() {
   var signalLabels = {
     'pr_stalled': '🏆 PR 갱신 정체 (2주)',
     'weight_stalled': '⚖️ 체중 변화 없음',
-    'frequency_drop': '📉 운동 빈도 감소',
-    'protein_low': '🥩 단백질 평균 부족'
+    'frequency_drop': '📉 운동 빈도 감소'
   };
   
   var signalsHtml = p.signals.map(function(s) {
@@ -4586,7 +3812,6 @@ function renderStats() {
   // 기간별 데이터 필터
   var bodyLog = filterByPeriod(state.data.bodyLog || [], period);
   var workoutLog = filterByPeriod(state.data.workoutLog, period);
-  var nutritionLog = filterByPeriod(state.data.nutritionLog, period);
   var personalRecords = filterByPeriod(state.data.personalRecords, period);
   
   // 정렬 (날짜 오름차순)
@@ -4597,20 +3822,6 @@ function renderStats() {
   var startWeight = bodyLog.length > 0 ? bodyLog[0].weight : profile.weight;
   var weightChange = (currentWeight - startWeight).toFixed(1);
   var weightChangeSign = weightChange >= 0 ? '+' : '';
-  
-  // 단백질 일평균
-  var nutritionByDate = {};
-  nutritionLog.forEach(function(m) {
-    if (!nutritionByDate[m.date]) nutritionByDate[m.date] = 0;
-    nutritionByDate[m.date] += m.protein || 0;
-  });
-  var dailyProteins = Object.values(nutritionByDate);
-  var avgProtein = dailyProteins.length > 0 
-    ? Math.round(dailyProteins.reduce(function(s, p) { return s + p; }, 0) / dailyProteins.length)
-    : 0;
-  
-  // 단백질 목표 달성일 (155g 이상)
-  var achievedDays = dailyProteins.filter(function(p) { return p >= profile.proteinTarget; }).length;
   
   // 기간 선택 탭
   var periodTabs = ['1week', '1month', '3month', 'all'].map(function(p) {
@@ -4730,37 +3941,6 @@ function renderStats() {
   
   var partsHtml = partRow('PUSH', pushCount) + partRow('PULL', pullCount) + partRow('LEGS', legsCount) + partRow('FREE', freeCount);
   
-  // 일별 단백질 (지난 7일)
-  var proteinDays = [];
-  for (var i = 6; i >= 0; i--) {
-    var d = new Date(today);
-    d.setDate(today.getDate() - i);
-    var dStr = getDateStr(d);
-    var dayProtein = state.data.nutritionLog
-      .filter(function(m) { return m.date === dStr; })
-      .reduce(function(s, m) { return s + (m.protein || 0); }, 0);
-    proteinDays.push({
-      day: ['일','월','화','수','목','금','토'][d.getDay()],
-      protein: dayProtein,
-      isToday: i === 0
-    });
-  }
-  
-  var maxProteinDay = Math.max.apply(null, proteinDays.map(function(p) { return p.protein; }).concat([profile.proteinTarget]));
-  
-  var proteinBarsHtml = '';
-  proteinDays.forEach(function(p) {
-    var pct = (p.protein / maxProteinDay);
-    var height = p.protein > 0 ? Math.max(5, pct * 90) : 4;
-    var cls = p.protein === 0 ? 'bar-shape' : (p.protein >= profile.proteinTarget ? 'bar-shape active' : 'bar-shape partial');
-    var labelStyle = p.isToday ? 'color: #00d4ff;' : '';
-    proteinBarsHtml += 
-      '<div class="bar-col" style="gap: 4px;">' +
-        '<div class="' + cls + '" style="height: ' + height + 'px; border-radius: 3px 3px 0 0;"></div>' +
-        '<p class="text-[8px] font-mono" style="' + labelStyle + (p.isToday ? '' : 'color: #4a5568;') + '">' + p.day + '</p>' +
-      '</div>';
-  });
-  
   // PR 히스토리
   var prListHtml = '';
   if (personalRecords.length === 0) {
@@ -4840,16 +4020,8 @@ function renderStats() {
           '</div>' +
           '<p class="stat-mini-change accent">평균 주 ' + (workoutLog.length > 0 ? Math.round((workoutLog.length / Math.max(1, getPeriodDays(period) / 7)) * 10) / 10 : 0) + '회</p>' +
         '</div>' +
-        '<div class="stat-mini-card">' +
-          '<p class="stat-mini-label">단백질</p>' +
-          '<div class="flex items-baseline gap-1\\.5">' +
-            '<p class="stat-mini-value">' + avgProtein + '</p>' +
-            '<p class="stat-mini-unit">g</p>' +
-          '</div>' +
-          '<p class="stat-mini-change text-stone-500">일평균 · ' + achievedDays + '일 달성</p>' +
-        '</div>' +
       '</div>' +
-      
+
       // 체중/체지방 차트
       '<div class="card mb-4">' +
         '<div class="flex items-center justify-between mb-4">' +
@@ -4871,22 +4043,6 @@ function renderStats() {
         '<div class="border-t pt-4 mt-5">' +
           '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest mb-3">부위별 분배</p>' +
           partsHtml +
-        '</div>' +
-      '</div>' +
-      
-      // 단백질 달성 (지난 7일)
-      '<div class="card mb-4">' +
-        '<div class="flex items-center justify-between mb-4">' +
-          '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono">단백질 (지난 7일)</p>' +
-        '</div>' +
-        
-        '<div class="bar-chart" style="height: 100px;">' + proteinBarsHtml + '</div>' +
-        
-        '<div class="mt-4 pt-4 border-t">' +
-          '<div class="flex items-baseline justify-between">' +
-            '<p class="text-[10px] font-mono text-stone-500 uppercase">기간 내 최고</p>' +
-            '<p class="font-bebas text-xl">' + (proteinDays.length > 0 ? Math.max.apply(null, proteinDays.map(function(p) { return p.protein; })) : 0) + '<span class="text-[10px] text-stone-500">g</span></p>' +
-          '</div>' +
         '</div>' +
       '</div>' +
       
@@ -4980,13 +4136,29 @@ function renderPlaceholder(title, label, iconName) {
 }
 
 // ═══════════════════════════════════════════════
+// 러닝(유산소) 화면 — 2단계에서 러닝머신 인터벌 유산소 구현 예정 (지금은 빈 껍데기)
+// ═══════════════════════════════════════════════
+function renderRunning() {
+  return '' +
+    '<div class="px-5 pt-12 pb-32">' +
+      '<p class="text-xs uppercase font-mono text-stone-500 mb-2" style="letter-spacing: 0.3em;">RUNNING</p>' +
+      '<h1 class="font-bebas text-4xl">러닝</h1>' +
+      '<div class="mt-20 text-center">' +
+        '<div class="placeholder-icon">' + icon('clock', 36) + '</div>' +
+        '<p class="text-sm text-stone-400 font-mono mt-4">유산소 기능 준비 중</p>' +
+        '<p class="text-xs text-stone-600 mt-2 leading-relaxed">러닝머신 인터벌 유산소가<br/>다음 단계에서 추가됩니다</p>' +
+      '</div>' +
+    '</div>';
+}
+
+// ═══════════════════════════════════════════════
 // 탭바
 // ═══════════════════════════════════════════════
 function renderTabbar() {
   var tabs = [
     { id: 'home', label: 'HOME', iconName: 'home' },
     { id: 'workout', label: 'WORKOUT', iconName: 'dumbbell' },
-    { id: 'fuel', label: 'FUEL', iconName: 'apple' },
+    { id: 'running', label: 'RUNNING', iconName: 'clock' },
     { id: 'stats', label: 'STATS', iconName: 'chart' },
     { id: 'more', label: 'MORE', iconName: 'more' }
   ];
@@ -5036,12 +4208,6 @@ function render() {
     return;
   }
   
-  // 음식 입력 화면
-  if (state.foodInputOpen) {
-    document.getElementById('app').innerHTML = renderFoodInput();
-    return;
-  }
-  
   // 완료 화면
   if (state.completedSession) {
     document.getElementById('app').innerHTML = renderWorkoutComplete();
@@ -5059,7 +4225,7 @@ function render() {
   switch (state.currentTab) {
     case 'home': content = renderHome(); break;
     case 'workout': content = renderWorkout(); break;
-    case 'fuel': content = renderFuel(); break;
+    case 'running': content = renderRunning(); break;
     case 'stats': content = renderStats(); break;
     case 'more': content = renderMore(); break;
   }
@@ -5088,7 +4254,7 @@ function renderResetConfirm() {
           '<div style="font-size: 48px; margin-bottom: 8px;">⚠️</div>' +
           '<p class="font-display font-bold text-xl mb-2" style="color: #ef4444;">전체 데이터 삭제</p>' +
           '<p class="text-xs text-stone-400 leading-relaxed">' +
-            '운동 기록, 영양 기록, 체중 기록, PR, 1RM,<br/>' +
+            '운동 기록, 체중 기록, PR, 1RM,<br/>' +
             '코치 채팅 등 <strong style="color: #fbbf24;">모든 데이터</strong>가 영구 삭제됩니다.<br/>' +
             '이 작업은 되돌릴 수 없습니다.' +
           '</p>' +
@@ -5113,10 +4279,9 @@ function renderResetConfirm() {
 window.setTab = function(tabId, fromNav) {
   // 모든 탭 진입 시 데이터 강제 재로드 (삭제 즉시 반영 보장)
   state.data.workoutLog = storage.get(KEYS.WORKOUT_LOG) || [];
-  state.data.nutritionLog = storage.get(KEYS.NUTRITION_LOG) || [];
   state.data.bodyLog = storage.get(KEYS.BODY_LOG) || [];
   state.data.personalRecords = storage.get(KEYS.PERSONAL_RECORDS) || [];
-  console.log('[setTab] ' + tabId + ' - 운동:' + state.data.workoutLog.length + ' 영양:' + state.data.nutritionLog.length);
+  console.log('[setTab] ' + tabId + ' - 운동:' + state.data.workoutLog.length);
 
   // 운동 탭 진입 시 마법사는 이전 진행 단계를 그대로 유지 (저장된 state 복원됨)
   state.currentTab = tabId;
@@ -5163,7 +4328,6 @@ init();
 // 지금 화면에서 "가장 위에 떠 있는 단계"를 문자열로 판별 (render 우선순위와 정합)
 function getTopLayer() {
   // 모달/시트 (다른 화면 위에 겹쳐 뜨는 가장 위 레이어)
-  if (state.manualInputMode) return 'manualInput';   // 음식입력 위 수동입력
   if (state.itemDetailSheet) return 'itemDetail';     // 기록 상세 (탭 위)
   if (state.editingSet) return 'setEditor';           // 세트 편집 (세션 위)
   if (state.exerciseSwapOpen) return 'exerciseSwap';  // 종목 교체 (세션 위)
@@ -5176,7 +4340,6 @@ function getTopLayer() {
   if (state.weeklyReviewOpen) return 'weeklyReview';
   if (state.plateauOpen) return 'plateau';
   if (state.coachChatOpen) return 'coachChat';
-  if (state.foodInputOpen) return 'foodInput';
   // 완료 화면 / 진행 중 세션
   if (state.completedSession) return 'completed';
   if (state.activeSession) return 'session';
@@ -5188,22 +4351,17 @@ function getTopLayer() {
   return 'root';
 }
 
-// 뒤로가기 한 번 처리. 반환값: true=흡수(트랩 다시 깔기), false=앱을 실제로 떠나도 됨(루트 2번째)
+// 뒤로가기 한 번 처리. 반환값: true=흡수(트랩 다시 깔기), false=앱을 실제로 떠나도 됨(홈에서 종료)
 function navBack() {
   var top = getTopLayer();
 
   if (top === 'root') {
-    // 홈에서 더 닫을 게 없음 → '한 번 더 누르면 종료'
-    if (state._navExitArmed) return false;          // 두 번째(2초 내) → 실제 종료 허용
-    state._navExitArmed = true;
-    showToast('한 번 더 누르면 닫혀요');
-    setTimeout(function() { state._navExitArmed = false; }, 2000);
-    return true;                                     // 첫 번째 → 흡수
+    // 홈 탭에서 뒤로 = 앱 종료(폰 첫화면). 토스트·재확인 없이 바로 내보낸다.
+    return false;
   }
 
   switch (top) {
     // 모달/시트 — 기존 닫기 함수 그대로 재사용(애니가 있는 4종은 그 안에서 처리)
-    case 'manualInput': closeManualInput(); break;
     case 'itemDetail': closeItemDetail(); break;
     case 'setEditor': closeSetEditor(); break;
     case 'exerciseSwap': closeExerciseSwap(); break;
@@ -5216,10 +4374,9 @@ function navBack() {
     case 'weeklyReview': closeWeeklyReview(); break;
     case 'plateau': closePlateauDetail(); break;
     case 'coachChat': closeCoachChat(); break;
-    case 'foodInput': closeFoodInput(); break;
     // 완료 화면 / 진행 세션
     case 'completed': goHome(); break;
-    case 'session': endSession(); break;            // 완료 본세트 없으면 endSession이 확인창
+    case 'session': endSession(true); break;        // 운동 중 뒤로 = 항상 "종료할까요?" 팝업
     // 마법사 단계
     case 'wizard3': backToStep2(); break;           // FREE면 backToStep2가 STEP1로 직행
     case 'wizard2': backToStep1(); break;
@@ -5238,17 +4395,49 @@ function navBack() {
   return true;
 }
 
-// 부팅 시 트랩 1칸을 깔고 popstate(폰/브라우저 뒤로가기)를 듣는다.
-// 뒤로가기가 눌리면 트랩이 한 칸 빠지므로 navBack으로 한 겹 닫고 트랩을 다시 깐다.
+// ═══════════════════════════════════════════════
+// 뒤로가기 트랩 (안드로이드 standalone PWA 대응)
+//   원인: standalone PWA는 (1) 부팅 파싱 시점의 pushState가 초기 히스토리 항목에
+//   흡수되어 "되돌릴 항목"이 안 생기는 경우가 있고, (2) 홈에서 앱을 다시 부르면
+//   페이지가 새로 로드되지 않아(백그라운드 복귀·bfcache) 부팅 트랩이 사라져 있을 수 있다.
+//   → 첫 뒤로가기가 트랩 없이 곧장 앱 종료로 빠진다.
+//   해결: history.state 표식으로 idempotent하게 트랩을 "확보"(ensureBackTrap)하고,
+//   부팅 + load + pageshow(복원) + 포그라운드 복귀 + popstate 흡수 직후에 매번 확보한다.
+// ═══════════════════════════════════════════════
+var BACK_TRAP_FLAG = '__healthBackTrap';
+
+// 트랩이 없으면 하나 깐다(있으면 그대로 — 중복 push 방지). history.state 표식으로 판별.
+function ensureBackTrap() {
+  if (typeof history === 'undefined' || !history.pushState) return;
+  try {
+    if (!history.state || !history.state[BACK_TRAP_FLAG]) {
+      var s = {}; s[BACK_TRAP_FLAG] = true;
+      history.pushState(s, '');
+    }
+  } catch (e) {}
+}
+
 (function() {
   if (typeof window === 'undefined' || !window.addEventListener || typeof history === 'undefined') return;
-  try { history.pushState({ nav: 'trap' }, ''); } catch (e) {}
+
+  ensureBackTrap();                                  // 부팅 즉시 1차 확보
+  // standalone에서 부팅 pushState가 초기 항목에 흡수되는 문제 대비 — 로드 완료 후 다시 확보
+  window.addEventListener('load', ensureBackTrap);
+  // bfcache/홈에서 재실행 등으로 페이지가 복원될 때 트랩이 없으면 다시 확보
+  window.addEventListener('pageshow', function() { ensureBackTrap(); });
+  // 안드로이드 PWA 포그라운드 복귀 시 트랩 재확보
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('visibilitychange', function() {
+      if (document.visibilityState === 'visible') ensureBackTrap();
+    });
+  }
+
   window.addEventListener('popstate', function() {
     var keep = navBack();
     if (keep) {
-      try { history.pushState({ nav: 'trap' }, ''); } catch (e) {}  // 트랩 재설정(흡수)
+      ensureBackTrap();                              // 흡수 → 트랩 다시 확보
     } else {
-      try { history.back(); } catch (e) {}                          // 한 칸 더 뒤로 → 앱 떠남
+      try { history.back(); } catch (e) {}           // 홈에서 종료 → 실제로 앱을 떠난다
     }
   });
 })();
@@ -5285,7 +4474,6 @@ function navBack() {
     if (state.editingSet) return;
     if (state.exerciseSwapOpen) return;
     if (state.completedSession) return;
-    if (state.foodInputOpen) return;
     if (state.itemDetailSheet) return;
     if (state.resetConfirming) return;
 

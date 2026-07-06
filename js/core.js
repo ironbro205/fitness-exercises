@@ -6,7 +6,6 @@
 var KEYS = {
   PROFILE: 'fitness_profile',
   WORKOUT_LOG: 'fitness_workout_log',
-  NUTRITION_LOG: 'fitness_nutrition_log',
   BODY_LOG: 'fitness_body_log',
   PERSONAL_RECORDS: 'fitness_personal_records',
   INITIALIZED: 'fitness_initialized',
@@ -156,12 +155,6 @@ function generateDemoData() {
     { id: 'd2', startTime: monday.getTime() + 86400000 + 10*60*60*1000, date: new Date(monday.getTime() + 86400000).toISOString().split('T')[0], sessionType: 'pull', sessionName: 'PULL', sessionKr: 'PULL', duration: 48, sets: 16, exerciseCount: 6, exercises: [], completed: true }
   ];
   
-  var nutritionLog = [
-    { id: 'dm1', date: todayStr, meal: 'breakfast', mealKr: '아침', protein: 35, carbs: 30, fat: 12, kcal: 380, foods: [{ name: '계란 4개', amount: '4개', protein: 24, kcal: 280 }, { name: '오트밀', amount: '50g', protein: 11, kcal: 100 }], thresholdPassed: true },
-    { id: 'dm2', date: todayStr, meal: 'lunch', mealKr: '점심', protein: 38, carbs: 80, fat: 15, kcal: 620, foods: [{ name: '닭가슴살', amount: '150g', protein: 35, kcal: 250 }, { name: '현미밥', amount: '1공기', protein: 3, kcal: 220 }], thresholdPassed: true },
-    { id: 'dm3', date: todayStr, meal: 'dinner', mealKr: '저녁', protein: 25, carbs: 60, fat: 18, kcal: 540, foods: [{ name: '연어구이', amount: '120g', protein: 25, kcal: 240 }, { name: '샐러드', amount: '200g', protein: 0, kcal: 100 }], thresholdPassed: false }
-  ];
-  
   var personalRecords = [
     { id: 'p1', exerciseName: '레그 프레스', weight: 120, reps: 10, previousWeight: 115, date: new Date(today.getTime() - 2 * 86400000).toISOString().split('T')[0] },
     { id: 'p2', exerciseName: '풀업', reps: 8, previousReps: 7, date: new Date(today.getTime() - 5 * 86400000).toISOString().split('T')[0] },
@@ -180,7 +173,7 @@ function generateDemoData() {
     });
   }
   
-  return { workoutLog: workoutLog, nutritionLog: nutritionLog, personalRecords: personalRecords, bodyLog: bodyLog };
+  return { workoutLog: workoutLog, personalRecords: personalRecords, bodyLog: bodyLog };
 }
 
 // ═══════════════════════════════════════════════
@@ -230,20 +223,13 @@ function icon(name, size) {
 var state = {
   currentTab: 'home',
   profile: null,
-  data: { workoutLog: [], nutritionLog: [], personalRecords: [], bodyLog: [], conditionLog: [], cycleHistory: [] },
+  data: { workoutLog: [], personalRecords: [], bodyLog: [], conditionLog: [], cycleHistory: [] },
   // 운동 세션 진행 중 상태
   activeSession: null,
   editingSet: null,
   exerciseSwapOpen: false,
   restTimer: null,
   completedSession: null,
-  // 음식 입력 화면
-  foodInputOpen: false,
-  foodChatHistory: [],
-  foodInputText: '',
-  pendingResult: null,
-  manualInputMode: false,
-  manualInputData: null,
   // 더보기 화면 - 모달
   apiKeyModalOpen: false,
   apiKeyInput: '',
@@ -415,7 +401,6 @@ function init() {
     storage.set(KEYS.PROFILE, DEFAULT_PROFILE);
     var demo = generateDemoData();
     storage.set(KEYS.WORKOUT_LOG, demo.workoutLog);
-    storage.set(KEYS.NUTRITION_LOG, demo.nutritionLog);
     storage.set(KEYS.PERSONAL_RECORDS, demo.personalRecords);
     storage.set(KEYS.BODY_LOG, demo.bodyLog);
     storage.set(KEYS.COACH_MEMORY, [
@@ -428,7 +413,6 @@ function init() {
   state.profile = storage.get(KEYS.PROFILE, DEFAULT_PROFILE);
   state.data = {
     workoutLog: storage.get(KEYS.WORKOUT_LOG, []),
-    nutritionLog: storage.get(KEYS.NUTRITION_LOG, []),
     personalRecords: storage.get(KEYS.PERSONAL_RECORDS, []),
     bodyLog: storage.get(KEYS.BODY_LOG, []),
     conditionLog: storage.get(KEYS.CONDITION_LOG, []),

@@ -1,6 +1,13 @@
 # PROGRESS — 헬스앱
 
-## 마지막 한 일 (2026-07-05 — 세션 15: UPPER 세션 추가 + AI 루틴 규칙 근성장 전면 재설계)
+## 마지막 한 일 (2026-07-06 — 세션 16: AI 운동 규칙 개정 v2 — grill→workflow→Codex)
+- **규칙 8개 개정** (사용자와 규칙 1~13 하나씩 grill → 확정): ①선호(preference) 루틴 제외·부상만 반영 ②코치 자동 기억 저장 제거(수동 입력만) ③볼륨 목표 부위별 차등(큰 근육 10~20 / 작은 근육 8~16, 간접자극 반영) ④RIR 밴드·⑤반복범위(메인6-10·보조8-12·고립10-20) 생성/수정대화 통일 ⑥소근육 저중량 고반복 규칙 신설 ⑦정체기 판정 무게+반복 둘 다(더블 프로그레션 오인 방지) ⑧메인 자격 데이터로 명시(mainEligible: 자유중량 대형복합+큰 하체머신). +주간리뷰 볼륨 기준 통일.
+- **근거 조사**(웹 다중소스, scratchpad research-notes.md): 부위별 볼륨(RP MEV/MRV·Pelland 2024 — 작은 근육은 큰 근육 절반), 소근육 고반복(Schoenfeld 2017·SBS = 근비대 우월 아닌 실용 권장: 승모근 개입·반동·관절 회피).
+- **구현 = Workflow 병렬**(파일별 data/domain/ai/screens 동시 편집 + 캐시/golden + 검증 4각). 인터페이스 계약(mainEligible·size) 먼저 못박아 충돌 방지. 검증이 **주간리뷰 볼륨 누락** 발견 → 수정.
+- 검증: 특성화 **48/48**, 문법 5파일 OK. **Codex 리뷰 critical 0/major 0/minor 4 전부 반영**(정체기 제목·퍼지 [메인가능] 태그·빈 노트 안내·수정대화 메인자격 계약).
+- **PR #30 → main 머지**(e5584f4), 캐시 **v29**, GitHub 연동 Vercel 자동배포.
+
+### 이전 (2026-07-05 — 세션 15: UPPER 세션 추가 + AI 루틴 규칙 근성장 전면 재설계)
 - **UPPER(상체 전체) 세션 추가**: WORKOUT에 push/pull/legs/free와 대등한 5번째 카드. 누르면 AI가 상체 전체(가슴·등·어깨·팔) 루틴 생성, 키 없으면 기본 7종목 폴백. 6파일 배선(SESSIONS·partCard·partInfo·partKeysByGroup×2·validSessions·주간집계·priority·CSS색). 자유 분할용(매주 원하는 대로 구성).
 - **AI 루틴 구성 능력 근성장 재설계** (15-에이전트 연구 워크플로 → 계획서 `docs/ai-routine-improvement-plan.md`): 규칙 블록 전면 재작성 + 결정론 로직 수정.
   - **무게 스냅**(사용자 헬스장): 덤벨 2kg·그 외(머신/케이블/바벨/스미스) 5kg 배수로 딱 떨어지게 — 추천·진행·작업무게표·워밍업·1RM목록·세트편집 수동버튼(머신±5/±10·덤벨±2/±4)·commitEdit/adjustWeight·AI응답 방어스냅까지 전 경로. `getWeightIncrement`/`snapWeightToEquipment` 신설(멱등·최소1스텝).
@@ -131,7 +138,7 @@
 - 배경 워크플로우(근성장 조사)는 사용량 한도로 21:28 종료 → 종합 결과는 journal에서 추출해 REMAKE-PLAN.md에 반영 완료(현재 도는 프로세스 없음).
 
 ## 마지막 커밋
-- `97a873c` — Merge PR #24 (묶음6-D 뒤로가기) → main, v23 운영 배포 success
-- `0604dcc` — feat: 묶음6-D 뒤로가기(getTopLayer+navBack, 트랩 1칸 방식, 탭 방문순서, 루트 종료 토스트)
+- `e5584f4` — Merge PR #30 (AI 규칙 개정 v2) → main, 캐시 v29 (Vercel 자동배포)
+- `f9d4ebe` — feat: AI 운동 규칙 개정 v2 (부위별 볼륨·메인자격·정체기·선호제거·소근육)
 
-_다음 세션 재개: **6묶음 리메이크 전부 완료**(묶음1~5 + 6-A·B·C·D, 배포 v23). 남은 것은 별도 항목 **영양 탄수/지방 undefined 버그**(DEFAULT_PROFILE에 carbTarget/fatTarget 추가)뿐 — 사용자 시작 지시 대기. 새 작업은 dev-pipeline 게이트로 진행._
+_다음 세션 재개: **AI 규칙 개정 v2 완료·배포(v29)**. 규칙은 AI 프롬프트/판정 로직이라 화면 무영향 — 실사용(폰에서 루틴 생성)으로 체감. 남은 별도 항목: **영양 탄수/지방 undefined 버그**(DEFAULT_PROFILE에 carbTarget/fatTarget 추가, 미착수). 새 작업은 dev-pipeline 게이트로 진행._

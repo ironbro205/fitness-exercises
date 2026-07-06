@@ -1,4 +1,4 @@
-// js/ai.js — Anthropic API 호출 + 프롬프트 (코치/음식/루틴/리뷰/정체기)
+// js/ai.js — Anthropic API 호출 + 프롬프트 (코치/루틴/리뷰/정체기)
 'use strict';
 
 // AI 응답에서 첫 '{'부터 짝이 맞는 '}'까지 정확히 잘라낸다 (문자열·이스케이프 고려).
@@ -19,86 +19,6 @@ function extractBalancedJson(s) {
     else if (ch === '}') { depth--; if (depth === 0) return s.slice(start, i + 1); }
   }
   return null;
-}
-
-// ═══════════════════════════════════════════════
-// Haiku API 호출 (DB 매칭 실패 시)
-// ═══════════════════════════════════════════════
-async function analyzeFoodWithAI(text) {
-  var apiKey = state.apiKey;
-  if (!apiKey) return null;
-  
-  var systemPrompt = '당신은 한국 음식 영양 분석 전문가입니다. 사용자가 입력한 음식의 단백질(g), 칼로리(kcal), 탄수화물(g), 지방(g)을 분석해 JSON으로만 응답하세요. 양이 명시되지 않으면 일반적인 1인분 기준. 한국 음식과 양 단위(인분, 그릇, 공기, 줌 등)에 익숙합니다. 응답은 반드시 다음 형식의 JSON만 포함하세요:\n{"foods": [{"name": "음식명", "amount": "양 표시(예: 100g)", "protein": 숫자, "kcal": 숫자, "carbs": 숫자, "fat": 숫자}]}\n\n여러 음식이 있으면 foods 배열에 각각 분리. 추가 설명 금지, JSON만 출력.';
-  
-  try {
-    var response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5',
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: [
-          { role: 'user', content: text }
-        ]
-      })
-    });
-    
-    if (!response.ok) {
-      var errorText = await response.text();
-      console.error('API error:', response.status, errorText);
-      return { error: 'API 오류 (' + response.status + ')', detail: errorText };
-    }
-    
-    var data = await response.json();
-    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
-      return { error: 'AI 응답이 비어있어요. 다시 시도해주세요.' };
-    }
-    var content = data.content[0].text;
-    
-    // JSON 추출 (```json 블록 제거)
-    var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    
-    var parsed;
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch (e) {
-      // JSON 추출 시도 (텍스트 중간에 JSON이 있을 경우)
-      var match = cleaned.match(/\{[\s\S]*\}/);
-      if (match) {
-        parsed = JSON.parse(match[0]);
-      } else {
-        throw e;
-      }
-    }
-    
-    if (!parsed.foods || !Array.isArray(parsed.foods)) {
-      return { error: '응답 형식 오류' };
-    }
-    
-    // 형식 정규화
-    return {
-      foods: parsed.foods.map(function(f) {
-        return {
-          name: f.name || '음식',
-          amount: f.amount || '1인분',
-          protein: Math.round((parseFloat(f.protein) || 0) * 10) / 10,
-          kcal: Math.round(parseFloat(f.kcal) || 0),
-          carbs: Math.round((parseFloat(f.carbs) || 0) * 10) / 10,
-          fat: Math.round((parseFloat(f.fat) || 0) * 10) / 10,
-          aiAnalyzed: true
-        };
-      })
-    };
-  } catch (error) {
-    console.error('AI 분석 실패:', error);
-    return { error: '네트워크 오류 또는 응답 파싱 실패: ' + error.message };
-  }
 }
 
 // AI에게 루틴 수정 요청
@@ -318,8 +238,7 @@ function buildUserContext(options) {
   var focusBodyPart = options.focusBodyPart || null;
   var profile = state.profile;
   var today = new Date();
-  var todayStr = getTodayStr();
-  
+
   // 최근 4주 운동
   var fourWeeksAgo = new Date(today);
   fourWeeksAgo.setDate(today.getDate() - 28);
@@ -342,26 +261,6 @@ function buildUserContext(options) {
   var pullCnt = recentWorkouts.filter(function(w) { return w.sessionKr === 'PULL'; }).length;
   var legsCnt = recentWorkouts.filter(function(w) { return w.sessionKr === 'LEGS'; }).length;
   var upperCnt = recentWorkouts.filter(function(w) { return w.sessionKr === 'UPPER'; }).length;
-  
-  // 오늘 영양
-  var todayMeals = state.data.nutritionLog.filter(function(m) { return m.date === todayStr; });
-  var todayProtein = todayMeals.reduce(function(s, m) { return s + (m.protein || 0); }, 0);
-  var todayKcal = todayMeals.reduce(function(s, m) { return s + (m.kcal || 0); }, 0);
-  var thresholdCnt = todayMeals.filter(function(m) { return m.thresholdPassed; }).length;
-  
-  // 최근 7일 단백질 평균
-  var sevenDaysAgo = new Date(today);
-  sevenDaysAgo.setDate(today.getDate() - 7);
-  var sevenDaysAgoStr = getDateStr(sevenDaysAgo);
-  var recentMeals = state.data.nutritionLog.filter(function(m) { return m.date >= sevenDaysAgoStr; });
-  var dailyP = {};
-  recentMeals.forEach(function(m) {
-    if (!dailyP[m.date]) dailyP[m.date] = 0;
-    dailyP[m.date] += m.protein || 0;
-  });
-  var avgP7 = Object.values(dailyP).length > 0 
-    ? Math.round(Object.values(dailyP).reduce(function(s, p) { return s + p; }, 0) / Object.values(dailyP).length) 
-    : 0;
   
   // 체중 추이
   var bodyLog = state.data.bodyLog || [];
@@ -424,17 +323,7 @@ function buildUserContext(options) {
   ctx += '- 경력: 명목상 중급, 실질 초~중급\n';
   ctx += '- 환경: 헬스장 머신/덤벨 위주, 풀업 ' + pullupRangeStr + '개 가능\n';
   ctx += '- 사이클: ' + profile.currentCycle + '차 / ' + profile.currentWeek + '주차 (' + profile.cyclePhase + ')\n';
-  ctx += '- 목표: 단백질 ' + profile.proteinTarget + 'g, 칼로리 ' + profile.calorieTarget + 'kcal/일, 주 ' + profile.workoutFreq + '회 운동\n\n';
-  
-  ctx += '## 오늘 상태 (' + todayStr + ')\n';
-  ctx += '- 단백질: ' + todayProtein + 'g / ' + profile.proteinTarget + 'g (' + thresholdCnt + '/4 끼니 임계점 통과)\n';
-  ctx += '- 칼로리: ' + todayKcal + 'kcal\n';
-  if (todayMeals.length > 0) {
-    ctx += '- 오늘 먹은 끼니: ' + todayMeals.map(function(m) { return m.mealKr + '(' + m.protein + 'g)'; }).join(', ') + '\n';
-  } else {
-    ctx += '- 아직 기록한 끼니 없음\n';
-  }
-  ctx += '\n';
+  ctx += '- 목표: 주 ' + profile.workoutFreq + '회 운동\n\n';
   
   ctx += '## 이번 주 운동\n';
   if (thisWeekWorkouts.length > 0) {
@@ -465,7 +354,6 @@ function buildUserContext(options) {
   ctx += '## 최근 4주 패턴\n';
   ctx += '- 총 ' + recentWorkouts.length + '회 운동\n';
   ctx += '- PUSH: ' + pushCnt + '회, PULL: ' + pullCnt + '회, LEGS: ' + legsCnt + '회, UPPER: ' + upperCnt + '회\n';
-  ctx += '- 단백질 7일 평균: ' + avgP7 + 'g (목표 ' + profile.proteinTarget + 'g)\n';
   if (Math.abs(parseFloat(weightChange)) > 0) {
     ctx += '- 체중 변화 (1개월): ' + (weightChange > 0 ? '+' : '') + weightChange + 'kg\n';
   }
@@ -618,21 +506,6 @@ function buildUserContext(options) {
     ctx += '\n';
   }
   
-  // 영양 × 운동 연결 분석
-  var workedOutToday = state.data.workoutLog.some(function(w) { return w.date === todayStr; });
-  if (workedOutToday) {
-    var proteinDeficit = profile.proteinTarget - todayProtein;
-    if (proteinDeficit > 30) {
-      ctx += '## ⚠️ 영양·회복 경고\n';
-      ctx += '- 오늘 운동 완료. 현재 단백질 ' + todayProtein + 'g (목표 대비 -' + proteinDeficit + 'g 부족)\n';
-      ctx += '- 회복 위해 단백질 ' + proteinDeficit + 'g 추가 섭취 권장 (운동 후 24시간 내 핵심)\n\n';
-    } else if (todayKcal < profile.calorieTarget * 0.6) {
-      ctx += '## ⚠️ 영양·회복 경고\n';
-      ctx += '- 오늘 운동 완료. 칼로리 ' + todayKcal + 'kcal (목표의 60% 미만)\n';
-      ctx += '- 큰 적자 시 근손실 위험. 추가 섭취 권장\n\n';
-    }
-  }
-  
   // 컨디션 추이 (최근 5회)
   var conditionLog = state.data.conditionLog || [];
   if (conditionLog.length > 0) {
@@ -705,29 +578,29 @@ function buildUserContext(options) {
 //  - stable: 역할·원칙·지식 베이스·답변규칙 (사용자 데이터 없음 → 호출마다 동일 → prompt caching 적중)
 //  - dynamic: 기억 노트 + 사용자 현재 데이터 (매번 바뀜 → 캐시 분기점 뒤)
 function buildCoachSystemParts() {
-  var stable = '당신은 사용자의 개인 피트니스 코치다. 운동생리학·영양학·스포츠과학의 메타분석 근거와 아래 지식 베이스에 기반해 코칭한다.\n\n' +
+  var stable = '당신은 사용자의 개인 피트니스 코치다. 운동생리학·스포츠과학의 메타분석 근거와 아래 지식 베이스에 기반해 코칭한다.\n\n' +
 
     '## 코칭 원칙\n' +
     '1. **근거 우선** — 메타분석/원리를 근거로 말한다. 확실하지 않으면 모른다고 밝히고 추측을 단정하지 않는다.\n' +
-    '2. **데이터 기반 개인화** — 내 데이터(부족/과잉 부위, 1RM, 단백질 평균 등)에 관한 질문은 그 데이터를 직접 인용한다.\n' +
+    '2. **데이터 기반 개인화** — 내 데이터(부족/과잉 부위, 1RM 등)에 관한 질문은 그 데이터를 직접 인용한다.\n' +
     '3. **사용자 환경 존중** — 머신/덤벨 중심. 프리웨이트 강요 금지.\n' +
-    '4. **점진적 과부하** — 구체적 수치 (예: 62.5 → 65kg).\n\n' +
+    '4. **점진적 과부하** — 구체적 수치 (예: 62.5 → 65kg).\n' +
+    '5. **근손실 방지 넛지** — 체지방을 빼는 시기에도 근육을 지키려면 웨이트(근력운동)를 병행하고 단백질을 충분히 확보하라고 조언할 수 있다(앱에 영양 추적 기능은 없으니 일반 텍스트 조언으로만).\n\n' +
 
     '## 🧬 지식 베이스 (이 내용을 활용해 충실히 답한다)\n' +
     COACH_KNOWLEDGE + '\n' +
 
     '## 답변 방식 (질문 유형별 — 중요)\n' +
     '사용자 메시지를 두 종류로 구분해 답한다.\n' +
-    '1. **개인 데이터 질문** (내 루틴/볼륨/무게/단백질/진도 등 "나"에 관한 것)\n' +
+    '1. **개인 데이터 질문** (내 루틴/볼륨/무게/진도 등 "나"에 관한 것)\n' +
     '   → 아래 "사용자 현재 데이터"를 직접 인용해 개인화한다. 데이터에 없는 내 수치를 지어내지 말 것.\n' +
-    '2. **일반 운동·영양 지식 질문** (종목 자세, 부상·통증, 식단 전략, 보충제, 원리 등)\n' +
+    '2. **일반 운동 지식 질문** (종목 자세, 부상·통증, 원리 등)\n' +
     '   → 위 지식 베이스와 너의 운동과학 지식으로 충실하고 구체적으로 답한다. 막연한 응원 대신 근거(메타분석/원리)를 들어 설명하고, 확실하지 않은 부분은 불확실하다고 밝힌다.\n' +
     '3. 두 종류가 섞이면 일반 지식으로 원리를 설명한 뒤 사용자 데이터로 개인화한다.\n\n' +
 
     '## 🎯 개인 데이터 인용 예시\n' +
     '- "이번 주 어깨 측면 주 2.5세트로 부족해요" (부위별 볼륨 인용)\n' +
     '- "1RM 레그프레스 240kg 기준, 작업 무게 168kg 권장" (1RM 인용)\n' +
-    '- "단백질 7일 평균 130g인데 목표 155g과 25g 차이" (영양 인용)\n' +
     '- "체스트프레스 65kg 3회 연속 같음 = 정체기, +5kg 도전" (정체기 활용)\n' +
     '※ "부위별 주간 볼륨"은 그룹 합산(가슴 = chest+chest_upper+chest_lower 등). 그대로 인용 OK.\n\n' +
 
@@ -1278,27 +1151,10 @@ function collectWeekData() {
     return d >= monday && d <= sunday;
   });
   
-  var weekMeals = state.data.nutritionLog.filter(function(m) {
-    var d = new Date(m.date);
-    return d >= monday && d <= sunday;
-  });
-  
   var weekPRs = state.data.personalRecords.filter(function(p) {
     var d = new Date(p.date);
     return d >= monday && d <= sunday;
   });
-  
-  // 일별 단백질
-  var dailyP = {};
-  weekMeals.forEach(function(m) {
-    if (!dailyP[m.date]) dailyP[m.date] = 0;
-    dailyP[m.date] += m.protein || 0;
-  });
-  var dailyProteins = Object.values(dailyP);
-  var avgProtein = dailyProteins.length > 0 
-    ? Math.round(dailyProteins.reduce(function(s, p) { return s + p; }, 0) / dailyProteins.length)
-    : 0;
-  var achievedDays = dailyProteins.filter(function(p) { return p >= state.profile.proteinTarget; }).length;
   
   // 체중 변화
   var weekBodyLogs = (state.data.bodyLog || []).filter(function(b) {
@@ -1320,9 +1176,6 @@ function collectWeekData() {
     freeCount: weekWorkouts.filter(function(w) { return w.sessionKr === 'FREE'; }).length,
     upperCount: weekWorkouts.filter(function(w) { return w.sessionKr === 'UPPER'; }).length,
     prs: weekPRs,
-    avgProtein: avgProtein,
-    achievedDays: achievedDays,
-    daysTracked: dailyProteins.length,
     weightChange: parseFloat(weightChange),
     startWeight: startWeight,
     endWeight: endWeight
@@ -1358,9 +1211,6 @@ async function generateWeeklyReview(forceRefresh) {
       weekSummary += '  · ' + dayMap[d.getDay()] + ': ' + w.sessionKr + ' (' + w.duration + '분, ' + w.sets + '세트)\n';
     });
   }
-  weekSummary += '\n### 영양\n';
-  weekSummary += '- 단백질 일평균: ' + weekData.avgProtein + 'g (목표 ' + profile.proteinTarget + 'g)\n';
-  weekSummary += '- 목표 달성일: ' + weekData.achievedDays + '/' + Math.max(1, weekData.daysTracked) + '일\n';
   weekSummary += '\n### 체중\n';
   weekSummary += '- 시작: ' + weekData.startWeight + 'kg → 종료: ' + weekData.endWeight + 'kg (' + (weekData.weightChange > 0 ? '+' : '') + weekData.weightChange + 'kg)\n';
   if (weekData.prs.length > 0) {
@@ -1430,21 +1280,20 @@ async function generateWeeklyReview(forceRefresh) {
     if (condCnt > 0) weekSummary += '- 전반 컨디션 평균: ' + (avgCond / condCnt).toFixed(1) + '/5\n';
   }
   
-  var systemPrompt = '당신은 사용자의 피트니스 코치입니다. 이번 주 운동/영양/체중 데이터를 분석해 주간 리뷰를 작성하세요. ' +
+  var systemPrompt = '당신은 사용자의 피트니스 코치입니다. 이번 주 운동/체중 데이터를 분석해 주간 리뷰를 작성하세요. ' +
     '반드시 JSON으로만 응답하세요.\n\n' +
     
     '## 🧬 평가 기준 (과학 근거)\n' +
     '- **운동 빈도**: 부위당 주 2회 자극 우월 (Schoenfeld 2016)\n' +
     '- **부위 볼륨**: 큰 근육(가슴·등·다리·둔근) 주 10~20세트 / 작은 근육(팔·어깨·종아리) 주 8~16세트 적정 (Pelland 2024, 간접세트 0.5 합산). 작은 근육은 복합운동 간접자극으로 목표가 낮다. 하한 미만 = 부족, 상한 초과 = 수확 체감\n' +
     '- **부위 균형**: PUSH/PULL/LEGS 골고루. 한 부위만 과잉 X.\n' +
-    '- **단백질**: 목표 달성률 (1.6~2.2g/kg 권장)\n' +
     '- **체중 변화**: 리컴포지션 목표 시 ±0.3kg/주 적정\n' +
     '- **PR 갱신**: 점진적 과부하 성과 지표\n\n' +
     
     '## 등급 기준\n' +
-    '- S: 운동 빈도 달성 + 부위 균형 + 단백질 90%+ + PR 갱신 있음\n' +
-    '- A: 운동 빈도 달성 + 단백질 80%+\n' +
-    '- B: 운동 빈도 70%+ 또는 단백질 70%+\n' +
+    '- S: 운동 빈도 달성 + 부위 균형 + PR 갱신 있음\n' +
+    '- A: 운동 빈도 달성 + 부위 균형\n' +
+    '- B: 운동 빈도 70%+\n' +
     '- C: 부분 달성 (40~60%)\n' +
     '- D: 거의 미실행 (40% 미만)\n\n' +
     
@@ -1460,7 +1309,7 @@ async function generateWeeklyReview(forceRefresh) {
     
     '## 사용자 프로필\n' +
     '- ' + profile.age + '세, ' + profile.height + 'cm, 목표: 린매스\n' +
-    '- 목표: 주 ' + profile.workoutFreq + '회 운동, 단백질 ' + profile.proteinTarget + 'g/일\n' +
+    '- 목표: 주 ' + profile.workoutFreq + '회 운동\n' +
     '- 사이클: ' + profile.currentCycle + '차 / ' + profile.currentWeek + '주차 (' + profile.cyclePhase + ')\n\n' +
     weekSummary;
   
@@ -1520,8 +1369,6 @@ async function generateWeeklyReview(forceRefresh) {
       coachNote: parsed.coachNote || '',
       stats: {
         workoutCount: weekData.workoutCount,
-        avgProtein: weekData.avgProtein,
-        achievedDays: weekData.achievedDays,
         weightChange: weekData.weightChange,
         prCount: weekData.prs.length
       },
@@ -1621,23 +1468,6 @@ function detectPlateauSignals() {
     signals.push('frequency_drop');
   }
 
-  // 4. 단백질 평균 부족
-  var recentMeals = state.data.nutritionLog.filter(function(m) {
-    return m.date >= oneWeekAgoStr;
-  });
-  var dailyP = {};
-  recentMeals.forEach(function(m) {
-    if (!dailyP[m.date]) dailyP[m.date] = 0;
-    dailyP[m.date] += m.protein || 0;
-  });
-  var values = Object.values(dailyP);
-  if (values.length > 0) {
-    var avg = values.reduce(function(s, p) { return s + p; }, 0) / values.length;
-    if (avg < state.profile.proteinTarget * 0.85) {
-      signals.push('protein_low');
-    }
-  }
-  
   return signals;
 }
 
@@ -1650,8 +1480,7 @@ async function analyzePlateauWithAI(signals) {
   var signalDescriptions = {
     'pr_stalled': '최근 2주간 PR 갱신 없음',
     'weight_stalled': '최근 2주간 체중 변화 0.3kg 미만',
-    'frequency_drop': '이번 주 운동 빈도가 목표보다 적음',
-    'protein_low': '최근 7일 단백질 평균이 목표 대비 85% 미만'
+    'frequency_drop': '이번 주 운동 빈도가 목표보다 적음'
   };
   
   var signalText = signals.map(function(s) { return '- ' + signalDescriptions[s]; }).join('\n');
@@ -1669,7 +1498,6 @@ async function analyzePlateauWithAI(signals) {
     '}\n\n' +
     '## 정체기 분석 원칙\n' +
     '- 점진 과부하 실패: 중량/횟수 정체 → 디로드 또는 변형 자극\n' +
-    '- 영양 부족: 단백질/칼로리 → 분배 또는 총량 조정\n' +
     '- 회복 부족: 빈도/수면 → 휴식일 늘리기\n' +
     '- 자극 적응: 같은 종목 6주 이상 → 종목 교체\n\n' +
     '## 사용자 데이터\n' + context;

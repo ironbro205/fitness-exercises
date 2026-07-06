@@ -1,4 +1,4 @@
-// js/data.js — 정적 데이터 테이블 (음식·운동·세션·부위 맵, 아이콘)
+// js/data.js — 정적 데이터 테이블 (운동·세션·부위 맵, 아이콘)
 'use strict';
 // ═══════════════════════════════════════════════
 // 기본 프로필
@@ -7,8 +7,6 @@ var DEFAULT_PROFILE = {
   age: 37,
   height: 170,
   weight: 77.5,
-  proteinTarget: 155,
-  calorieTarget: 2360,
   workoutFreq: 4,
   currentCycle: 1,
   currentWeek: 1,
@@ -60,119 +58,6 @@ var ICONS = {
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
   units: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>'
 };
-
-// ═══════════════════════════════════════════════
-// 한국 음식 영양 DB (영양_과학.md 기반)
-// ═══════════════════════════════════════════════
-// 형식: name → [단백질g, 칼로리, 탄수g, 지방g] per 100g 또는 표준량
-var FOOD_DB = {
-  // 동물성 단백질 (100g 기준)
-  '닭가슴살': { p: 23, kcal: 165, c: 0, f: 3.6, unit: 'g', defaultAmount: 100 },
-  '닭다리살': { p: 20, kcal: 170, c: 0, f: 9, unit: 'g', defaultAmount: 100 },
-  '닭갈비': { p: 20, kcal: 160, c: 5, f: 8, unit: 'g', defaultAmount: 300, presetLabel: '1인분 300g' },
-  '소고기': { p: 26, kcal: 250, c: 0, f: 15, unit: 'g', defaultAmount: 100 },
-  '돼지안심': { p: 22, kcal: 145, c: 0, f: 4, unit: 'g', defaultAmount: 100 },
-  '돼지등심': { p: 21, kcal: 240, c: 0, f: 15, unit: 'g', defaultAmount: 100 },
-  '삼겹살': { p: 18, kcal: 330, c: 0, f: 28, unit: 'g', defaultAmount: 200, presetLabel: '1인분 200g' },
-  '제육볶음': { p: 18, kcal: 220, c: 8, f: 13, unit: 'g', defaultAmount: 200 },
-  '연어': { p: 25, kcal: 208, c: 0, f: 13, unit: 'g', defaultAmount: 100 },
-  '고등어': { p: 21, kcal: 200, c: 0, f: 13, unit: 'g', defaultAmount: 100 },
-  '참치캔': { p: 25, kcal: 110, c: 0, f: 1, unit: 'g', defaultAmount: 100 },
-  '대구': { p: 18, kcal: 90, c: 0, f: 0.7, unit: 'g', defaultAmount: 100 },
-  '계란': { p: 6, kcal: 70, c: 0.4, f: 5, unit: '개', defaultAmount: 1 },
-  '달걀': { p: 6, kcal: 70, c: 0.4, f: 5, unit: '개', defaultAmount: 1 },
-  '그릭요거트': { p: 10, kcal: 60, c: 4, f: 0.5, unit: 'g', defaultAmount: 150 },
-  '우유': { p: 3.5, kcal: 50, c: 5, f: 2, unit: 'ml', defaultAmount: 200 },
-  '코티지치즈': { p: 11, kcal: 100, c: 3, f: 4, unit: 'g', defaultAmount: 100 },
-  
-  // 한국 음식 (1인분 기준)
-  '비빔밥': { p: 30, kcal: 600, c: 90, f: 12, unit: '인분', defaultAmount: 1 },
-  '김치찌개': { p: 25, kcal: 350, c: 15, f: 18, unit: '그릇', defaultAmount: 1 },
-  '된장찌개': { p: 12, kcal: 200, c: 18, f: 8, unit: '그릇', defaultAmount: 1 },
-  '부대찌개': { p: 28, kcal: 500, c: 30, f: 25, unit: '인분', defaultAmount: 1 },
-  '김밥': { p: 8, kcal: 320, c: 50, f: 8, unit: '줄', defaultAmount: 1 },
-  '회': { p: 20, kcal: 110, c: 0, f: 2, unit: 'g', defaultAmount: 200, presetLabel: '1인분 200g' },
-  '치킨': { p: 27, kcal: 290, c: 9, f: 18, unit: 'g', defaultAmount: 200 },
-  '라면': { p: 8, kcal: 500, c: 80, f: 14, unit: '개', defaultAmount: 1 },
-  
-  // 탄수화물
-  '흰밥': { p: 6, kcal: 300, c: 65, f: 0.5, unit: '공기', defaultAmount: 1 },
-  '현미밥': { p: 7, kcal: 320, c: 65, f: 2, unit: '공기', defaultAmount: 1 },
-  '잡곡밥': { p: 8, kcal: 310, c: 60, f: 2, unit: '공기', defaultAmount: 1 },
-  '바나나': { p: 1.3, kcal: 100, c: 27, f: 0.3, unit: '개', defaultAmount: 1 },
-  '고구마': { p: 1.6, kcal: 120, c: 28, f: 0.1, unit: '개', defaultAmount: 1 },
-  '오트밀': { p: 13, kcal: 380, c: 67, f: 7, unit: 'g', defaultAmount: 50 },
-  '떡': { p: 4, kcal: 220, c: 50, f: 0.5, unit: 'g', defaultAmount: 100 },
-  
-  // 견과류 & 보충제
-  '아몬드': { p: 21, kcal: 580, c: 22, f: 50, unit: 'g', defaultAmount: 20 },
-  '땅콩': { p: 25, kcal: 567, c: 16, f: 49, unit: 'g', defaultAmount: 20 },
-  '두부': { p: 8, kcal: 76, c: 2, f: 5, unit: 'g', defaultAmount: 150 },
-  '낫토': { p: 18, kcal: 200, c: 12, f: 11, unit: '팩', defaultAmount: 1 },
-  
-  // 보충제
-  '웨이프로틴': { p: 24, kcal: 120, c: 3, f: 2, unit: '스쿱', defaultAmount: 1 },
-  '카제인프로틴': { p: 24, kcal: 110, c: 3, f: 1, unit: '스쿱', defaultAmount: 1 },
-  '프로틴쉐이크': { p: 24, kcal: 130, c: 4, f: 2, unit: '스쿱', defaultAmount: 1 },
-  
-  // 김치류 (부가)
-  '김치': { p: 2, kcal: 30, c: 5, f: 0.5, unit: 'g', defaultAmount: 50 },
-  '깍두기': { p: 1, kcal: 40, c: 8, f: 0.3, unit: 'g', defaultAmount: 50 }
-};
-
-// 별칭 (사용자가 다양하게 부르는 이름)
-var FOOD_ALIASES = {
-  '치킨가슴살': '닭가슴살',
-  '닭가슴': '닭가슴살',
-  '치킨브레스트': '닭가슴살',
-  '닭다리': '닭다리살',
-  '연어회': '연어',
-  '광어': '회',
-  '회덮밥': '회',
-  '소시지': '돼지등심',
-  '안심': '돼지안심',
-  '등심': '돼지등심',
-  '돼지고기': '돼지등심',
-  '소불고기': '소고기',
-  '닭볶음탕': '닭갈비',
-  '계란후라이': '계란',
-  '계란프라이': '계란',
-  '스크램블': '계란',
-  '오믈렛': '계란',
-  '요거트': '그릭요거트',
-  '코티지': '코티지치즈',
-  '백미': '흰밥',
-  '쌀밥': '흰밥',
-  '밥': '흰밥',
-  '비빔국수': '비빔밥',
-  '김치국': '김치찌개',
-  '치킨가라아게': '치킨',
-  '후라이드치킨': '치킨',
-  '양념치킨': '치킨',
-  '프로틴': '웨이프로틴',
-  '단백질쉐이크': '웨이프로틴',
-  '쉐이크': '웨이프로틴'
-};
-
-// 양 단위 (정규식)
-var AMOUNT_PATTERNS = [
-  { regex: /(\d+\.?\d*)\s*g/, unit: 'g', multiplier: 1 },
-  { regex: /(\d+\.?\d*)\s*ml/, unit: 'ml', multiplier: 1 },
-  { regex: /(\d+)\s*개/, unit: '개', multiplier: 1 },
-  { regex: /(\d+\.?\d*)\s*인분/, unit: '인분', multiplier: 1 },
-  { regex: /(\d+\.?\d*)\s*그릇/, unit: '그릇', multiplier: 1 },
-  { regex: /(\d+\.?\d*)\s*공기/, unit: '공기', multiplier: 1 },
-  { regex: /(\d+)\s*줄/, unit: '줄', multiplier: 1 },
-  { regex: /(\d+\.?\d*)\s*스쿱/, unit: '스쿱', multiplier: 1 },
-  { regex: /(\d+)\s*팩/, unit: '팩', multiplier: 1 },
-  { regex: /반\s*공기/, unit: '공기', multiplier: 0.5, fixed: true },
-  { regex: /반\s*인분/, unit: '인분', multiplier: 0.5, fixed: true },
-  { regex: /반\s*그릇/, unit: '그릇', multiplier: 0.5, fixed: true },
-  { regex: /한\s*공기/, unit: '공기', multiplier: 1, fixed: true },
-  { regex: /두\s*공기/, unit: '공기', multiplier: 2, fixed: true },
-  { regex: /한\s*인분/, unit: '인분', multiplier: 1, fixed: true },
-  { regex: /한\s*줌/, unit: 'g', multiplier: 20, fixed: true }
-];
 
 // 세션별 데이터
 // ═══════════════════════════════════════════════
@@ -520,7 +405,7 @@ var BODY_PART_KR = {
 // 코치 지식 베이스 (근비대·운동과학 근거 기반)
 //  - 코치 시스템 프롬프트의 고정 블록(prompt caching 대상)에 주입된다.
 //  - 모든 핵심 수치는 메타분석/포지션스탠드 근거. 새 항목 추가 시 출처를 함께 적을 것.
-//  - 사용자 개인 데이터(무게/볼륨/단백질 등)는 여기 넣지 말 것 — 그건 가변 컨텍스트에서 주입됨.
+//  - 사용자 개인 데이터(무게/볼륨 등)는 여기 넣지 말 것 — 그건 가변 컨텍스트에서 주입됨.
 // ═══════════════════════════════════════════════
 var COACH_KNOWLEDGE =
   '### 1. 트레이닝 핵심 원리\n' +
@@ -552,27 +437,10 @@ var COACH_KNOWLEDGE =
   '- 손목/팔꿈치: 그립·각도(EZ바/뉴트럴) 변경으로 완화되는 경우 많음.\n' +
   '- 2주 이상 지속·악화되거나 일상에 지장을 주면 의료/물리치료 전문가 상담 권유. 코치는 진단을 대신하지 않음.\n\n' +
 
-  '### 4. 영양 — 단백질·칼로리·타이밍\n' +
-  '- 단백질 총량: 1.6~2.2 g/kg/일. 약 1.6g 이후 추가 이득은 평탄해짐 (Morton 2018 메타). 컷(감량) 중에는 상단(~2.2g+)이 제지방 보존에 유리.\n' +
-  '- 분배: 끼니당 약 0.4 g/kg(보통 30~40g), 3~4시간 간격으로 3~4끼. 총량만큼 분배도 중요.\n' +
-  '- 로이신 임계점: 끼니당 류신 약 2.5g(양질 동물성 단백질 25g 내외)이면 근단백합성(MPS) 충분히 자극.\n' +
-  '- 칼로리: 증량은 소폭 잉여, 감량은 소폭 적자(아래 5절). 단백질·탄수·지방 분배는 총칼로리 다음 순위.\n' +
-  '- 타이밍: 24시간 총량/분배가 핵심. 운동 직후 30분 골든타임은 과장 (ISSN 2017). 운동 전후 몇 시간 내 단백질을 포함하면 충분.\n' +
-  '- 취침 전: 카제인 등 25~40g이 야간 MPS를 높임 (Trommelen 2016).\n' +
-  '- 수분/탈수는 수행과 회복을 떨어뜨림. 충분한 수분·전해질 유지.\n\n' +
-
-  '### 5. 다이어트 전략 — 벌크/컷/리컴프/리피드\n' +
-  '- 린벌크(증량): TDEE +10~20%(약 +200~500 kcal/일), 주당 체중 +0.25~0.5%. 큰 잉여는 근육보다 지방을 더 늘림 (검증: 다중 자료 합의).\n' +
-  '- 컷(감량): -300~500 kcal/일 또는 주당 체중 -0.5~1.0%. 단백질 상단 유지·근력 트레이닝 유지가 근손실 방지의 핵심 (Helms).\n' +
-  '- 리컴프(체지방↓+근육↑ 동시): 초보/복귀자/고체지방에서 잘 일어남. 유지~소폭 적자 칼로리 + 고단백 + 점진적 과부하.\n' +
-  '- 리피드/다이어트 브레이크: 장기 감량 중 유지 칼로리(주로 탄수)로 며칠~2주 복귀하면 대사적응 완화·제지방 보존·수행 회복에 도움 (MATADOR/Peos 등). 간헐적 칼로리제한이 연속 제한과 같거나 유리.\n' +
-  '- 큰 적자(-500kcal 초과 지속)는 근손실·수행 저하 위험. 천천히가 결국 빠름.\n\n' +
-
   '### 6. 보충제 (근거 등급순)\n' +
   '- 크레아틴 모노하이드레이트: 가장 입증된 근력·근비대 보조. 매일 3~5g, 로딩 불필요(꾸준함이 핵심). 안전 (ISSN).\n' +
   '- 카페인: 운동 약 60분 전 3~6 mg/kg으로 근력·파워·근지구력 소폭 향상. 약 2mg/kg부터 효과 가능, 9mg/kg 이상은 부작용↑·추가 이득 없음 (ISSN 2021, Guest).\n' +
-  '- 단백질 파우더: 보충제라기보다 편의 식품. 총 단백질 목표를 채우는 수단.\n' +
-  '- 그 외(시트룰린·베타알라닌 등)는 효과가 작거나 상황 한정. 크레아틴·카페인·충분한 단백질이 우선.\n\n' +
+  '- 그 외(시트룰린·베타알라닌 등)는 효과가 작거나 상황 한정. 크레아틴·카페인이 우선.\n\n' +
 
   '### 7. 회복 — 수면·디로드·부위 회복\n' +
   '- 수면 7~9시간. 4~6시간으로 줄면 MPS·테스토스테론↓, 회복·수행 저하.\n' +
