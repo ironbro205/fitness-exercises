@@ -159,16 +159,17 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
     '4. **확실한 요청 시만 updatedRoutine 생성**\n' +
     '5. **종목별 자동 분석 활용**: 한 부위 4개 이상 = 과잉 / 동일 부위·각도 중복 금지\n' +
     '   - **같은 주 중복 회피**: 컨텍스트 "이번 주 이미 수행한 종목"에 있는 종목은 가능하면 추가하지 말고 다른 종목/각도로 새 자극을 준다 (부족 부위·점진적 과부하 우선).\n' +
+    '   - **메인 자격 (루틴 생성 규칙과 동일 기준)**: isMain:true(메인 복합)은 종목 풀에 [메인가능]으로 표시된 것 = 자유중량 대형 복합(바벨·덤벨·스미스)과 큰 하체 머신(레그프레스·핵스쿼트)만 해당한다. 머신·케이블 복합·고립은 절대 isMain:true로 두지 말 것(보조).\n' +
     '6. **무게 — 점진적 과부하 우선**\n' +
     '   - "최근 종목별 실제 수행" 표에 데이터 있으면 그 무게 기준 더블 프로그레션 (상단 횟수 2세션 연속 달성 시 +한 칸[덤벨 2kg·그 외 5kg], 미달 시 동일)\n' +
     '   - 사용자가 무게를 낮춘 적이 있으면 그 낮춘 무게가 새 기준선 (1RM 표 무시)\n' +
     '   - 실제 수행 기록 없는 신규 종목만 1RM 추정 사용 (메인 70~80%, 보조 65~75%, 고립 60~70%)\n' +
     '   - 장비 단위로 반올림 (덤벨 2kg·그 외 5kg 배수)\n' +
-    '7. **횟수 (type별 필수 가이드)**:\n' +
-    '   - 메인 복합 (isMain:true): "5-8" 또는 "6-8"\n' +
-    '   - 보조 복합 (compound, isMain:false): "8-10" 또는 "8-12"\n' +
-    '   - 고립 일반: "10-15"\n' +
-    '   - 소근육 고립 (사이드/리어 레터럴 레이즈, 페이스 풀, 푸시다운, 컬류, 카프 레이즈, 힙 어덕션 등): "12-20"\n' +
+    '7. **횟수 (type별 필수 가이드 — 루틴 생성 규칙과 동일)**:\n' +
+    '   - 메인 복합 (isMain:true): "6-10"\n' +
+    '   - 보조 복합 (compound, isMain:false): "8-12"\n' +
+    '   - 고립 일반: "10-20"\n' +
+    '   - 소근육 고립 (사이드/리어 레터럴 레이즈, 페이스 풀, 푸시다운, 컬류, 카프 레이즈, 힙 어덕션 등): "12-25" (중간~가벼운 무게로 반동 없이 실패 2~3회 전까지)\n' +
     '   ※ 가벼운 무게 다회수 운동을 무겁게 적은 횟수로 추천하지 말 것\n\n' +
     
     '## ❌ 절대 금지\n' +
@@ -191,7 +192,7 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
     '  "changes": [{"type": "add|remove|replace|modify", "exercise": "종목명", "detail": "변경 내용"}],\n' +
     '  "updatedRoutine": {\n' +
     '    "headline": "한 줄", "duration": 60, "totalSets": 18, "intensity": "moderate",\n' +
-    '    "exercises": [{"name":"종목","type":"복합|고립|보조","isMain":bool,"sets":3,"reps":"8-10","weight":150,"rir":2,"note":"이유"}]\n' +
+    '    "exercises": [{"name":"종목","type":"복합|고립|보조","isMain":bool,"sets":3,"reps":"8-10","weight":150,"rir":"2-3","note":"이유"}]\n' +
     '  }\n' +
     '}\n\n' +
     
@@ -398,12 +399,21 @@ function buildUserContext(options) {
     });
   });
   
-  // 정체기 감지: 최근 3회 같은 무게 시 표시
+  // 정체기 감지: 최근 3회 무게 동일 AND 본세트 최고 반복도 안 늚 → plateau
+  //   (무게가 같아도 반복이 오르는 중이면 더블 프로그레션 정상 진행이므로 plateau=false)
   Object.keys(recentLifts).forEach(function(name) {
-    var hist = recentLifts[name].history.slice(0, 3);
-    if (hist.length >= 3 && hist[0].weight === hist[1].weight && hist[1].weight === hist[2].weight) {
-      recentLifts[name].plateau = true;
+    var hist = recentLifts[name].history.slice(0, 3);  // [0]=최근, [2]=3회 전
+    if (hist.length < 3) return;
+    var weightSame = hist[0].weight === hist[1].weight && hist[1].weight === hist[2].weight;
+    if (!weightSame) return;
+    function maxReps(h) {
+      return (h.reps && h.reps.length) ? Math.max.apply(null, h.reps) : null;
     }
+    var repsNew = maxReps(hist[0]);  // 최근 세션 본세트 최고 반복
+    var repsOld = maxReps(hist[2]);  // 3회 전 세션
+    // 반복이 오르는 중(최근 > 3회 전)이면 정체 아님. 반복 데이터가 없으면 무게 기준만으로 정체 처리(보수적).
+    var repsRising = (repsNew !== null && repsOld !== null && repsNew > repsOld);
+    if (!repsRising) recentLifts[name].plateau = true;
   });
   
   // 컨텍스트 문자열 구성
@@ -469,7 +479,7 @@ function buildUserContext(options) {
     var groupedVol = groupVolumeBy(volumeByPart);
     
     ctx += '## 부위별 주간 볼륨 분석 (최근 2주 평균, 세트/주, 그룹 합산)\n';
-    ctx += '※ Pelland 2024: 부위당 주 10~24세트 적정(20+는 수확 체감) / 4 미만 부족 / 24 초과 과다. 간접(보조근) 세트는 0.5로 합산\n';
+    ctx += '※ 큰 근육(가슴·등·대퇴사두·햄스트링·둔근) 주 10~20세트 / 작은 근육(어깨·이두·삼두·종아리·복근) 주 8~16세트가 적정(작은 근육은 복합운동 간접자극을 받아 목표가 낮다). 큰 근육 20+·작은 근육 16+는 수확 체감. 간접(보조근) 세트는 0.5로 합산\n';
     ctx += '※ 가슴 = chest+chest_upper+chest_lower 합산. 어깨 측면/전면/후면 별도. 등 중부 = upper_back+traps.\n';
     
     // 그룹 단위로 표시 (가슴 합산)
@@ -477,7 +487,10 @@ function buildUserContext(options) {
     Object.keys(BODY_PART_GROUPS).forEach(function(g) {
       var vol = (groupedVol[g] || 0) / 2;
       if (vol > 0) {
-        var status = vol < 4 ? '🔴' : (vol < 10 ? '🟡' : (vol <= 24 ? '🟢' : '🔥'));
+        var isSmall = (BODY_PART_GROUPS[g] && BODY_PART_GROUPS[g].size === 'small');
+        var status = isSmall
+          ? (vol < 3 ? '🔴' : (vol < 8 ? '🟡' : (vol <= 16 ? '🟢' : '🔥')))
+          : (vol < 4 ? '🔴' : (vol < 10 ? '🟡' : (vol <= 20 ? '🟢' : '🔥')));
         partVolStrs.push(status + ' ' + BODY_PART_GROUPS[g].kr + ' ' + vol.toFixed(1));
       }
     });
@@ -485,16 +498,17 @@ function buildUserContext(options) {
       ctx += partVolStrs.join(' / ') + '\n';
     }
     
-    // 폐루프: 목표(주 12세트)까지 남은 직접 세트를 함께 제시 → AI가 이번 세션 크기를 격차에 맞춤
-    function volNeedNote(v) {
-      var need = 12 - v;
-      return need > 0 ? (' — 목표 12세트까지 ' + (Math.round(need * 10) / 10) + '세트 더') : '';
+    // 폐루프: 부위별 목표(큰 근육 12 / 작은 근육 8, domain diagnosis의 item.target)까지 남은 직접 세트를 함께 제시 → AI가 이번 세션 크기를 격차에 맞춤
+    function volNeedNote(v, target) {
+      target = target || 12;
+      var need = target - v;
+      return need > 0 ? (' — 목표 ' + target + '세트까지 ' + (Math.round(need * 10) / 10) + '세트 더') : '';
     }
     if (diagnosis.lacking.length > 0) {
-      ctx += '⚠️ **부족 부위 (최우선 보충, 주 4세트 미만)**:\n';
+      ctx += '⚠️ **부족 부위 (최우선 보충)**:\n';
       diagnosis.lacking.forEach(function(item) {
         var recs = WEAK_PART_EXERCISE_MAP[item.group] || [];
-        ctx += '- ' + item.label + volNeedNote(item.vol);
+        ctx += '- ' + item.label + volNeedNote(item.vol, item.target);
         if (recs.length > 0) {
           ctx += ' → 권장 종목: ' + recs.slice(0, 3).join(', ');
         }
@@ -502,9 +516,9 @@ function buildUserContext(options) {
       });
     }
     if (diagnosis.belowOptimal && diagnosis.belowOptimal.length > 0) {
-      ctx += '🟡 **최적 하한 미달 (여유 있으면 보충, 4~10세트)**:\n';
+      ctx += '🟡 **최적 하한 미달 (여유 있으면 보충)**:\n';
       diagnosis.belowOptimal.forEach(function(item) {
-        ctx += '- ' + item.label + volNeedNote(item.vol) + '\n';
+        ctx += '- ' + item.label + volNeedNote(item.vol, item.target) + '\n';
       });
     }
     if (diagnosis.untouched && diagnosis.untouched.length > 0) {
@@ -536,7 +550,7 @@ function buildUserContext(options) {
     });
     
     if (plateauList.length > 0) {
-      ctx += '## 🔥 정체기 감지 (3회 이상 같은 무게)\n';
+      ctx += '## 🔥 정체기 감지 (최근 3회 무게 동일 + 최고 반복도 비상승 — 반복이 오르는 중이면 정상 진행이라 제외)\n';
       ctx += '- ' + plateauList.join(', ') + '\n';
       ctx += '- 권장: +한 칸(덤벨 2kg·그 외 5kg) 도전 또는 종목 변경 / 더블 프로그레션 적용\n\n';
     }
@@ -721,13 +735,7 @@ function buildCoachSystemParts() {
     '- **길이**: 단순 질문은 2~4문장. 자세·부상·식단 전략처럼 설명이 필요한 질문은 필요한 만큼 충분히(소제목·목록 사용 가능). 묻지 않은 것까지 늘어놓지 말 것.\n' +
     '- **구체**: "더 무겁게" X → "65 → 67.5kg" O.\n' +
     '- **친근하면서 전문적**: 코치다운 자신감. 한국어로 답한다.\n' +
-    '- 강조는 **굵게**, 운동명은 `백틱`.\n\n' +
-
-    '## 기억 규칙\n' +
-    '대화에서 앞으로도 기억할 가치가 있는 새 정보(부상·제약, 선호, 목표, 일정)를 알게 되면, ' +
-    '응답 맨 끝에 아래 형식의 숨김 블록을 덧붙여라(사용자에겐 표시되지 않음). 새 정보가 없으면 블록을 생략한다.\n' +
-    '```memory\n[{"category":"injury|preference|goal|schedule|other","text":"한 줄 요약"}]\n```\n' +
-    '기억 노트에 이미 있는 내용은 다시 쓰지 마라. 임시적인 잡담은 기억하지 마라.';
+    '- 강조는 **굵게**, 운동명은 `백틱`.';
 
   var dynamic = '## 📌 기억 노트 (이 사용자에 대해 장기 기억 — 부상·선호·목표·일정)\n' +
     formatCoachMemoryForPrompt(state.coachMemory) + '\n\n' +
@@ -972,6 +980,7 @@ async function generateFullRoutine(bodyPart) {
       var tags = [];
       if (info.compound) tags.push('복합');
       else tags.push('고립');
+      if (info.mainEligible === true) tags.push('메인가능');
       if (info.stretched) tags.push('신장강조');
       if (info.angle) tags.push(info.angle);
       
@@ -1002,6 +1011,7 @@ async function generateFullRoutine(bodyPart) {
       var tags = ['사용자종목'];
       if (info.compound) tags.push('복합');
       else tags.push('고립');
+      if (info.mainEligible === true) tags.push('메인가능');
       byPart[partKr].push(name + ' [' + tags.join('/') + ', 1RM ' + Math.round(oneRMData[name]) + 'kg]');
       addedNames[name] = true;
     });
@@ -1013,6 +1023,9 @@ async function generateFullRoutine(bodyPart) {
     return lines.join('\n');
   }
   
+  // 부상·제약(injury)만 안전 반영 — 선호/목표/일정은 루틴 생성에서 제외
+  var injuryMemory = (state.coachMemory || []).filter(function(m) { return m.category === 'injury'; });
+
   var systemPrompt = '당신은 과학적 근거 기반 피트니스 코치다. ' +
     info.name + ' (' + info.kor + ') 루틴 5~7개 종목 생성. JSON으로만 응답.\n' +
     
@@ -1020,7 +1033,7 @@ async function generateFullRoutine(bodyPart) {
     '📋 [데이터] 사용자 컨텍스트\n' +
     '═════════════════════════════════════\n' +
     context + '\n' +
-    (state.coachMemory && state.coachMemory.length ? ('## 🩹 부상·제약·선호 (안전 최우선 — 종목 선택 시 반드시 반영)\n' + formatCoachMemoryForPrompt(state.coachMemory) + '\n\n') : '') +
+    (injuryMemory.length ? ('## 🩹 부상·제약 (안전 최우선 — 종목 선택 시 반드시 반영)\n' + formatCoachMemoryForPrompt(injuryMemory) + '\n\n') : '') +
 
     '═════════════════════════════════════\n' +
     '🏋️ [데이터] ' + info.name + ' 사용 가능 종목 풀\n' +
@@ -1033,15 +1046,15 @@ async function generateFullRoutine(bodyPart) {
     
     `## 핵심 원칙 (사용자 데이터 + 근비대 근거)
 
-**1. 안전 최우선 — 부상·제약·선호 회피 (다른 모든 규칙보다 우선)**
-- 컨텍스트에 부상·제약·선호(코치 기억) 정보가 있으면: 그 부위·동작에 통증을 주는 종목은 통증 없는 대체 종목으로 바꾼다(예: 어깨 통증 → 통증 나는 프레스 각도 대신 중립 그립·부분 가동범위, 허리 통증 → 척추 부담 큰 종목 대신 지지형 종목). 사용자가 싫다고 한 종목은 넣지 않는다.
+**1. 안전 최우선 — 부상·제약 회피 (다른 모든 규칙보다 우선)**
+- 컨텍스트에 부상·제약(코치 기억) 정보가 있으면: 그 부위·동작에 통증을 주는 종목은 통증 없는 대체 종목으로 바꾼다(예: 어깨 통증 → 통증 나는 프레스 각도 대신 중립 그립·부분 가동범위, 허리 통증 → 척추 부담 큰 종목 대신 지지형 종목).
 - 우선순위: 통증 회피 > 부족 부위 보충 > 종목 최적화. 애매하면 안전한 쪽으로.
 
 **2. 부족 부위 우선 + 주간 볼륨 폐루프 (세트 수를 격차에 맞춤)**
 - 컨텍스트 "부족 부위(최우선 보충)"와 "🟡 최적 하한 미달"에 나온 부위를 이번 루틴에 우선 포함한다.
-- 각 항목 옆의 "목표 12세트까지 N세트 더"를 읽고, 이번 세션의 그 부위 세트 수를 그 격차에 맞춰 정한다(많이 부족할수록 세트를 더, 거의 찼으면 적게).
+- 각 항목 옆의 "목표 N세트까지 N세트 더"를 읽고, 이번 세션의 그 부위 세트 수를 그 격차에 맞춰 정한다(많이 부족할수록 세트를 더, 거의 찼으면 적게). 주간 목표는 부위 크기별로 다르다 — 큰 근육(가슴·등·대퇴사두·햄스트링·둔근) 약 12세트, 작은 근육(어깨·이두·삼두·종아리·복근) 약 8세트(복합운동 간접자극을 받아 목표가 낮다).
 - 세션당 한 부위 직접 세트는 약 8세트 이하로 둔다(소프트 상한 — 정밀 근거는 아직 약함). 격차가 커서 한 세션에 다 못 넣으면 초과분은 그 주 두 번째 세션으로 분할한다.
-- 컨텍스트 "🔥 수확 체감 구간(주 24세트+)"으로 표시된 부위는 더 늘리지 않는다. 단 24는 절대 상한이 아니라 수확 체감 지점이다(넘어도 성장이 멈추는 건 아님) — "금지선"처럼 단정하지 말 것.
+- 컨텍스트 "🔥 수확 체감 구간"으로 표시된 부위는 더 늘리지 않는다. 단 이는 절대 상한이 아니라 수확 체감 지점이다(큰 근육 20+·작은 근육 16+, 넘어도 성장이 멈추는 건 아님) — "금지선"처럼 단정하지 말 것.
 
 **3. 다양성 (같은 주 중복 회피)**
 - 컨텍스트 "이번 주 이미 수행한 종목"에 있는 종목은 이번 루틴에 다시 넣지 않는다 — 같은 부위라도 다른 종목·각도로 새 자극을 준다. "최근 종목별 실제 수행"과도 가능하면 안 겹치게. (단, 부족 부위 보충·점진적 과부하가 우선)
@@ -1049,6 +1062,7 @@ async function generateFullRoutine(bodyPart) {
 **4. 종목 수·구성**
 - 부위별 1~3개(4개 이상 = 과잉), 동일 부위·동일 각도 중복 금지.
 - 메인 복합 1~2개(isMain: true, type "복합")로 시작한다.
+- isMain: true는 종목 풀에 **[메인가능]**으로 표시된 종목만 가능하다(자유중량 대형 복합 + 큰 하체 머신 = 레그프레스·핵스쿼트). 머신·케이블 복합(체스트 프레스·펙덱·시티드 로우·랫풀다운 등)과 고립은 메인이 될 수 없다(isMain:false, 보조).
 
 **5. 모든 세트 RIR 밴드 명시 (평상시·도전 모드 전부 포함)**
 - RIR = 그 세트에서 힘이 다 빠지기 전 남긴 반복 수(0 = 완전 실패).
@@ -1059,8 +1073,14 @@ async function generateFullRoutine(bodyPart) {
 **6. 반복 범위 (근비대 중심)**
 - 메인 복합: 6~10
 - 보조 복합: 8~12
-- 고립: 10~20 (사이드/리어 레터럴 레이즈, 페이스풀, 푸시다운, 컬, 카프 레이즈 등 소근육은 12~20)
+- 고립: 10~20 (사이드/리어 레터럴 레이즈, 페이스풀, 푸시다운, 컬, 카프 레이즈 등 소근육 고립은 12~25 — 아래 6-1)
 - 근력 편향 5~8은 쓰지 않는다.
+
+**6-1. 소근육 고립 = 고반복 통제 (실용 권장)**
+- 측면·후면 어깨, 종아리, 이두 등 **소근육 고립**은 중간~가벼운 무게로 **12~25회**, 반동 없이 통제해서 실패 2~3회 전까지 수행한다.
+- 이유: 근비대는 반복수와 거의 무관하지만, 소근육 고립을 무겁게 실으면 관절·힘줄 부담·승모근 개입·반동으로 타깃 자극이 줄고 부상 위험이 커지므로, 실용적으로 고반복을 기본값으로 둔다("저중량 고반복이 근비대에 더 우월"이라서가 아니다).
+- 너무 가볍게(약 30회 초과) 가지 말 것 — 가벼운 세트일수록 반드시 실패 근처까지 민다.
+- 이 규칙은 소근육 고립에만 적용한다. 복합운동(스쿼트·벤치 등)엔 적용하지 않는다.
 
 **7. 무게 — 더블 프로그레션 + 실제 수행 우선**
 - "최근 종목별 실제 수행" 표가 있으면 그 무게가 시작점이다(1RM 표보다 우선). 사용자가 낮춘 무게가 있으면 그 낮춘 값을 새 기준선으로 쓴다.
@@ -1101,18 +1121,18 @@ async function generateFullRoutine(bodyPart) {
 - 이 감량은 "성장 부스터"가 아니라 누적 피로·관절·부상 회복용이다(디로드가 근성장을 더 늘린다는 직접 근거는 약함). caution에 "회복·부상 예방용 주간"이라고 적는다.
 
 ## 🧬 과학 근거 (요지)
-- 주간 볼륨이 근비대 1순위 동력, 부위당 주 10~20세트가 실용 최적(Pelland 2024; Baz-Valle 2022) — 20+는 수확 체감이지 금지선이 아니다.
+- 주간 볼륨이 근비대 1순위 동력, 부위당 주 10~20세트가 실용 최적(Pelland 2024; Baz-Valle 2022) — 20+는 수확 체감이지 금지선이 아니다. 작은 근육(어깨·이두·삼두·종아리)은 복합운동 간접자극을 받아 목표가 약 절반(주 8~16세트)으로 낮다.
 - 실패 근접도(RIR)가 근비대에 유의미하나 완전 실패까진 불필요, 6~12회가 효율 스윗스팟이며 5~30회 모두 유효(Refalo 2023; Schoenfeld·Grgic 2021).
 - 머신 = 프리웨이트 동등(Schwanbeck). 신장 강조 소폭 우위(Maeo 2021·2023, 효과는 작고 논쟁적). 종목 순서는 근비대에 사실상 무관(Nunes 2021).
 - 휴식: 복합 2~3분, 고립 1~2분(휴식이 짧으면 다음 세트 볼륨이 깎인다).
 
 ## ❌ 절대 금지
 - 풀에 없는 종목 사용 금지(반드시 위 "사용 가능 종목 풀"에서만 고른다).
-- 부상·제약 부위에 통증 주는 종목, 사용자가 싫다고 한 종목 사용 금지.
+- 부상·제약 부위에 통증 주는 종목 사용 금지.
 - 한 부위 4개 이상 / 동일 부위·각도 중복 / 메인 0개.
 - 실행 불가능한 무게(장비 단위 안 맞는 .5kg 등) 출력 금지.
 - 부족 부위 무시 금지.
-- RIR·주 24세트·세션당 8세트를 "탈락 게이트"처럼 단정하지 말 것 — 전부 소프트 기준이다.
+- RIR·주간 볼륨 상한(큰 근육 20·작은 근육 16)·세션당 8세트를 "탈락 게이트"처럼 단정하지 말 것 — 전부 소프트 기준이다.
 
 ## 응답 형식 (JSON만)
 {
@@ -1127,10 +1147,11 @@ async function generateFullRoutine(bodyPart) {
 - duration은 추정치일 뿐 상한이 없다(시간 제한 없음 — 슈퍼셋을 강제하지 말 것).
 
 ## 응답 전 체크
-☐ 부상·제약·싫은 종목을 회피했나?
-☐ 부족 부위를 포함하고 세트 수를 "N세트 더" 격차에 맞췄나?
-☐ 모든 종목에 reps(6~10 / 8~12 / 10~20)·rir 밴드·rest를 넣었나?
+☐ 부상·제약 부위에 통증 주는 종목을 회피했나?
+☐ 부족 부위를 포함하고 세트 수를 "N세트 더" 격차(큰 근육 12·작은 근육 8 목표)에 맞췄나?
+☐ 모든 종목에 reps(메인 6~10 / 보조 8~12 / 고립 10~20 · 소근육 고립 12~25)·rir 밴드·rest를 넣었나?
 ☐ 모든 weight가 장비 단위(덤벨 2kg·그 외 5kg)로 딱 떨어지나?
+☐ isMain:true가 [메인가능] 종목인가? (머신·케이블 복합·고립은 메인 불가)
 ☐ 팔·측면/후면 어깨·종아리가 있으면 직접 고립을 넣었나? (어깨 세션 = 리어델트 필수)
 ☐ 신장 강조 1개+? 메인 1~2개? 한 부위 4개 미만?
 ☐ 풀에 없는 종목은 없나?
@@ -1383,7 +1404,12 @@ async function generateWeeklyReview(forceRefresh) {
     var groupKeys = Object.keys(weekGrouped).sort(function(a, b) { return weekGrouped[b] - weekGrouped[a]; });
     groupKeys.forEach(function(g) {
       var vol = weekGrouped[g];
-      var status = vol < 4 ? '🔴 부족' : (vol < 10 ? '🟡 MEV' : (vol <= 24 ? '🟢 적정' : '🔥 과잉'));
+      // 부위 크기별 임계 (큰 근육 10~20 / 작은 근육 8~16) — buildUserContext와 동일 기준
+      var isSmallG = BODY_PART_GROUPS[g] && BODY_PART_GROUPS[g].size === 'small';
+      var loV = isSmallG ? 3 : 4;
+      var mevV = isSmallG ? 8 : 10;
+      var optV = isSmallG ? 16 : 20;
+      var status = vol < loV ? '🔴 부족' : (vol < mevV ? '🟡 MEV' : (vol <= optV ? '🟢 적정' : '🔥 과잉'));
       weekSummary += '- ' + BODY_PART_GROUPS[g].kr + ': ' + vol.toFixed(1) + '세트 (' + status + ')\n';
     });
   }
@@ -1409,7 +1435,7 @@ async function generateWeeklyReview(forceRefresh) {
     
     '## 🧬 평가 기준 (과학 근거)\n' +
     '- **운동 빈도**: 부위당 주 2회 자극 우월 (Schoenfeld 2016)\n' +
-    '- **부위 볼륨**: 주 10~24세트 적정 (Pelland 2024, 간접세트 0.5 합산). 4세트 미만 = 부족, 24 초과 = 수확 체감(과다)\n' +
+    '- **부위 볼륨**: 큰 근육(가슴·등·다리·둔근) 주 10~20세트 / 작은 근육(팔·어깨·종아리) 주 8~16세트 적정 (Pelland 2024, 간접세트 0.5 합산). 작은 근육은 복합운동 간접자극으로 목표가 낮다. 하한 미만 = 부족, 상한 초과 = 수확 체감\n' +
     '- **부위 균형**: PUSH/PULL/LEGS 골고루. 한 부위만 과잉 X.\n' +
     '- **단백질**: 목표 달성률 (1.6~2.2g/kg 권장)\n' +
     '- **체중 변화**: 리컴포지션 목표 시 ±0.3kg/주 적정\n' +
