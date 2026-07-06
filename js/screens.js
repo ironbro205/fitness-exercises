@@ -3518,14 +3518,14 @@ function renderWeeklyReviewDetail() {
   }
   
   // 등급 색상
-  var gradeColors = { 'S': 'var(--accent)', 'A': 'var(--accent)', 'B': '#a78bfa', 'C': '#fbbf24', 'D': '#ef4444' };
+  var gradeColors = { 'S': '#F68460', 'A': '#F68460', 'B': '#a78bfa', 'C': '#fbbf24', 'D': '#ef4444' };
   var gradeColor = gradeColors[review.grade] || '#a78bfa';
   
   // 잘한 점
   var winsHtml = review.wins.map(function(w) {
     return '<div class="review-bullet">' +
       '<div class="review-bullet-dot" style="background: var(--accent);"></div>' +
-      '<p>' + w + '</p>' +
+      '<p>' + escapeHtml(w) + '</p>' +
     '</div>';
   }).join('');
   
@@ -3533,7 +3533,7 @@ function renderWeeklyReviewDetail() {
   var improvementsHtml = review.improvements.map(function(i) {
     return '<div class="review-bullet">' +
       '<div class="review-bullet-dot" style="background: #fbbf24;"></div>' +
-      '<p>' + i + '</p>' +
+      '<p>' + escapeHtml(i) + '</p>' +
     '</div>';
   }).join('');
   
@@ -3541,7 +3541,7 @@ function renderWeeklyReviewDetail() {
   var nextWeekHtml = review.nextWeek.map(function(n) {
     return '<div class="review-bullet">' +
       '<div class="review-bullet-dot" style="background: var(--accent);"></div>' +
-      '<p>' + n + '</p>' +
+      '<p>' + escapeHtml(n) + '</p>' +
     '</div>';
   }).join('');
   
@@ -3565,7 +3565,7 @@ function renderWeeklyReviewDetail() {
         '<div class="text-center mb-6">' +
           '<div style="display: inline-block; font-family: var(--font); font-weight: 800; font-size: 80px; line-height: 1; color: ' + gradeColor + '; text-shadow: 0 0 30px ' + gradeColor + '40;">' + review.grade + '</div>' +
           '<p class="text-xs font-mono text-stone-500 uppercase tracking-widest mt-1 mb-3">이번 주 평가</p>' +
-          '<p class="text-base font-display font-bold leading-relaxed">' + review.headline + '</p>' +
+          '<p class="text-base font-display font-bold leading-relaxed">' + escapeHtml(review.headline) + '</p>' +
         '</div>' +
         
         // 통계 요약
@@ -3673,7 +3673,7 @@ function renderPlateauDetail() {
   var recsHtml = p.recommendations.map(function(r) {
     return '<div class="review-bullet">' +
       '<div class="review-bullet-dot" style="background: var(--accent);"></div>' +
-      '<p>' + r + '</p>' +
+      '<p>' + escapeHtml(r) + '</p>' +
     '</div>';
   }).join('');
   
@@ -3702,14 +3702,14 @@ function renderPlateauDetail() {
         '<div class="text-center mb-6">' +
           '<div style="display: inline-block; padding: 6px 14px; border-radius: 9999px; background: ' + sevColor + '20; border: 1px solid ' + sevColor + '60; color: ' + sevColor + '; font-size: 10px; font-family: var(--font); font-weight: 700;">심각도 ' + sevLabel + '</div>' +
           '<p class="font-bebas text-3xl mt-4 mb-2">정체기 신호 감지</p>' +
-          '<p class="text-sm text-stone-300 leading-relaxed">' + p.diagnosis + '</p>' +
+          '<p class="text-sm text-stone-300 leading-relaxed">' + escapeHtml(p.diagnosis) + '</p>' +
         '</div>' +
         
         // 주요 원인
         (p.primary_cause ? 
           '<div class="review-section warning">' +
             '<p class="text-[10px] font-mono uppercase tracking-widest mb-2" style="color: #fbbf24;">⚠ 주요 원인</p>' +
-            '<p class="text-sm font-display font-bold">' + p.primary_cause + '</p>' +
+            '<p class="text-sm font-display font-bold">' + escapeHtml(p.primary_cause) + '</p>' +
           '</div>' : '') +
         
         // 감지된 신호
@@ -3732,7 +3732,7 @@ function renderPlateauDetail() {
               '<div class="coach-icon accent">' + icon('msg', 18) + '</div>' +
               '<div class="flex-1">' +
                 '<p class="text-xs font-mono accent uppercase tracking-widest mb-1\\.5">COACH</p>' +
-                '<p class="text-sm text-stone-200 leading-relaxed">' + p.encouragement + '</p>' +
+                '<p class="text-sm text-stone-200 leading-relaxed">' + escapeHtml(p.encouragement) + '</p>' +
               '</div>' +
             '</div>' +
           '</div>' : '') +
@@ -3869,12 +3869,12 @@ function renderStats() {
         '<svg style="position: absolute; left: 28px; right: 0; top: 0; bottom: 20px; width: calc(100% - 28px); height: calc(100% - 20px);" viewBox="0 0 ' + chartW + ' ' + chartH + '" preserveAspectRatio="none">' +
           '<defs>' +
             '<linearGradient id="weightGrad" x1="0" y1="0" x2="0" y2="1">' +
-              '<stop offset="0%" stop-color="var(--accent)" stop-opacity="0.3"/>' +
-              '<stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>' +
+              '<stop offset="0%" stop-color="#F68460" stop-opacity="0.3"/>' +
+              '<stop offset="100%" stop-color="#F68460" stop-opacity="0"/>' +
             '</linearGradient>' +
           '</defs>' +
           '<path d="' + line.area + '" fill="url(#weightGrad)"/>' +
-          '<path d="' + line.path + '" stroke="var(--accent)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>' +
+          '<path d="' + line.path + '" stroke="#F68460" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>' +
           line.points +
         '</svg>' +
         '<div class="chart-x-labels">' +
