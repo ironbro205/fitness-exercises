@@ -4200,7 +4200,7 @@ function cardioNormalizePlan(res, min) {
     var end = (typeof s.endSec === 'number') ? s.endSec : (start + 60);
     if (end <= start) end = start + 30;
     var speed = Number(s.speed);
-    if (!isFinite(speed) || speed < 0) speed = (type === 'run' ? 7 : type === 'walk' ? 5 : type === 'warmup' ? 4 : 3.5);
+    if (!isFinite(speed) || speed < 0) speed = (type === 'run' ? 8.0 : type === 'walk' ? 5.5 : type === 'warmup' ? 5.0 : 5.0);
     segs.push({ startSec: Math.round(start), endSec: Math.round(end), type: type, speed: Math.round(speed * 10) / 10, label: s.label || cardioTypeLabel(type) });
     cursor = end;
   }
@@ -4219,25 +4219,27 @@ function cardioNormalizePlan(res, min) {
 // 워밍업 걷기 → [뛰기 1분 + 걷기 2분] 반복 → 쿨다운 걷기. 시간 짧으면 워밍업/쿨다운 압축(최소 2분).
 function buildFallbackInterval(min, noKey) {
   var T = Math.max(5, Math.min(120, Math.round(min || 30)));
-  var totalSec = T * 60;
-  var wu = Math.min(300, Math.max(120, Math.round(totalSec * 0.15)));
-  var cd = Math.min(300, Math.max(120, Math.round(totalSec * 0.15)));
+  var totalSec = T * 60;                                 // 항상 60의 배수(=30의 배수)
+  function snap30(x) { return Math.round(x / 30) * 30; } // 30초 격자에 맞춤(구간 길이 30초 단위)
+  var wu = Math.min(300, Math.max(120, snap30(totalSec * 0.15)));
+  var cd = Math.min(300, Math.max(120, snap30(totalSec * 0.15)));
   if (wu + cd > totalSec - 60) { // 본 인터벌 최소 60초 확보
-    wu = Math.max(60, Math.floor((totalSec - 60) / 2));
+    wu = Math.max(60, snap30((totalSec - 60) / 2));
     cd = Math.max(60, totalSec - 60 - wu);
-    if (wu + cd > totalSec) { wu = Math.floor(totalSec * 0.3); cd = totalSec - wu; }
+    if (wu + cd > totalSec) { wu = snap30(totalSec * 0.3); cd = totalSec - wu; }
   }
-  var midSec = Math.max(0, totalSec - wu - cd);
+  var midSec = Math.max(0, totalSec - wu - cd);          // 30배수들의 차 → 30배수
   var segs = [];
   var t = 0;
   function push(type, dur, speed) { if (dur <= 0) return; segs.push({ startSec: t, endSec: t + dur, type: type, speed: speed, label: cardioTypeLabel(type) }); t += dur; }
-  push('warmup', wu, 4.0);
+  push('warmup', wu, 5.0);
   var remaining = midSec;
-  var RUN = 60, WALK = 120, RUNSPD = 6.5, WALKSPD = 5.0;
+  // ★첫 회 기본 하한(사용자=중급): 뛰기 8.0, 걷기 회복 5.5, 워밍업·쿨다운 걷기 5.0. RUN/WALK 길이는 30초 배수.
+  var RUN = 60, WALK = 120, RUNSPD = 8.0, WALKSPD = 5.5;
   while (remaining >= RUN + WALK) { push('run', RUN, RUNSPD); push('walk', WALK, WALKSPD); remaining -= (RUN + WALK); }
   if (remaining >= RUN) { push('run', RUN, RUNSPD); remaining -= RUN; if (remaining > 0) { push('walk', remaining, WALKSPD); remaining = 0; } }
   else if (remaining > 0) { push('walk', remaining, WALKSPD); remaining = 0; }
-  push('cooldown', cd, 3.5);
+  push('cooldown', cd, 5.0);
   var tot = segs.length ? segs[segs.length - 1].endSec : totalSec;
   var note = '완주가 목표예요. 힘들면 속력을 낮추세요. 뛰기는 "짧은 말은 되는데 대화는 벅찬" 정도가 적당해요.';
   if (noKey) note += ' (더보기에서 AI 키를 넣으면 기록 기반 맞춤 구성을 받아요.)';
@@ -4493,15 +4495,16 @@ function cardioStopAudio() {
   if (cardioRuntime.keepAlive) { try { cardioRuntime.keepAlive.stop(); } catch (e) {} try { cardioRuntime.keepAlive.disconnect(); } catch (e) {} cardioRuntime.keepAlive = null; }
   if (cardioRuntime.audioCtx) { try { cardioRuntime.audioCtx.close(); } catch (e) {} cardioRuntime.audioCtx = null; }
 }
-// 톤 시퀀스 예약: kind = pre(예고·부드러운 2블립) / up(올림·상승 2음) / down(내림·하강 2음) / finish(완주·상승 3음).
+// 톤 시퀀스 예약: kind = tick(예고 '따' 단음 — 전환 3·2·1초 전 매초) / up(전환 '딴!' 올림·높은 톤) /
+//   down(전환 '딴!' 내림·낮은 톤) / finish(완주 상승 팡파레). 올림/내림은 마지막 '딴!'의 주파수로 구분.
 function cardioSchedSeq(ctx, at, kind) {
   var seqs = {
-    pre:    { freqs: [880, 880],       dur: 0.09, gap: 0.07, gain: 0.14, type: 'sine' },
-    up:     { freqs: [660, 990],       dur: 0.13, gap: 0.04, gain: 0.22, type: 'square' },
-    down:   { freqs: [660, 440],       dur: 0.13, gap: 0.04, gain: 0.22, type: 'square' },
-    finish: { freqs: [523, 659, 784],  dur: 0.16, gap: 0.03, gain: 0.22, type: 'triangle' }
+    tick:   { freqs: [660],            dur: 0.16, gap: 0.00, gain: 0.20, type: 'sine' },     // 예고 '따'(단음, 확실히 들리게)
+    up:     { freqs: [1046],           dur: 0.24, gap: 0.00, gain: 0.30, type: 'square' },   // '딴!' 올림 — 더 높고·길고·강하게
+    down:   { freqs: [440],            dur: 0.24, gap: 0.00, gain: 0.30, type: 'square' },   // '딴!' 내림 — 더 낮고·길고·강하게
+    finish: { freqs: [659, 880, 1175], dur: 0.18, gap: 0.03, gain: 0.28, type: 'triangle' }  // 완주 상승 팡파레
   };
-  var spec = seqs[kind] || seqs.pre;
+  var spec = seqs[kind] || seqs.tick;
   var nodes = [];
   for (var i = 0; i < spec.freqs.length; i++) {
     var t0 = at + i * (spec.dur + spec.gap);
@@ -4532,8 +4535,12 @@ function cardioScheduleTones(fromElapsed) {
     var b = segs[i].endSec;              // 구간 경계(마지막은 완주 지점)
     if (b <= fromElapsed + 0.05) continue;
     var isFinal = (i === segs.length - 1);
-    var pre = b - 3;
-    if (pre > fromElapsed + 0.05) cardioPushTones(cardioSchedSeq(ctx, base + (pre - fromElapsed), 'pre'));
+    // 전환 3초 전·2초 전·1초 전 매초 예고 '따'(총 3번) — 카운트다운처럼 놓치지 않게.
+    for (var k = 3; k >= 1; k--) {
+      var pt = b - k;
+      if (pt > fromElapsed + 0.05) cardioPushTones(cardioSchedSeq(ctx, base + (pt - fromElapsed), 'tick'));
+    }
+    // 전환 순간 '딴!' — 더 높고 길게 강조. 올림/내림은 톤(주파수)으로 구분.
     if (isFinal) {
       cardioPushTones(cardioSchedSeq(ctx, base + (b - fromElapsed), 'finish'));
     } else {
@@ -5132,12 +5139,14 @@ function navBack() {
 //   부팅 + load + pageshow(복원) + 포그라운드 복귀 + popstate 흡수 직후에 매번 확보한다.
 // ═══════════════════════════════════════════════
 var BACK_TRAP_FLAG = '__healthBackTrap';
+var BACK_BASE_FLAG = '__healthBackBase';           // 맨 아래(진짜 시작) 항목 표식 — replaceState로 심는다
 
-// 트랩이 없으면 하나 깐다(있으면 그대로 — 중복 push 방지). history.state 표식으로 판별.
+// 최상단 항목이 트랩이 아니면 트랩을 하나 push 한다(있으면 그대로 — 중복 방지). history.state 표식으로 판별.
 function ensureBackTrap() {
   if (typeof history === 'undefined' || !history.pushState) return;
   try {
-    if (!history.state || !history.state[BACK_TRAP_FLAG]) {
+    var st = history.state;
+    if (!st || !st[BACK_TRAP_FLAG]) {
       var s = {}; s[BACK_TRAP_FLAG] = true;
       history.pushState(s, '');
     }
@@ -5147,11 +5156,35 @@ function ensureBackTrap() {
 (function() {
   if (typeof window === 'undefined' || !window.addEventListener || typeof history === 'undefined') return;
 
-  ensureBackTrap();                                  // 부팅 즉시 1차 확보
-  // standalone에서 부팅 pushState가 초기 항목에 흡수되는 문제 대비 — 로드 완료 후 다시 확보
+  // 부팅: 먼저 현재(맨 아래) 항목을 base로 "마킹"한다. replaceState는 새 항목을 추가하지 않고
+  //   현재 항목만 바꾸므로 standalone 부팅에서 흡수될 여지가 없다(=바닥이 확실히 우리 표식이 됨).
+  //   그 위에 pushState로 트랩을 하나 더 쌓아 최소 2중(base + trap)을 확보 → 뒤로가기 한 번에 앱이 닫히지 않게.
+  //   (단, 이미 트랩 항목 위에서 새로고침된 경우엔 그 트랩을 덮지 않는다.)
+  try {
+    if (history.replaceState && (!history.state || !history.state[BACK_TRAP_FLAG])) {
+      var base = {}; base[BACK_BASE_FLAG] = true;
+      history.replaceState(base, '');
+    }
+  } catch (e) {}
+  ensureBackTrap();                                  // 부팅 즉시 트랩 확보(base 위 1칸)
+
+  // standalone 부팅 시 pushState가 초기 항목에 흡수되는 문제 대비 — 로드 완료 후 다시 확보
   window.addEventListener('load', ensureBackTrap);
   // bfcache/홈에서 재실행 등으로 페이지가 복원될 때 트랩이 없으면 다시 확보
   window.addEventListener('pageshow', function() { ensureBackTrap(); });
+
+  // ★자동 이벤트(load·pageshow)의 pushState는 안드로이드 standalone에서 흡수될 수 있다.
+  //   첫 사용자 상호작용(제스처) 컨텍스트의 pushState는 브라우저가 확실히 반영하므로,
+  //   touchstart/click에서 한 번만(once) 트랩을 재확보한다.
+  var gestureArmed = false;
+  function armBackTrapOnce() {
+    if (gestureArmed) return;
+    gestureArmed = true;
+    ensureBackTrap();
+  }
+  window.addEventListener('touchstart', armBackTrapOnce, { once: true, passive: true });
+  window.addEventListener('click', armBackTrapOnce, { once: true });
+
   // 안드로이드 PWA 포그라운드 복귀 시 트랩 재확보
   if (typeof document !== 'undefined' && document.addEventListener) {
     document.addEventListener('visibilitychange', function() {

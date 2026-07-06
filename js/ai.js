@@ -1609,7 +1609,8 @@ async function generateCardioInterval(totalMinutes) {
 
   var ALLOWED_TYPES = { warmup: 1, run: 1, walk: 1, cooldown: 1 };
   var DEFAULT_LABEL = { warmup: '워밍업 걷기', run: '뛰기', walk: '걷기 회복', cooldown: '쿨다운 걷기' };
-  var DEFAULT_SPEED = { warmup: 3.5, run: 7, walk: 4, cooldown: 3.5 };
+  // 첫 회 기본 하한(사용자=중급): 걷기(회복) ≥5.5, 뛰기 ≥8.0, 워밍업·쿨다운 걷기 5.0. AI가 speed를 빠뜨렸을 때의 기본값.
+  var DEFAULT_SPEED = { warmup: 5.0, run: 8.0, walk: 5.5, cooldown: 5.0 };
 
   // 속력 숫자 정리: km/h, 1~20 클램프, 소수 1자리. 이상값이면 종류별 기본값.
   function cleanSpeed(v, type) {
@@ -1621,7 +1622,8 @@ async function generateCardioInterval(totalMinutes) {
   }
 
   // AI/폴백 구간(길이 sec 기반)을 totalSec에 "정확히" 맞춘다.
-  //  - 누적 위치를 반올림해 정수 경계를 만든다 → 구간 합이 항상 totalSec (초과·미달 0).
+  //  - 각 구간 경계를 30초 배수(30·60·90…)로 스냅한다 → 모든 구간 길이가 30초 단위(연구: ±15~30초 진행).
+  //  - totalSec은 항상 60의 배수(mins*60)라 30 격자로 스냅해도 총합은 정확히 totalSec(초과·미달 0).
   //  - 종류/속력 이상값 정리, 퇴화(0초) 구간 제거, 첫 구간 0초부터 연속 보장.
   function fitToTotal(raw) {
     var clean = [];
@@ -1641,15 +1643,24 @@ async function generateCardioInterval(totalMinutes) {
     }
     if (!clean.length || sum <= 0) return null;
 
+    var STEP = 30;                                         // 30초 격자
     var out = [];
-    var prev = 0;
+    var prev = 0;                                          // 확정된 끝(항상 30의 배수)
     var cum = 0;
-    for (var j = 0; j < clean.length; j++) {
-      cum += clean[j].sec * totalSec / sum;               // 스케일된 누적 위치(실수)
-      var end = (j === clean.length - 1) ? totalSec : Math.round(cum);
-      if (end < prev) end = prev;
-      if (end > totalSec) end = totalSec;
-      if (end - prev <= 0) continue;                       // 퇴화 구간 스킵(누적은 유지)
+    var n = clean.length;
+    for (var j = 0; j < n; j++) {
+      cum += clean[j].sec * totalSec / sum;               // 스케일된 이상적 끝(실수, 초)
+      var end;
+      if (j === n - 1) {
+        end = totalSec;                                    // 마지막 구간은 정확히 총시간(30의 배수)
+      } else {
+        end = Math.round(cum / STEP) * STEP;               // 30초 격자에 스냅
+        var minEnd = prev + STEP;                          // 이 구간 최소 30초 확보
+        var maxEnd = totalSec - (n - 1 - j) * STEP;        // 이후 구간마다 30초씩 남겨두기
+        if (end < minEnd) end = minEnd;
+        if (end > maxEnd) end = maxEnd;
+      }
+      if (end <= prev) continue;                           // 격자 부족 시 병합(누적은 유지)
       out.push({
         startSec: prev,
         endSec: end,
@@ -1722,20 +1733,22 @@ async function generateCardioInterval(totalMinutes) {
 
   // 파싱 실패/네트워크 오류 시 폴백: 연구 첫 회 템플릿을 시간에 맞춰 스케일(기능이 항상 동작하도록).
   function fallbackPlan() {
-    var warm = Math.min(300, Math.max(120, Math.round(totalSec * 0.2)));
+    // ★첫 회(기록 없음) 기본 하한 — 사용자=중급: 뛰기 8.0, 걷기 회복 5.5, 워밍업·쿨다운 걷기 5.0.
+    //   길이는 30초 배수(warm을 미리 30으로 스냅; 최종 30 격자 스냅은 fitToTotal이 보장).
+    var warm = Math.round(Math.min(300, Math.max(120, totalSec * 0.2)) / 30) * 30;
     var cool = warm;
     var mid = totalSec - warm - cool;
-    var raw = [{ type: 'warmup', sec: warm, speed: 3.5, label: '워밍업 걷기' }];
+    var raw = [{ type: 'warmup', sec: warm, speed: 5.0, label: '워밍업 걷기' }];
     if (mid < 120) {
-      raw.push({ type: 'walk', sec: Math.max(1, mid), speed: 5, label: '빠르게 걷기' });
+      raw.push({ type: 'walk', sec: Math.max(30, Math.round(mid / 30) * 30), speed: 5.5, label: '빠르게 걷기' });
     } else {
       var reps = Math.max(1, Math.floor(mid / 180));       // [뛰기 60초 + 걷기 120초] 반복
       for (var i = 0; i < reps; i++) {
-        raw.push({ type: 'run', sec: 60, speed: 7, label: '뛰기' });
-        raw.push({ type: 'walk', sec: 120, speed: 4, label: '걷기 회복' });
+        raw.push({ type: 'run', sec: 60, speed: 8.0, label: '뛰기' });
+        raw.push({ type: 'walk', sec: 120, speed: 5.5, label: '걷기 회복' });
       }
     }
-    raw.push({ type: 'cooldown', sec: cool, speed: 3.5, label: '쿨다운 걷기' });
+    raw.push({ type: 'cooldown', sec: cool, speed: 5.0, label: '쿨다운 걷기' });
     var segs = fitToTotal(raw);
     if (!segs) return null;
     return {
@@ -1751,12 +1764,14 @@ async function generateCardioInterval(totalMinutes) {
 
 ## ⏱️ 시간 규칙 (가장 중요)
 - 모든 구간 sec(초)의 합 = 정확히 ${totalSec}초 (= ${mins}분). 절대 초과 금지, 모자라게도 하지 말 것.
+- 각 구간 길이(sec)는 30초의 배수(30·60·90·120…)로 한다 — 워밍업·쿨다운·뛰기·걷기 모두. (연구 권고: 인터벌은 ±15~30초 단위 진행)
 - 반드시 warmup(걷기)로 시작하고 cooldown(걷기)로 끝낸다.
 - 시간이 짧으면 워밍업/쿨다운을 각각 최소 2~3분(120~180초)으로 압축하고, 인터벌(뛰기) 반복 횟수부터 줄인다.
 
-## 🐣 첫 회(기록 없음) 처방 — 보수적, 목표 = 완주
-- 워밍업 걷기 약 5분(3~4km/h) → [뛰기 60초 + 걷기 120초] 6~8회 반복 → 쿨다운 걷기 약 5분(3~4km/h).
-- 뛰기 속력 = "짧은 말은 되지만 대화는 벅찬" 편한 조깅(대략 6~8km/h, 첫 회는 6~7 권장). 속력 욕심 금지.
+## 🐣 첫 회(기록 없음) 처방 — 목표 = 완주 (사용자는 중급: 평소 6km/h 걷기·8km/h+ 뛰기)
+- 워밍업 걷기 약 5분(5.0~5.5km/h) → [뛰기 60초 + 걷기 120초] 6~8회 반복 → 쿨다운 걷기 약 5분(5.0~5.5km/h).
+- ★첫 회 기본 하한(이 밑으로 내리지 말 것): 걷기(회복) ≥ 5.5km/h, 뛰기 ≥ 8.0km/h. 워밍업·쿨다운 걷기만 5.0~5.5 허용.
+- 뛰기 속력 = "짧은 말은 되지만 대화는 벅찬" 편한 조깅(8.0km/h부터 시작, 전력질주는 금지).
 - 주어진 시간이 위 템플릿보다 짧으면 뛰기 반복 횟수를 줄여 시간에 맞춘다.
 
 ## 📈 향상 우선순위 (★속력이 아니다 — 한 번에 "한 축만")
@@ -1773,7 +1788,7 @@ async function generateCardioInterval(totalMinutes) {
 
 ## 🗣️ 강도 지표 (초보용)
 - 대화 테스트 1순위: 뛰기 = "짧은 단어만 가능", 걷기 = "노래도 될 만큼 편함".
-- RPE 보조: 뛰기 6~7 / 걷기 2~3 (첫 회 뛰기 상한 6).
+- RPE 보조: 뛰기 6~7 / 걷기 2~3 (중급자라 8.0km/h 뛰기도 대개 RPE 6~7 범위).
 
 ## 🙅 정직한 톤 (note에 반영)
 - "인터벌 = 지방 순삭/애프터번 폭발" 같은 과장 금지. 체지방은 총에너지소비 × 식이 적자 × 꾸준함 × 근육보존이 핵심이다.
@@ -1789,14 +1804,14 @@ ${cardioHistoryContext()}
   "headline": "한 줄 요약 (예: 첫 회 · 완주 목표 걷기·뛰기 / 또는 지난 회보다 걷기 10초 단축)",
   "note": "정직한 안내 1~2문장 + 오늘의 포인트(향상/유지/하향 이유). 과장 금지, 근손실 넛지 한 조각.",
   "segments": [
-    {"type":"warmup","sec":300,"speed":3.5,"label":"워밍업 걷기"},
-    {"type":"run","sec":60,"speed":7,"label":"뛰기"},
-    {"type":"walk","sec":120,"speed":4,"label":"걷기 회복"},
-    {"type":"cooldown","sec":300,"speed":3.5,"label":"쿨다운 걷기"}
+    {"type":"warmup","sec":300,"speed":5,"label":"워밍업 걷기"},
+    {"type":"run","sec":60,"speed":8,"label":"뛰기"},
+    {"type":"walk","sec":120,"speed":5.5,"label":"걷기 회복"},
+    {"type":"cooldown","sec":300,"speed":5,"label":"쿨다운 걷기"}
   ]
 }
-- type은 warmup|run|walk|cooldown 넷 중 하나. sec는 정수 초, speed는 km/h 숫자, label은 짧은 한국어.
-- 걷기 속력 3~5, 뛰기 속력 6~8 권장(첫 회 뛰기 6~7). sec의 합은 정확히 ${totalSec}.`;
+- type은 warmup|run|walk|cooldown 넷 중 하나. sec는 30초 배수(정수 초), speed는 km/h 숫자, label은 짧은 한국어.
+- 걷기 속력 5~6, 뛰기 속력 8~9 권장(첫 회 하한: 걷기 5.5 · 뛰기 8.0). 각 sec은 30초 배수, 합은 정확히 ${totalSec}.`;
 
   try {
     var response = await fetch('https://api.anthropic.com/v1/messages', {
