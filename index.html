@@ -24,10 +24,22 @@
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <!-- 한글 웹폰트: 원티드 산스 한 벌 (split=쓰는 글자만 받아 가벼움, display swap 내장) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/wanteddev/wanted-sans@v1.0.3/packages/wanted-sans/fonts/webfonts/variable/split/WantedSansVariable.min.css">
+<style>
+/* 부팅 스플래시 — CSS/JS 로드 전 흰 깜빡임 방지 + 브랜드 로고(오렌지 덤벨) */
+html,body{margin:0;padding:0;background:#201E1B}
+#boot-splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:#201E1B;z-index:9999}
+#boot-splash svg{width:104px;height:104px;animation:bootpulse 1.6s ease-in-out infinite}
+#boot-splash p{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Malgun Gothic','Apple SD Gothic Neo',system-ui,sans-serif;color:#EBE3D8;font-size:18px;font-weight:700;letter-spacing:.02em}
+@keyframes bootpulse{0%,100%{opacity:.5;transform:scale(.96)}50%{opacity:1;transform:scale(1)}}
+@media(prefers-reduced-motion:reduce){#boot-splash svg{animation:none;opacity:1}}
+</style>
 <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
-<div id="app"></div>
+<div id="app"><div id="boot-splash">
+<svg viewBox="0 0 512 512" aria-hidden="true"><g fill="#F68460"><rect x="86" y="167" width="52" height="178" rx="4"/><rect x="143" y="192" width="47" height="128" rx="6"/><rect x="190" y="224" width="132" height="64" rx="20"/><rect x="322" y="192" width="47" height="128" rx="6"/><rect x="374" y="167" width="52" height="178" rx="4"/></g></svg>
+<p>헬스앱</p>
+</div></div>
 
 <script src="/js/data.js"></script>
 <script src="/js/core.js"></script>
