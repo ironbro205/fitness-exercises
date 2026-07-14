@@ -876,7 +876,9 @@ window.startGeneratedRoutine = function() {
   // 종목 데이터를 운동 세션 형식으로 변환
   var exercises = r.exercises.map(function(ex, idx) {
     var sets = [];
-    
+    // 가드레일: AI 제안 반복을 종목 클래스 범위로 교정 (예: 사이드 레터럴 "10회" 차단)
+    var repRange = clampRepsToClass(ex.name, ex.reps || '8-12');
+
     // 워밍업 1세트 (메인 종목만)
     if (ex.isMain) {
       sets.push({
@@ -886,24 +888,24 @@ window.startGeneratedRoutine = function() {
         isWarmup: true
       });
     }
-    
+
     // 본 세트
     for (var s = 0; s < (ex.sets || 3); s++) {
       sets.push({
         weight: ex.weight ? snapWeightToEquipment(ex.weight, ex.name) : null,
-        reps: parseInt(String(ex.reps).split('-')[0]) || 8,
+        reps: repRange.low,
         completed: false,
         isWarmup: false
       });
     }
-    
+
     return {
       name: ex.name,
       type: ex.type || '보조',
       rest: ex.rest,
       sets: sets,
       reps: ex.reps,
-      targetReps: ex.reps || '8-12',  // 세션 화면에서 사용
+      targetReps: repRangeToStr(repRange),  // 세션 화면에서 사용 (클래스 범위로 교정됨)
       lastWeight: ex.weight !== undefined ? ex.weight : null,
       lastReps: null,
       reps_done: ex.reps,
@@ -1332,25 +1334,27 @@ window.startSession = function(sessionType) {
   // 세션 데이터 초기화
   var exercises = sessionData.exercises.map(function(ex) {
     var sets = [];
+    // 가드레일: 템플릿 반복도 종목 클래스 범위로 교정
+    var repRange = clampRepsToClass(ex.name, ex.reps || '8-10');
     // 워밍업 1세트 + 본 세트 3개
-    sets.push({ 
-      weight: ex.lastWeight ? Math.round(ex.lastWeight * 0.5) : null, 
-      reps: 10, 
-      isWarmup: true, 
-      completed: false 
+    sets.push({
+      weight: ex.lastWeight ? Math.round(ex.lastWeight * 0.5) : null,
+      reps: 10,
+      isWarmup: true,
+      completed: false
     });
     for (var i = 0; i < ex.sets; i++) {
-      sets.push({ 
-        weight: ex.lastWeight, 
-        reps: parseInt(String(ex.reps || '8-10').split('-')[0]) || 10, 
-        isWarmup: false, 
-        completed: false 
+      sets.push({
+        weight: ex.lastWeight,
+        reps: repRange.low,
+        isWarmup: false,
+        completed: false
       });
     }
     return {
       name: ex.name,
       type: ex.type,
-      targetReps: ex.reps,
+      targetReps: repRangeToStr(repRange),
       lastWeight: ex.lastWeight,
       lastReps: ex.reps_done,
       sets: sets
@@ -1887,14 +1891,17 @@ window.swapCurrentExercise = function(newName) {
     ex.type = info.compound ? '복합' : '고립';
   }
 
+  // 목표 반복을 새 종목 클래스 범위로 교정 (가드레일)
+  var newRange = clampRepsToClass(newName, ex.targetReps);
+  ex.targetReps = repRangeToStr(newRange);
+
   // 미완료 세트의 무게/횟수를 새 종목 기준으로 재추천
   var prog = getProgressiveRecommendation(newName, ex.targetReps);
   if (prog && prog.weight) {
-    var lowReps = parseRepRange(ex.targetReps).low || 8;
     (ex.sets || []).forEach(function(s) {
       if (s.completed) return;
       s.weight = prog.weight;
-      if (!s.isWarmup) s.reps = lowReps;
+      if (!s.isWarmup) s.reps = newRange.low;
     });
     ex.lastWeight = prog.previousWeight !== undefined ? prog.previousWeight : null;
   } else {
@@ -2244,7 +2251,10 @@ function renderWorkoutSession() {
           // 실제 수행 기록이 있는 경우
           var prevRepsStr = (prog.previousReps || []).join(', ') + '회';
           var color = prog.source === 'progress' ? '#10b981' : 'var(--accent)';
-          var label = prog.source === 'progress' ? '🎯 도전 권장' : '🔁 동일 무게';
+          var label = prog.source === 'progress' ? '🎯 도전 권장'
+            : prog.source === 'rehab' ? '🩹 재활 — 무게 유지'
+            : prog.painGated ? '⚠️ 통증 기록 — 증량 보류'
+            : '🔁 동일 무게';
           html +=
             '<div class="flex items-center justify-between mb-2">' +
               '<p class="text-[10px] font-mono uppercase tracking-widest text-stone-400">지난 기록</p>' +
