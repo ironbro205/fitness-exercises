@@ -1,6 +1,15 @@
 # PROGRESS — 헬스앱
 
-## 마지막 한 일 (2026-07-07 — 세션 19: 앱 아이콘 번개→덤벨 리메이크 + 시작 로딩화면)
+## 마지막 한 일 (2026-07-14 — 세션 20: 트래커→코치 개편 1단계 [브랜치 `conversational-coaching`])
+- **배경**: 사용자가 운동 중 클로드와 만든 개편 지시문 md("트래커를 코치로") 비판 검토 → grill로 계획 확정. **반려**: 서버 프록시(개인용 직호출 유지)·부상 하드코딩(기억 노트 방식 유지)·Opus 전환(컨텍스트 완성 후 재평가, 지금은 아님). **3단계 계획**: ①과부하 엔진+운동중 UX ②종목 안전정보+VETO/REFER+**모델 sonnet-4-5→4.6 교체** ③세트 사이 채팅(통증·자극 추출→다음 추천 반영). 이번 세션 = 1단계 완료.
+- **1단계-A 과부하 엔진 v2** (TDD, `53f5705`): 종목 클래스 5종(`EXERCISE_CLASS_RULES`: compound_heavy 5-8 / compound_moderate 8-12 / isolation 12-15 / light_isolation 15-25 / rehab 15-20) + `getExerciseClass`(오버라이드→재활 키워드→부위맵 휴리스틱). **가드레일**: `clampRepsToClass`가 세션 생성 2곳·종목 교체에서 targetReps 교정("사이드 레터럴 10회" 차단), heavy/light는 **상단 2세션 연속** 달성해야 증량, rehab 증량 금지, **통증 게이트**(`hasRecentPain` — 최근 14일 painFlag 시 증량 금지, 3단계 채팅이 painFlag 쓰면 자동 작동). `getRecentPerformances`(종목당 최근 3세션 캐시). 재활 종목 3종(밴드 외회전·클램쉘·터미널 니 익스텐션) 부위맵 추가, 페이스 풀=rehab 지정.
+- **1단계-B 세트 편집** (`cb414c8`): 완료 세트 재저장 시 휴식타이머 재시작 안 함, `uncompleteSet`/`deleteSet`(시트 하단 버튼)/`addSetToExercise`(목록 아래 + 버튼).
+- **1단계-C 종목 교체 검색** (`04f290e`): 교체 시트 검색창 — 전체 종목 검색(공백무시, 같은 부위 우선), **미등록 이름 그대로 추가 카드**(onclick이 `state._swapQuery` 직접 읽음 = 주입 불가), 목록만 부분갱신(포커스 유지).
+- **Codex 리뷰 4건 반영** (`af16e3f`): ①PR 알림 `pr.exerciseName` escapeHtml 3곳 ②**1RM 되돌리기** — completeSet이 `set.prev1RM` 보관, 완료취소/삭제 시 `recalc1RMAfterEdit`(rolling max·남은 세션 세트 e1RM·직전값 중 최대로 하향) ③타이머 주인 세트 삭제 시 타이머 종료 ④레거시 배열 reps 정규화. +세션 화면 종목명 escapeHtml 3곳(`4df1bee`).
+- 검증: `tests/progression.test.mjs` 신설 **20개** + 특성화 45 = **65/65**, golden-symbols 재생성(전역 +14 전부 의도됨). 캐시 v34→**v35** + APP_VERSION v32→**v35 동기화**(어긋나 있던 것 정리).
+- ⚠️ 브랜치는 세션18·19 커밋 위에 생성(main엔 그 6커밋 미병합 상태였음 — PR 시 같이 딸려감). 폰 QA·배포 전.
+
+### 이전 (2026-07-07 — 세션 19: 앱 아이콘 번개→덤벨 리메이크 + 시작 로딩화면)
 - **배경**: 세션18 비주얼 리메이크(오렌지·웜다크·원티드산스)에서 아이콘 3종·시작화면만 옛 파란 번개(#00d4ff 시절) 그대로라 톤 어긋남 → **아이콘 모티프 자체 교체**(색만 X, 사용자 지시).
 - **아이콘 확정 과정**: grill → 시안 6종(덤벨/케틀벨/성장그래프/불꽃/레터마크H/바벨원판) → **사용자 1번 덤벨 선택** → 덤벨 변주 6종(계단·단일·원형·육각 / 단색·그라디언트·투톤) → **4관점 workflow 심사**(아트디렉터·모바일아이콘·미니멀·실사용자, 5에이전트/194k토큰) → **단색 오렌지 STEP 2단·폭66%·봉 굵게** 확정(육각은 '뼈다귀' 오독으로 탈락, 노랑·글로우·그라디언트 전면 배제).
 - **제작 파이프라인**: 스크래치 `icon-lab`에서 SVG 직접 디자인 → `@resvg/resvg-js`+`sharp`로 PNG 렌더. ★이 WSL엔 rsvg/imagemagick/inkscape 전무 + playwright 크롬 없음 → **SVG+resvg가 아이콘 제작 유일 경로**. 96/64/48px·원/스쿼클 마스킹 실측 검수.
@@ -165,7 +174,7 @@
 - 배경 워크플로우(근성장 조사)는 사용량 한도로 21:28 종료 → 종합 결과는 journal에서 추출해 REMAKE-PLAN.md에 반영 완료(현재 도는 프로세스 없음).
 
 ## 마지막 커밋
-- `4bf09e0` — Merge PR #34 → main (앱 아이콘 덤벨 리메이크 + 시작화면, 캐시 v34, 2026-07-07)
-- `65fb905` — feat: 앱 아이콘 번개→덤벨 리메이크 + 시작 로딩화면 통일
+- `af16e3f` — fix: Codex review — 1RM rollback, PR name escaping, rest-timer cleanup, legacy reps (브랜치 `conversational-coaching`)
+- `53f5705` — feat: progressive overload engine v2 — exercise classes + rep-range guardrails
 
-_다음 세션 재개: **세션19 아이콘 덤벨 리메이크 완료·배포(v34, main `4bf09e0`)**. 폰 PWA 재설치로 새 아이콘 확인. 남은 별도 항목: **영양 탄수/지방 undefined 버그**(DEFAULT_PROFILE에 carbTarget/fatTarget 추가, 미착수) + healthapp 코치 Phase B 잔여. 새 작업은 dev-pipeline 게이트로 진행._
+_다음 세션 재개: **개편 1단계 완료(브랜치 `conversational-coaching`, v35, 65/65)** — 사용자 폰 QA → PR·배포 → **2단계**(종목 금기·대체·폼큐 + VETO/REFER + 모델 claude-sonnet-4-5→**4.6** 교체) → **3단계**(세트 사이 채팅: 스트리밍 답변+통증·자극 추출 저장→painFlag로 통증 게이트 자동 연동). 반려 확정: 서버 프록시 X·부상 하드코딩 X(기억 노트 유지)·Opus 전환은 3단계 후 재평가._

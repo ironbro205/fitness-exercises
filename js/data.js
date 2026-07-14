@@ -338,7 +338,12 @@ var EXERCISE_BODY_PART_MAP = {
   '케이블 닐링 사이드 크런치': { primary: 'obliques', secondary: ['abs'], compound: false, mainEligible: false },
   '러시안 트위스트': { primary: 'obliques', secondary: ['abs'], compound: false, mainEligible: false },
   '플랭크': { primary: 'abs', secondary: ['obliques'], compound: false, mainEligible: false },
-  '인클라인 덤벨 와이 레이즈': { primary: 'shoulders_rear', secondary: ['traps'], compound: false, mainEligible: false }
+  '인클라인 덤벨 와이 레이즈': { primary: 'shoulders_rear', secondary: ['traps'], compound: false, mainEligible: false },
+
+  // 재활 (부상 부위 강화 목적 — 무게 진행 없음, 진행 지표 = 통증 감소)
+  '밴드 외회전': { primary: 'shoulders_rear', secondary: [], compound: false, mainEligible: false },
+  '클램쉘': { primary: 'glutes_med', secondary: [], compound: false, mainEligible: false },
+  '터미널 니 익스텐션': { primary: 'quads', secondary: [], compound: false, mainEligible: false }
 };
 
 // primary 부위별 종목 이름 인덱스 (종목 변경 시트 등에서 O(1) 조회)
@@ -352,6 +357,36 @@ var EXERCISES_BY_PRIMARY = (function() {
   });
   return idx;
 })();
+
+// ═══════════════════════════════════════════════
+// 종목 클래스 — 점진적 과부하 진행 규칙 결정 (md 개편 Phase 5)
+// 근거: 근비대는 넓은 반복범위에서 가능하나(Schoenfeld 2017 메타), 실무 처방은
+// 대형 프리웨이트=저반복 고중량, 고립=중고반복, 소근육(측면삼각근·종아리 등)=고반복이
+// 관절 부담·자극 효율에서 유리(RP/Helms). 재활 종목은 부하 진행 금지, 지표=통증 감소.
+var EXERCISE_CLASS_RULES = {
+  compound_heavy:    { repMin: 5,  repMax: 8,  doubleSessions: 2, kr: '고중량 복합' },
+  compound_moderate: { repMin: 8,  repMax: 12, doubleSessions: 1, kr: '중강도 복합' },
+  isolation:         { repMin: 12, repMax: 15, doubleSessions: 1, kr: '고립' },
+  light_isolation:   { repMin: 15, repMax: 25, doubleSessions: 2, kr: '경량 고립' },
+  rehab:             { repMin: 15, repMax: 20, doubleSessions: 0, kr: '재활' }
+};
+
+// 클래스 명시 지정 (휴리스틱보다 우선). 페이스 풀은 사용자 어깨 재활 목적 → rehab.
+var EXERCISE_CLASS_OVERRIDES = {
+  '밴드 외회전': 'rehab',
+  '클램쉘': 'rehab',
+  '터미널 니 익스텐션': 'rehab',
+  '페이스 풀': 'rehab'
+};
+
+// 재활 키워드 (미등록 종목 이름에서 감지)
+var REHAB_NAME_KEYWORDS = ['밴드', '외회전', '내회전', '클램쉘', 'TKE', '터미널 니'];
+
+// 고중량 복합 판별 키워드 (프리웨이트 대형 리프트 + 맨몸 대형)
+var HEAVY_COMPOUND_KEYWORDS = ['풀업', '친업', '딥스', '벤치 프레스', '스쿼트', '데드리프트', '바벨 로우'];
+
+// 경량 고립 부위 (소근육 — 고반복·무게 거의 고정)
+var LIGHT_ISOLATION_PARTS = ['shoulders_side', 'shoulders_rear', 'calves', 'abs', 'obliques', 'glutes_med', 'adductors', 'forearms'];
 
 // 부위 그룹 (대분류) - 부위 균형 분석 및 합산 진단용
 // 형식: 통합부위코드: { kr: '한국어명', subParts: ['세부 부위 코드들...'] }

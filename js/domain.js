@@ -69,11 +69,12 @@ function parseRepRange(reps) {
   return { low: low, high: high };
 }
 
-// 종목의 가장 최근 본 세트(워밍업 제외) 가져오기
-// 운동 로그를 한 번만 스캔해서 모든 종목 → 마지막 세트 맵을 빌드한 뒤 캐시.
+// 종목의 최근 수행 세트(워밍업 제외) 가져오기 — 종목당 최근 3세션까지 보관.
+// 운동 로그를 한 번만 스캔해서 모든 종목 → 최근 수행 목록 맵을 빌드한 뒤 캐시.
 // workoutLog 길이가 같으면 재사용 (finalizeSession에서 길이가 증가하므로 자동 무효화).
 var _lastSetsCache = null;
-function getLastPerformedSets(exerciseName) {
+var RECENT_PERFORMANCES_KEEP = 3;
+function _buildRecentSetsMap() {
   var log = state.data.workoutLog || [];
   if (!_lastSetsCache || _lastSetsCache.logLen !== log.length) {
     var map = {};
@@ -83,65 +84,210 @@ function getLastPerformedSets(exerciseName) {
       if (!exList || !Array.isArray(exList)) continue;
       for (var j = 0; j < exList.length; j++) {
         var ex = exList[j];
-        if (!ex.name || map[ex.name]) continue; // 첫 매칭만
+        if (!ex.name) continue;
+        if (map[ex.name] && map[ex.name].length >= RECENT_PERFORMANCES_KEEP) continue;
+        var entry = null;
         if (ex.setsDetail && Array.isArray(ex.setsDetail)) {
           var working = ex.setsDetail.filter(function(s) { return !s.isWarmup; });
-          if (working.length > 0) {
-            map[ex.name] = { sets: working, date: w.date };
-            continue;
-          }
+          if (working.length > 0) entry = { sets: working, date: w.date };
         }
-        // 폴백: 요약된 maxWeight + reps (legacy 데이터)
-        if (ex.maxWeight !== undefined || ex.weight !== undefined) {
+        // 폴백: 요약된 maxWeight + reps (legacy 데이터). reps가 배열([12,12,12])이거나
+        // 문자열이어도 숫자로 정규화 — 아니면 진행도 계산에서 조용히 누락됨.
+        if (!entry && (ex.maxWeight !== undefined || ex.weight !== undefined)) {
           var wt = ex.maxWeight !== undefined ? ex.maxWeight : ex.weight;
-          var rp = ex.reps || (Array.isArray(ex.repsArr) ? ex.repsArr[0] : 0);
-          map[ex.name] = { sets: [{ weight: wt, reps: rp }], date: w.date };
+          var rp = ex.reps;
+          if (Array.isArray(rp)) rp = rp[0];
+          if (!rp && Array.isArray(ex.repsArr)) rp = ex.repsArr[0];
+          rp = parseInt(rp, 10) || 0;
+          entry = { sets: [{ weight: wt, reps: rp }], date: w.date };
+        }
+        if (entry) {
+          if (!map[ex.name]) map[ex.name] = [];
+          map[ex.name].push(entry); // log[0]=최신이므로 [0]=가장 최근
         }
       }
     }
     _lastSetsCache = { logLen: log.length, map: map };
   }
-  return _lastSetsCache.map[exerciseName] || null;
+  return _lastSetsCache.map;
 }
 
-// 점진적 과부하 추천 (더블 프로그레션)
-// 지난 본 세트 모두가 목표 횟수 상단을 달성하면 +한 칸(장비 단위), 그 외 같은 무게 유지
+function getLastPerformedSets(exerciseName) {
+  var list = _buildRecentSetsMap()[exerciseName];
+  return (list && list[0]) || null;
+}
+
+// 최근 n세션 수행 목록 ([0]=가장 최근). 고중량 복합/경량 고립의 "2세션 연속" 판정용.
+function getRecentPerformances(exerciseName, n) {
+  var list = _buildRecentSetsMap()[exerciseName] || [];
+  return list.slice(0, n || 2);
+}
+
+// ═══════════════════════════════════════════════
+// 종목 클래스 + 반복범위 가드레일 (md 개편 Phase 5)
+// ═══════════════════════════════════════════════
+
+// 종목 → 진행 규칙 클래스. 명시 지정 → 재활 키워드 → 부위맵 휴리스틱 순.
+function getExerciseClass(exerciseName) {
+  var name = exerciseName || '';
+  if (EXERCISE_CLASS_OVERRIDES[name]) return EXERCISE_CLASS_OVERRIDES[name];
+
+  // 재활 키워드 (미등록 종목 이름도 감지)
+  for (var i = 0; i < REHAB_NAME_KEYWORDS.length; i++) {
+    if (name.indexOf(REHAB_NAME_KEYWORDS[i]) !== -1) return 'rehab';
+  }
+
+  var info = EXERCISE_BODY_PART_MAP[name] || getExercisePart(name);
+  if (!info) return 'isolation'; // 미등록 종목 — 보수적 기본값 (12-15회, 소폭 증량)
+
+  if (info.compound) {
+    for (var k = 0; k < HEAVY_COMPOUND_KEYWORDS.length; k++) {
+      if (name.indexOf(HEAVY_COMPOUND_KEYWORDS[k]) !== -1) return 'compound_heavy';
+    }
+    return 'compound_moderate';
+  }
+
+  return LIGHT_ISOLATION_PARTS.indexOf(info.primary) !== -1 ? 'light_isolation' : 'isolation';
+}
+
+// 목표 반복을 클래스 허용 범위로 교정 (교집합, 어긋나면 클래스 범위 전체).
+// "사이드 레터럴에 10회" 같은 범위 밖 제안을 시스템 레벨에서 차단하는 가드레일.
+function clampRepsToClass(exerciseName, targetReps) {
+  var rules = EXERCISE_CLASS_RULES[getExerciseClass(exerciseName)];
+  var r = parseRepRange(targetReps);
+  var low = Math.max(r.low || rules.repMin, rules.repMin);
+  var high = Math.min(r.high || rules.repMax, rules.repMax);
+  if (low > high) { low = rules.repMin; high = rules.repMax; } // 교집합 없음 → 클래스 범위
+  return { low: low, high: high };
+}
+
+// 반복범위 객체 → "15-25" / "8" 문자열 (targetReps 필드용)
+function repRangeToStr(range) {
+  return range.low === range.high ? String(range.low) : range.low + '-' + range.high;
+}
+
+// 최근 N일 내 이 종목에 통증 기록이 있는지 (세트별 painFlag 또는 종목별 painFlag)
+function hasRecentPain(exerciseName, days) {
+  var cutoff = new Date(Date.now() - (days || 14) * 86400000).toISOString().slice(0, 10);
+  var log = state.data.workoutLog || [];
+  for (var i = 0; i < log.length; i++) {
+    var w = log[i];
+    if (!w.date || w.date < cutoff) continue;
+    var exList = w.exercises || w.exercisesData;
+    if (!Array.isArray(exList)) continue;
+    for (var j = 0; j < exList.length; j++) {
+      var ex = exList[j];
+      if (ex.name !== exerciseName) continue;
+      if (ex.painFlag) return true;
+      var sets = ex.setsDetail;
+      if (Array.isArray(sets)) {
+        for (var k = 0; k < sets.length; k++) {
+          if (sets[k] && (sets[k].painFlag || sets[k].pain_flag)) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// 점진적 과부하 추천 — 종목 클래스별 진행 규칙 (더블 프로그레션 기반)
+// · compound_heavy / light_isolation: 상단 반복 2세션 연속 달성해야 증량 (경량 고립은 "아주 드물게")
+// · compound_moderate / isolation: 상단 1세션 달성 → 증량 (장비 최소 단위)
+// · rehab: 무게 진행 금지 — 진행 지표는 통증 감소
+// · 하드 가드레일: 반복은 클래스 범위로 클램프, 최근 2주 통증 기록 시 증량 금지
 // 기록이 없으면 1RM 기반 추천으로 폴백
 function getProgressiveRecommendation(exerciseName, targetReps) {
-  var last = getLastPerformedSets(exerciseName);
+  var cls = getExerciseClass(exerciseName);
+  var rules = EXERCISE_CLASS_RULES[cls];
+  var range = clampRepsToClass(exerciseName, targetReps);
+
+  var recent = getRecentPerformances(exerciseName, 2);
+  var last = recent[0];
   if (!last || !last.sets.length) {
     var w = suggestWorkingWeight(exerciseName, 0.7);
-    if (w) return { weight: w, source: 'rm_estimate', note: '1RM 추정 기반 (첫 시도)' };
+    if (w) return { weight: w, source: 'rm_estimate', note: '1RM 추정 기반 (첫 시도)', repRange: range, exClass: cls };
     return null;
   }
 
-  var workingSets = last.sets.filter(function(s) { return s.weight > 0 && s.reps > 0; });
+  // 재활: 무게 0(밴드)도 유효 — reps만 있으면 인정
+  var workingSets = last.sets.filter(function(s) {
+    return (cls === 'rehab' ? s.weight >= 0 : s.weight > 0) && s.reps > 0;
+  });
   if (!workingSets.length) return null;
 
   var maxW = Math.max.apply(null, workingSets.map(function(s) { return s.weight; }));
-  var topReps = parseRepRange(targetReps).high || 10;
+  var lastReps = workingSets.map(function(s) { return s.reps; });
+
+  if (cls === 'rehab') {
+    return {
+      weight: maxW,
+      source: 'rehab',
+      previousWeight: maxW,
+      previousReps: lastReps,
+      repRange: range,
+      exClass: cls,
+      note: '재활 종목 — 무게를 올리지 않아요. 통증 없이 ' + range.low + '~' + range.high + '회 컨트롤이 목표 (진행 지표 = 통증 감소)'
+    };
+  }
+
   var inc = getWeightIncrement(exerciseName); // 장비 증량 단위 (덤벨 2kg / 그 외 5kg)
+  var topReps = range.high;
 
-  var setsAtMaxW = workingSets.filter(function(s) { return s.weight === maxW; });
-  var allReachedTop = setsAtMaxW.length > 0 && setsAtMaxW.every(function(s) { return s.reps >= topReps; });
+  // 하드 가드레일: 최근 2주 통증 기록 → 증량 금지, 점검 제안으로 전환
+  if (hasRecentPain(exerciseName, 14)) {
+    return {
+      weight: maxW,
+      source: 'maintain',
+      painGated: true,
+      previousWeight: maxW,
+      previousReps: lastReps,
+      repRange: range,
+      exClass: cls,
+      note: '최근 2주 내 통증 기록 — 증량 대신 폼·그립·가동범위를 점검해요'
+    };
+  }
 
-  if (allReachedTop) {
+  function reachedTopAt(perf, weight) {
+    var ws = perf.sets.filter(function(s) { return s.weight === weight && s.reps > 0 && !s.isWarmup; });
+    return ws.length > 0 && ws.every(function(s) { return s.reps >= topReps; });
+  }
+
+  var lastReachedTop = reachedTopAt(last, maxW);
+  var needSessions = rules.doubleSessions; // 증량에 필요한 "상단 달성" 연속 세션 수
+  var prevReachedTop = recent.length > 1 && reachedTopAt(recent[1], maxW);
+  var canProgress = lastReachedTop && (needSessions <= 1 || prevReachedTop);
+
+  if (canProgress) {
     var newW = snapWeightToEquipment(maxW + inc, exerciseName);
     return {
       weight: newW,
       source: 'progress',
       previousWeight: maxW,
-      previousReps: setsAtMaxW.map(function(s) { return s.reps; }),
-      note: '지난 ' + maxW + 'kg × 상단 ' + topReps + '+회 달성 → ' + newW + 'kg'
+      previousReps: lastReps,
+      repRange: range,
+      exClass: cls,
+      note: (needSessions > 1 ? '2세션 연속 ' : '지난 ') + maxW + 'kg × 상단 ' + topReps + '회 달성 → ' + newW + 'kg'
     };
+  }
+
+  var holdNote;
+  if (lastReachedTop && needSessions > 1) {
+    holdNote = maxW + 'kg × ' + topReps + '회 달성! 한 세션 더 유지하면 +' + inc + 'kg' +
+      (cls === 'light_isolation' ? ' (경량 고립은 무게보다 반복·템포·컨트롤로 진행)' : '');
+  } else if (cls === 'light_isolation') {
+    holdNote = maxW + 'kg 고정, ' + range.low + '~' + range.high + '회에서 반복·템포·컨트롤로 진행';
+  } else {
+    holdNote = '지난 ' + maxW + 'kg에서 ' + topReps + '회 도전 (상단 도달 시 +' + inc + 'kg)';
   }
 
   return {
     weight: maxW,
     source: 'maintain',
     previousWeight: maxW,
-    previousReps: workingSets.map(function(s) { return s.reps; }),
-    note: '지난 ' + maxW + 'kg에서 ' + topReps + '회 도전 (상단 도달 시 +' + inc + 'kg)'
+    previousReps: lastReps,
+    repRange: range,
+    exClass: cls,
+    note: holdNote
   };
 }
 
@@ -209,6 +355,40 @@ function calculateRollingMax1RM(exerciseName, windowSessions) {
     if (recent[m].e1rm > max) max = recent[m].e1rm;
   }
   return { value: Math.round(max * 10) / 10, sessions: recent.length };
+}
+
+// 세트 완료취소/삭제 후 1RM 되돌리기.
+// 후보(과거 로그 rolling max, 세션에 남은 완료 세트 최고 e1RM, 갱신 직전 값) 중
+// 최댓값이 현재 1RM보다 낮으면 그 값으로 내린다 — 잘못 입력한 세트로 부풀려진 1RM 교정.
+function recalc1RMAfterEdit(exerciseName, prevRM) {
+  var key = EXERCISE_ALIASES_1RM[exerciseName] || exerciseName;
+  var data = storage.get(KEYS.ONE_RM_DATA, {});
+  var cur = data[key];
+  if (cur === undefined) return;
+
+  var candidates = [];
+  var roll = calculateRollingMax1RM(exerciseName);
+  if (roll) candidates.push(roll.value);
+  if (prevRM !== null && prevRM !== undefined) candidates.push(prevRM);
+
+  // 진행 중 세션에 남아 있는 완료 본 세트들의 e1RM (다른 세트가 세운 기록은 유지)
+  if (state.activeSession && Array.isArray(state.activeSession.exercises)) {
+    state.activeSession.exercises.forEach(function(ex) {
+      if (ex.name !== exerciseName) return;
+      (ex.sets || []).forEach(function(s) {
+        if (!s.completed || s.isWarmup || !s.weight || !s.reps) return;
+        if (s.reps > ROLLING_1RM_MAX_REPS) return;
+        candidates.push(calculate1RM(s.weight, s.reps));
+      });
+    });
+  }
+
+  if (!candidates.length) return; // 근거 없음 — 건드리지 않음 (보수적)
+  var best = Math.max.apply(null, candidates);
+  if (best < cur) {
+    data[key] = best;
+    storage.set(KEYS.ONE_RM_DATA, data);
+  }
 }
 
 // 세션 종료 후 호출: 로그 기반 rolling max로 추적 1RM 보정.
