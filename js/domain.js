@@ -1093,8 +1093,9 @@ function getRecentFeel(exerciseName, days) {
 // 확인된 채팅 신호를 전용 저장소에 즉시 기록 (세션 취소·0세트 종료·종목 교체와 무관하게 보존).
 // 통증 게이트(hasRecentPain)·자극 조회(getRecentFeel)가 workoutLog와 함께 이 저장소도 읽는다.
 function recordChatSignal(exerciseName, signal) {
-  if (!exerciseName || !signal) return;
+  if (!exerciseName || !signal) return false;
   var log = storage.get(KEYS.CHAT_SIGNALS, []);
+  if (!Array.isArray(log)) log = []; // 손상됐지만 JSON으로는 읽히는 값 방어
   log.unshift({
     date: getTodayStr(),
     name: exerciseName,
@@ -1103,13 +1104,16 @@ function recordChatSignal(exerciseName, signal) {
     feel: signal.feel || null,
     rpe: signal.rpe || null
   });
-  storage.set(KEYS.CHAT_SIGNALS, log.slice(0, 200));
+  return storage.set(KEYS.CHAT_SIGNALS, log.slice(0, 200));
 }
 
 // 최근 N일 내 채팅 신호 조회 (내부용 — [0]=최신)
+// 저장된 date가 KST(getTodayStr) 기준이므로 cutoff도 KST로 계산 (UTC면 오전 9시 전 하루 오차)
 function _recentChatSignals(exerciseName, days) {
-  var cutoff = new Date(Date.now() - (days || 14) * 86400000).toISOString().slice(0, 10);
-  return storage.get(KEYS.CHAT_SIGNALS, []).filter(function(s) {
+  var cutoff = getDateStr(new Date(Date.now() - (days || 14) * 86400000));
+  var log = storage.get(KEYS.CHAT_SIGNALS, []);
+  if (!Array.isArray(log)) return [];
+  return log.filter(function(s) {
     return s && s.name === exerciseName && s.date && s.date >= cutoff;
   });
 }
