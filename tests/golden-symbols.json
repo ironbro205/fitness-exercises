@@ -1,5 +1,5 @@
 {
-  "functionCount": 258,
+  "functionCount": 259,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -133,6 +133,7 @@
     "getRecentPerformances",
     "getRecentVolumeByPart",
     "getRecommendedSession",
+    "getResponseText",
     "getSessionSetPlan",
     "getTodayStr",
     "getTopLayer",

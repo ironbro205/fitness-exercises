@@ -669,7 +669,7 @@ test('코치지식 callCoachAPI — system 배열 + cache_control ephemeral(고�
     captured = JSON.parse(opts.body);
     return Promise.resolve({
       ok: true,
-      json: () => Promise.resolve({ content: [{ text: 'ok' }] }),
+      json: () => Promise.resolve({ content: [{ type: 'text', text: 'ok' }] }),
       text: () => Promise.resolve(''),
     });
   };
@@ -696,7 +696,7 @@ test('코치지식 generateFullRoutine — 지식 주입 + cache_control(캐싱)
     captured = JSON.parse(opts.body);
     return Promise.resolve({
       ok: true,
-      json: () => Promise.resolve({ content: [{ text: '{"headline":"t","reason":"r","exercises":[{"name":"벤치프레스","type":"복합","isMain":true,"sets":3,"reps":"6-8","weight":60,"rir":2,"note":"n"}]}' }] }),
+      json: () => Promise.resolve({ content: [{ type: 'text', text: '{"headline":"t","reason":"r","exercises":[{"name":"벤치프레스","type":"복합","isMain":true,"sets":3,"reps":"6-8","weight":60,"rir":2,"note":"n"}]}' }] }),
       text: () => Promise.resolve(''),
     });
   };
@@ -718,7 +718,7 @@ test('코치지식 modifyRoutineWithAI — 지식 주입 + cache_control(캐싱)
     captured = JSON.parse(opts.body);
     return Promise.resolve({
       ok: true,
-      json: () => Promise.resolve({ content: [{ text: '{"intent":"question","reply":"ok","changes":[],"updatedRoutine":null}' }] }),
+      json: () => Promise.resolve({ content: [{ type: 'text', text: '{"intent":"question","reply":"ok","changes":[],"updatedRoutine":null}' }] }),
       text: () => Promise.resolve(''),
     });
   };
@@ -741,7 +741,7 @@ test('코치지식 generateWeeklyReview — 지식 주입(문자열 system), 캐
     captured = JSON.parse(opts.body);
     return Promise.resolve({
       ok: true,
-      json: () => Promise.resolve({ content: [{ text: '{"headline":"h","grade":"A","wins":[],"improvements":[],"nextWeek":[],"coachNote":"n"}' }] }),
+      json: () => Promise.resolve({ content: [{ type: 'text', text: '{"headline":"h","grade":"A","wins":[],"improvements":[],"nextWeek":[],"coachNote":"n"}' }] }),
       text: () => Promise.resolve(''),
     });
   };

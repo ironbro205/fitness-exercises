@@ -4,6 +4,19 @@
 // AI 응답에서 첫 '{'부터 짝이 맞는 '}'까지 정확히 잘라낸다 (문자열·이스케이프 고려).
 // 응답 끝에 잡담이 붙거나, 탐욕적 정규식(/\{[\s\S]*\}/)이 과하게 무는 문제를 막는다.
 // 닫는 '}'를 못 찾으면(=응답이 중간에 잘림) null 을 돌려준다.
+// 응답 content 배열에서 텍스트 블록만 모아 반환.
+// Sonnet 5는 답 앞에 thinking(생각) 블록을 붙일 수 있어 content[0]이 텍스트가 아닐 수 있다 —
+// 첫 조각만 읽으면 "AI 응답이 비어있어요" 오판이 난다. 반드시 이 헬퍼로 읽을 것.
+function getResponseText(data) {
+  if (!data || !Array.isArray(data.content)) return '';
+  var out = '';
+  for (var i = 0; i < data.content.length; i++) {
+    var b = data.content[i];
+    if (b && b.type === 'text' && typeof b.text === 'string') out += b.text;
+  }
+  return out.trim();
+}
+
 function extractBalancedJson(s) {
   var start = s.indexOf('{');
   if (start === -1) return null;
@@ -176,10 +189,10 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
     }
     
     var data = await response.json();
-    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+    if (!getResponseText(data)) {
       return { error: 'AI 응답이 비어있어요. 다시 시도해주세요.' };
     }
-    var content = data.content[0].text;
+    var content = getResponseText(data);
 
     var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
 
@@ -691,10 +704,10 @@ async function callCoachAPI(messages) {
     }
     
     var data = await response.json();
-    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+    if (!getResponseText(data)) {
       return { error: 'AI 응답이 비어있어요. 다시 시도해주세요.' };
     }
-    var text = data.content[0].text;
+    var text = getResponseText(data);
     
     return { text: text };
   } catch (error) {
@@ -785,10 +798,10 @@ async function fetchAIRecommendation() {
     }
     
     var data = await response.json();
-    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+    if (!getResponseText(data)) {
       return null;
     }
-    var content = data.content[0].text;
+    var content = getResponseText(data);
     
     // JSON 추출
     var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -1090,10 +1103,10 @@ async function generateFullRoutine(bodyPart) {
     }
     
     var data = await response.json();
-    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+    if (!getResponseText(data)) {
       return { error: 'AI 응답이 비어있어요. 다시 시도해주세요.' };
     }
-    var content = data.content[0].text;
+    var content = getResponseText(data);
     
     var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
 
@@ -1385,10 +1398,10 @@ async function generateWeeklyReview(forceRefresh) {
     }
     
     var data = await response.json();
-    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+    if (!getResponseText(data)) {
       return null;
     }
-    var content = data.content[0].text;
+    var content = getResponseText(data);
     
     var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     var parsed;
@@ -1571,10 +1584,10 @@ async function analyzePlateauWithAI(signals) {
     if (!response.ok) return null;
     
     var data = await response.json();
-    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+    if (!getResponseText(data)) {
       return null;
     }
-    var content = data.content[0].text;
+    var content = getResponseText(data);
     
     var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     var parsed;
@@ -1886,10 +1899,10 @@ ${cardioHistoryContext()}
     }
 
     var data = await response.json();
-    if (!data || !Array.isArray(data.content) || data.content.length === 0 || !data.content[0].text) {
+    if (!getResponseText(data)) {
       return fallbackPlan();
     }
-    var content = data.content[0].text;
+    var content = getResponseText(data);
 
     var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     var parsed = null;
@@ -2065,8 +2078,8 @@ async function extractWorkoutSignals(userText, exerciseName) {
     });
     if (!response.ok) return null;
     var data = await response.json();
-    if (!data || !Array.isArray(data.content) || !data.content[0] || !data.content[0].text) return null;
-    var cleaned = data.content[0].text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    if (!getResponseText(data)) return null;
+    var cleaned = getResponseText(data).replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     var parsed = null;
     try { parsed = JSON.parse(cleaned); } catch (e) {
       var m = cleaned.match(/\{[\s\S]*\}/);
