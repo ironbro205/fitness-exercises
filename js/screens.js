@@ -2088,6 +2088,14 @@ function applyExerciseSwap(ex, newName) {
   state.exerciseSwapOpen = false;
   saveActiveSession();
   render();
+
+  // 부상 대조 경고 (막지는 않음 — 사용자 선택 존중)
+  var safety = checkExerciseSafety(newName);
+  if (safety.level === 'contra') {
+    showToast('⚠️ ' + INJURY_AREAS[safety.area].kr + ' 부상 등록됨 — 이 종목은 금기예요' + (safety.sub ? ' (대체: ' + safety.sub + ')' : ''));
+  } else if (safety.level === 'caution') {
+    showToast('⚠️ ' + INJURY_AREAS[safety.area].kr + ' 주의: ' + (safety.mod || '가볍게, 통증 없는 범위로'));
+  }
 }
 
 // ═══════════════════════════════════════════════

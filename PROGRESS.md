@@ -177,4 +177,4 @@
 - `af16e3f` — fix: Codex review — 1RM rollback, PR name escaping, rest-timer cleanup, legacy reps (브랜치 `conversational-coaching`)
 - `53f5705` — feat: progressive overload engine v2 — exercise classes + rep-range guardrails
 
-_다음 세션 재개: **개편 1단계 완료(브랜치 `conversational-coaching`, v35, 65/65)** — 사용자 폰 QA → PR·배포 → **2단계**(종목 금기·대체·폼큐 + VETO/REFER + 모델 claude-sonnet-4-5→**4.6** 교체) → **3단계**(세트 사이 채팅: 스트리밍 답변+통증·자극 추출 저장→painFlag로 통증 게이트 자동 연동). 반려 확정: 서버 프록시 X·부상 하드코딩 X(기억 노트 유지)·Opus 전환은 3단계 후 재평가._
+_다음 세션 재개: **개편 1단계 완료·배포·QA 통과(main, v36 = PR#36+#37)** → **2단계**(2026-07-14 사용자 승인으로 계획 수정: ①종목 안전 태그 — **부위 5개**(허리·어깨·무릎·손목·팔꿈치, 진단명 태그 아님)로 금기/주의/재활 + 대체 매핑, 기억 노트 injury 부상과 자동 대조, 프롬프트엔 걸리는 종목만 주입 ②출력 타입 RECOMMEND/ADJUST/**VETO 3종만** — **REFER 삭제**(중단 로직 없음, "심한 통증 지속 시 병원 권유" 프롬프트 한 줄만) ③**폼 큐 데이터 삭제**(모델이 이미 앎) ④모델 claude-sonnet-4-5→**claude-sonnet-5** 교체(ai.js 7곳, 정가 동일+2026-08-31까지 할인) ⑤VETO 코드 가드레일(AI 루틴에 금기 종목 들어오면 대체 교체/차단)) → **3단계**(세트 사이 채팅: 스트리밍 답변+통증·자극 추출 저장→painFlag로 통증 게이트 자동 연동). 반려 확정: 서버 프록시 X·부상 하드코딩 X(기억 노트 유지)·Opus 전환은 3단계 후 재평가._
