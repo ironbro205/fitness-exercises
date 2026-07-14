@@ -1389,6 +1389,9 @@ window.endSession = function(fromBack) {
     state.activeSession = null;
     state.restTimer = null;
     state.editingSet = null;
+    state.sessionChatOpen = false;      // 세트 사이 채팅은 세션과 함께 소멸
+    state.sessionChatPending = null;
+    state._sessionChatStreaming = false;
     saveActiveSession();
     saveRestTimer();
     if (restTickerInterval) { clearInterval(restTickerInterval); restTickerInterval = null; }
@@ -1463,7 +1466,7 @@ function finalizeSession() {
       var reps = doneSets.map(function(s) { return s.reps; });
       var maxWeight = Math.max.apply(null, weights);
       
-      exercisesDone.push({
+      var doneEntry = {
         name: ex.name,
         type: ex.type,
         sets: doneSets.length,        // 숫자 (기존 호환)
@@ -1475,7 +1478,12 @@ function finalizeSession() {
         lastWeight: ex.lastWeight,
         lastReps: ex.lastReps,
         isMain: !!ex.isMain
-      });
+      };
+      // 세트 사이 채팅에서 확인 후 저장된 신호 (3단계) — 통증 게이트·다음 추천이 읽는다
+      if (ex.painFlag) { doneEntry.painFlag = true; if (ex.painNote) doneEntry.painNote = ex.painNote; }
+      if (ex.feel) doneEntry.feel = ex.feel;
+      if (ex.chatRpe) doneEntry.chatRpe = ex.chatRpe;
+      exercisesDone.push(doneEntry);
       
       // PR 감지
       if (ex.lastWeight !== null && maxWeight > ex.lastWeight) {
@@ -1563,6 +1571,9 @@ function finalizeSession() {
   state.activeSession = null;
   state.restTimer = null;
   state.editingSet = null;
+  state.sessionChatOpen = false;        // 세트 사이 채팅은 세션과 함께 소멸
+  state.sessionChatPending = null;
+  state._sessionChatStreaming = false;
   saveActiveSession();
   saveRestTimer();
   if (restTickerInterval) { clearInterval(restTickerInterval); restTickerInterval = null; }
@@ -2369,7 +2380,10 @@ function renderWorkoutSession() {
           '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">' + session.sessionName + ' · 종목 ' + (session.currentExerciseIdx + 1) + '/' + totalExercises + '</p>' +
           '<p class="text-xs font-mono accent mt-0\\.5">⏱ ' + elapsedStr + '</p>' +
         '</div>' +
-        '<button class="session-header-btn" onclick="openExerciseSwap()" title="종목 변경">' + icon('dots', 18) + '</button>' +
+        '<div class="flex gap-2">' +
+          '<button class="session-header-btn" onclick="openSessionChat()" title="세트 사이 코치">' + icon('msg', 18) + '</button>' +
+          '<button class="session-header-btn" onclick="openExerciseSwap()" title="종목 변경">' + icon('dots', 18) + '</button>' +
+        '</div>' +
       '</div>' +
       
       // 전체 진행률
@@ -2471,7 +2485,153 @@ function renderWorkoutSession() {
     
     restTimerHtml +
     sheetHtml +
-    swapSheetHtml;
+    swapSheetHtml +
+    buildSessionChatSheetHtml(session, exercise);
+}
+
+// 세트 사이 코치 시트 (운동 중 채팅 — 3단계)
+function buildSessionChatSheetHtml(session, exercise) {
+  if (!state.sessionChatOpen) return '';
+
+  var msgs = (session.chat || []).map(function(m) {
+    return '<div class="chat-line ' + (m.role === 'user' ? 'user' : 'coach') + '">' + renderMarkdown(m.content) + '</div>';
+  }).join('');
+
+  var streamingHtml = state._sessionChatStreaming
+    ? '<div class="chat-line coach"><span id="session-chat-stream"></span><span class="chat-cursor">▌</span></div>'
+    : '';
+
+  // 추출 신호 확인 칩 (확인 후 저장)
+  var pendingHtml = '';
+  if (state.sessionChatPending && !state._sessionChatStreaming) {
+    var p = state.sessionChatPending;
+    var parts = [];
+    if (p.pain) parts.push('🩹 통증' + (p.painNote ? ' (' + escapeHtml(p.painNote) + ')' : ''));
+    if (p.feel === 'bad') parts.push('😕 자극 나쁨');
+    if (p.feel === 'good') parts.push('👍 자극 좋음');
+    if (p.rpe) parts.push('RPE ' + p.rpe);
+    var targetEx = session.exercises[p.exIdx];
+    pendingHtml =
+      '<div class="chat-signal-chip">' +
+        '<p class="text-xs">' + parts.join(' · ') + ' — <b>' + escapeHtml(targetEx ? targetEx.name : '') + '</b>에 기록할까요?' +
+          (p.pain ? '<br/><span class="text-stone-400">통증 기록 시 이 종목 증량이 자동 중단돼요</span>' : '') + '</p>' +
+        '<div class="flex gap-2 mt-2">' +
+          '<button class="adj-btn accent-btn" style="flex:1;" onclick="confirmChatSignal()">기록</button>' +
+          '<button class="adj-btn" style="flex:1;" onclick="dismissChatSignal()">아니오</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  return '' +
+    '<div class="sheet-overlay" onclick="closeSessionChat()">' +
+      '<div class="sheet" onclick="event.stopPropagation()" style="display:flex; flex-direction:column; max-height:70vh;">' +
+        '<div class="sheet-handle"></div>' +
+        '<div class="flex items-center justify-between mb-2">' +
+          '<div>' +
+            '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">세트 사이 코치</p>' +
+            '<p class="font-bebas text-xl mt-1">' + escapeHtml(exercise.name) + '</p>' +
+          '</div>' +
+          '<button class="session-header-btn" onclick="closeSessionChat()">' + icon('close', 18) + '</button>' +
+        '</div>' +
+        '<div id="session-chat-list" style="flex:1; overflow-y:auto; min-height:120px; padding:4px 2px;">' +
+          (msgs || '<p class="text-xs font-mono text-stone-500" style="padding:12px 4px;">지금 하는 운동에 대해 물어보세요 — 자세, 무게 판단, 통증, 자극 등. 통증·자극을 말하면 기록으로 남겨 다음 추천에 반영해요.</p>') +
+          streamingHtml +
+          pendingHtml +
+        '</div>' +
+        '<div class="flex gap-2 mt-3">' +
+          '<input id="session-chat-input" type="text" placeholder="메시지 입력…" ' +
+            (state._sessionChatStreaming ? 'disabled ' : '') +
+            'onkeydown="if(event.key===\'Enter\')sendSessionChatMessage()" onclick="event.stopPropagation()" ' +
+            'style="flex:1; padding:10px 12px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:10px; color:inherit; font-size:14px; outline:none;" />' +
+          '<button class="rest-done-btn" onclick="sendSessionChatMessage()"' + (state._sessionChatStreaming ? ' disabled' : '') + '>전송</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+}
+
+// ── 세트 사이 코치: 열기/닫기/전송/신호 확인 ──
+function openSessionChat() {
+  if (!state.activeSession) return;
+  if (!state.activeSession.chat) state.activeSession.chat = [];
+  state.sessionChatOpen = true;
+  render();
+  scrollSessionChatToBottom();
+}
+
+function closeSessionChat() {
+  state.sessionChatOpen = false;
+  render();
+}
+
+function scrollSessionChatToBottom() {
+  var list = document.getElementById('session-chat-list');
+  if (list) list.scrollTop = list.scrollHeight;
+}
+
+function sendSessionChatMessage() {
+  if (state._sessionChatStreaming) return;
+  var input = document.getElementById('session-chat-input');
+  var text = (input && input.value || '').trim();
+  if (!text) return;
+  var session = state.activeSession;
+  if (!session) return;
+  if (!session.chat) session.chat = [];
+
+  session.chat.push({ role: 'user', content: text });
+  if (session.chat.length > 40) session.chat = session.chat.slice(-40); // 세션 내 캡
+  state._sessionChatStreaming = true;
+  saveActiveSession();
+  render();
+  scrollSessionChatToBottom();
+
+  var exIdx = session.currentExerciseIdx;
+  var exName = session.exercises[exIdx].name;
+
+  // 신호 추출 (haiku, 병렬) — 결과는 확인 칩으로만, 저장은 사용자 확인 후
+  extractWorkoutSignals(text, exName).then(function(sig) {
+    if (sig) {
+      sig.exIdx = exIdx;
+      state.sessionChatPending = sig;
+      if (!state._sessionChatStreaming && state.sessionChatOpen) { render(); scrollSessionChatToBottom(); }
+    }
+  });
+
+  // 코치 응답 (스트리밍) — 에러 메시지는 API 이력에서 제외되도록 isError 표시
+  var apiMessages = session.chat.slice(-12)
+    .filter(function(m) { return !m.isError; })
+    .map(function(m) { return { role: m.role, content: m.content }; });
+
+  callSessionCoachAPI(apiMessages, function(fullText) {
+    var el = document.getElementById('session-chat-stream');
+    if (el) { el.textContent = fullText; scrollSessionChatToBottom(); }
+  }).then(function(result) {
+    state._sessionChatStreaming = false;
+    if (result.error) {
+      session.chat.push({ role: 'assistant', content: '⚠️ ' + result.error, isError: true });
+    } else {
+      session.chat.push({ role: 'assistant', content: result.text });
+    }
+    saveActiveSession();
+    if (state.sessionChatOpen) { render(); scrollSessionChatToBottom(); }
+  });
+}
+
+function confirmChatSignal() {
+  var sig = state.sessionChatPending;
+  state.sessionChatPending = null;
+  if (sig && state.activeSession) {
+    var ex = state.activeSession.exercises[sig.exIdx];
+    if (ex && applyChatSignalToExercise(ex, sig)) {
+      saveActiveSession();
+      showToast(sig.pain ? '🩹 통증 기록됨 — 이 종목 증량을 중단해요' : '기록했어요 — 다음 추천에 반영돼요');
+    }
+  }
+  render();
+}
+
+function dismissChatSignal() {
+  state.sessionChatPending = null;
+  render();
 }
 
 // ═══════════════════════════════════════════════

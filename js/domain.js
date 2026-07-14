@@ -1058,3 +1058,45 @@ function applySafetyGuardrail(exercises) {
   }).filter(Boolean);
   return { exercises: out, changes: changes };
 }
+
+// ═══════════════════════════════════════════════
+// 세트 사이 채팅 신호 (3단계 — 통증·자극·RPE 피드백 루프)
+// ═══════════════════════════════════════════════
+
+// 최근 N일 내 이 종목의 자극 평가 ('bad'|'good'|null). 가장 최근 기록 우선.
+function getRecentFeel(exerciseName, days) {
+  var cutoff = new Date(Date.now() - (days || 14) * 86400000).toISOString().slice(0, 10);
+  var log = state.data.workoutLog || [];
+  for (var i = 0; i < log.length; i++) {
+    var w = log[i];
+    if (!w.date || w.date < cutoff) continue;
+    var exList = w.exercises || w.exercisesData;
+    if (!Array.isArray(exList)) continue;
+    for (var j = 0; j < exList.length; j++) {
+      var ex = exList[j];
+      if (ex.name === exerciseName && (ex.feel === 'bad' || ex.feel === 'good')) return ex.feel;
+    }
+  }
+  return null;
+}
+
+// 추출된 채팅 신호를 세션 종목 객체에 적용 (사용자 확인 후 호출).
+// painFlag는 1단계 통증 게이트(hasRecentPain)가 읽어 증량을 자동 중단한다.
+function applyChatSignalToExercise(ex, signal) {
+  if (!ex || !signal) return false;
+  var applied = false;
+  if (signal.pain) {
+    ex.painFlag = true;
+    if (signal.painNote) ex.painNote = signal.painNote;
+    applied = true;
+  }
+  if (signal.feel === 'good' || signal.feel === 'bad') {
+    ex.feel = signal.feel;
+    applied = true;
+  }
+  if (typeof signal.rpe === 'number') {
+    ex.chatRpe = signal.rpe;
+    applied = true;
+  }
+  return applied;
+}

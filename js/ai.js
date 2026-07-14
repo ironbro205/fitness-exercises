@@ -464,6 +464,9 @@ function buildUserContext(options) {
       var info = recentLifts[name];
       if (info.weight === null || info.weight === undefined) return;
       var marker = info.plateau ? ' 🔥' : '';
+      // 세트 사이 채팅에서 추출된 신호 반영 (3단계 피드백 루프)
+      if (hasRecentPain(name, 14)) marker += ' ⚠️최근 통증 보고(증량 금지, 가볍게 또는 대체 고려)';
+      else if (getRecentFeel(name, 14) === 'bad') marker += ' 😕자극 나쁨(종목·각도 교체 고려)';
       var repsStr = (info.lastReps && info.lastReps.length) ? ' × ' + info.lastReps.join(',') + '회' : '';
       ctx += '- ' + name + ': ' + info.weight + 'kg' + repsStr + ' (' + daysAgo(info.date) + ')' + marker + '\n';
     });
@@ -1914,5 +1917,172 @@ ${cardioHistoryContext()}
   } catch (error) {
     console.error('유산소 인터벌 호출 실패:', error);
     return fallbackPlan();                                  // 네트워크 예외에도 유산소 시작 가능하게
+  }
+}
+
+// ═══════════════════════════════════════════════
+// 세트 사이 채팅 (운동 중 — 3단계)
+// ═══════════════════════════════════════════════
+
+// 현재 세션·종목 상황을 짧은 컨텍스트 블록으로 (세트 사이 채팅 전용)
+function buildSessionChatContext() {
+  var session = state.activeSession;
+  if (!session || !session.exercises || !session.exercises.length) return '';
+  var ex = session.exercises[session.currentExerciseIdx];
+  var working = ex.sets.filter(function(s) { return !s.isWarmup; });
+  var done = working.filter(function(s) { return s.completed; });
+  var setsStr = done.map(function(s) { return s.weight + 'kg×' + s.reps; }).join(', ') || '아직 없음';
+  var ctx = '## 🏋️ 지금 운동 중 (세트 사이 휴식)\n' +
+    '- 세션: ' + session.sessionName + ' — 종목 ' + (session.currentExerciseIdx + 1) + '/' + session.exercises.length + '\n' +
+    '- 현재 종목: ' + ex.name + ' (' + (ex.type || '') + ', 목표 ' + (ex.targetReps || '?') + '회)\n' +
+    '- 오늘 이 종목 완료 세트: ' + setsStr + ' (' + done.length + '/' + working.length + ')\n';
+  var prog = getProgressiveRecommendation(ex.name, ex.targetReps);
+  if (prog && prog.previousWeight !== undefined && prog.previousWeight !== null) {
+    ctx += '- 지난 세션 수행: ' + prog.previousWeight + 'kg × ' + (prog.previousReps || []).join(',') + '회\n';
+  }
+  var safety = checkExerciseSafety(ex.name);
+  if (safety.level === 'caution') {
+    ctx += '- ⚠️ 사용자 부상(' + INJURY_AREAS[safety.area].kr + ') 주의 종목: ' + (safety.mod || '가볍게, 통증 없는 범위로') + '\n';
+  } else if (safety.level === 'contra') {
+    ctx += '- 🚫 사용자 부상(' + INJURY_AREAS[safety.area].kr + ') 금기 종목' + (safety.sub ? ' (대체: ' + safety.sub + ')' : '') + ' — 중단을 권할 것\n';
+  }
+  return ctx;
+}
+
+// SSE(스트리밍) 버퍼에서 완성된 줄만 파싱해 텍스트 조각을 뽑는다 (순수 함수 — 테스트 대상).
+// 반환: { deltas: [텍스트 조각들], rest: 아직 줄이 안 끝난 나머지 버퍼 }
+function parseSSEStream(buffer) {
+  var deltas = [];
+  var rest = buffer;
+  var idx;
+  while ((idx = rest.indexOf('\n')) !== -1) {
+    var line = rest.slice(0, idx).replace(/\r$/, '');
+    rest = rest.slice(idx + 1);
+    if (line.indexOf('data: ') !== 0) continue;
+    var payload = line.slice(6);
+    try {
+      var evt = JSON.parse(payload);
+      if (evt.type === 'content_block_delta' && evt.delta && typeof evt.delta.text === 'string') {
+        deltas.push(evt.delta.text);
+      }
+    } catch (e) { /* data가 JSON이 아니면 무시 */ }
+  }
+  return { deltas: deltas, rest: rest };
+}
+
+// 세트 사이 코치 호출 — 스트리밍. onDelta(지금까지의 전체 텍스트)가 조각마다 불린다.
+async function callSessionCoachAPI(messages, onDelta) {
+  var apiKey = state.apiKey;
+  if (!apiKey) return { error: 'API 키가 설정되지 않았습니다. 더보기 > Anthropic API 키에서 설정해주세요.' };
+
+  var coachParts = buildCoachSystemParts();
+  var sessionBlock = buildSessionChatContext() +
+    '\n## 지금 모드: 세트 사이 짧은 코칭 (중요)\n' +
+    '- 사용자는 운동 중이고 휴식 시간에 묻는다. **1~3문장으로 짧게**, 지금 바로 실행할 수 있게 답한다. 긴 설명·목록 금지.\n' +
+    '- 통증을 말하면: 무게를 낮추거나 가동범위를 줄이거나 이 종목을 중단하라고 명확히 권한다(안전 우선). 부상 안전 규칙의 금기 종목이면 즉시 거부(VETO)하고 대체를 제시한다.\n' +
+    '- 자극이 안 온다고 하면: 자세 큐 1~2개 또는 무게·템포 조정을 제안한다.\n' +
+    '- 남은 세트 무게·횟수 판단을 물으면 위 "오늘 완료 세트"와 목표 반복을 근거로 구체적 수치로 답한다.\n';
+
+  try {
+    var response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5',
+        max_tokens: 512,
+        stream: true,
+        // 코치 채팅과 같은 stable 블록 재사용 → 프롬프트 캐시 공유로 비용 절감
+        system: [
+          { type: 'text', text: coachParts.stable, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: coachParts.dynamic + '\n' + sessionBlock }
+        ],
+        messages: messages
+      })
+    });
+
+    if (!response.ok) {
+      var errorText = await response.text();
+      console.error('Session coach API error:', response.status, errorText);
+      if (response.status === 401) return { error: 'API 키가 유효하지 않습니다. 더보기에서 키를 확인해주세요.' };
+      if (response.status === 429) return { error: '요청 한도 초과. 잠시 후 다시 시도해주세요.' };
+      return { error: 'API 오류 (' + response.status + ')' };
+    }
+
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buf = '';
+    var full = '';
+    while (true) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      var parsed = parseSSEStream(buf);
+      buf = parsed.rest;
+      if (parsed.deltas.length) {
+        full += parsed.deltas.join('');
+        if (onDelta) onDelta(full);
+      }
+    }
+    if (!full) return { error: 'AI 응답이 비어있어요. 다시 시도해주세요.' };
+    return { text: full };
+  } catch (error) {
+    console.error('세트 사이 코치 호출 실패:', error);
+    return { error: '네트워크 오류: ' + error.message };
+  }
+}
+
+// 사용자 채팅 한 마디에서 통증·자극·RPE 신호 추출 (haiku — 빠르고 저렴).
+// 신호가 없거나 실패하면 null. 저장은 사용자 확인 후에만 한다.
+async function extractWorkoutSignals(userText, exerciseName) {
+  if (!state.apiKey) return null;
+  try {
+    var response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': state.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5',
+        max_tokens: 150,
+        system: '운동 중 사용자가 코치에게 보낸 채팅 한 마디에서 신호를 추출한다. JSON만 출력.\n' +
+          '형식: {"pain": true|false, "painNote": "부위+증상 요약(10자 내)" 또는 null, "feel": "good"|"bad"|null, "rpe": 1~10 정수 또는 null}\n' +
+          '- pain: 지금 이 운동으로 아픔·통증·불편·시큰함·결림을 말할 때만 true. 과거 이야기, 일반 질문("어깨 아플 땐 뭐가 좋아?")은 false.\n' +
+          '- feel: 자극이 잘 온다(good) / 안 온다·엉뚱한 데로 샌다(bad)를 말할 때만.\n' +
+          '- rpe: "너무 힘들다"(9), "여유 있다"(6)처럼 강도 표현이 명확할 때만 1~10 정수로.\n' +
+          '- 확실하지 않으면 전부 false/null. 절대 추측하지 않는다.',
+        messages: [
+          { role: 'user', content: '종목: ' + exerciseName + '\n메시지: ' + userText }
+        ]
+      })
+    });
+    if (!response.ok) return null;
+    var data = await response.json();
+    if (!data || !Array.isArray(data.content) || !data.content[0] || !data.content[0].text) return null;
+    var cleaned = data.content[0].text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    var parsed = null;
+    try { parsed = JSON.parse(cleaned); } catch (e) {
+      var m = cleaned.match(/\{[\s\S]*\}/);
+      if (m) { try { parsed = JSON.parse(m[0]); } catch (e2) { parsed = null; } }
+    }
+    if (!parsed) return null;
+    var sig = {
+      pain: !!parsed.pain,
+      painNote: (parsed.pain && typeof parsed.painNote === 'string') ? parsed.painNote.slice(0, 30) : null,
+      feel: (parsed.feel === 'good' || parsed.feel === 'bad') ? parsed.feel : null,
+      rpe: (typeof parsed.rpe === 'number' && parsed.rpe >= 1 && parsed.rpe <= 10) ? Math.round(parsed.rpe) : null
+    };
+    if (!sig.pain && !sig.feel && !sig.rpe) return null;
+    return sig;
+  } catch (error) {
+    console.error('신호 추출 실패:', error);
+    return null;
   }
 }

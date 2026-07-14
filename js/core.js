@@ -118,7 +118,7 @@ var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v37';
+var APP_VERSION = 'v38';
 // 백업에 담지 않는 키. 두 부류:
 // (1) 로컬 전용·민감 → 복원해도 그대로 보존 (API 키·코치 대화)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
@@ -286,6 +286,10 @@ var state = {
   coachMessages: [],
   coachInputText: '',
   coachThinking: false,
+  // 세트 사이 채팅 (운동 중 — 3단계). 대화 내용은 activeSession.chat에 저장(세션과 함께 소멸)
+  sessionChatOpen: false,
+  sessionChatPending: null,     // 확인 대기 중인 추출 신호 {pain, painNote, feel, rpe, exIdx}
+  _sessionChatStreaming: false,
   // AI 추천
   aiRecommendation: null,
   aiRecLoading: false,
