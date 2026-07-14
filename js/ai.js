@@ -42,20 +42,22 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
   // 무게 추천 계산 (1RM 기반)
   var oneRMData = storage.get(KEYS.ONE_RM_DATA, {});
   var routineBalance = analyzeRoutineBalance(currentRoutine.exercises);
-  
+  var safetyBlock = buildSafetyPromptBlock();
+
   var systemPrompt = '당신은 과학적 근거 기반의 피트니스 코치다. ' +
     '운동 루틴 화면에서 사용자가 보낸 메시지를 두 가지 의도로 분기 처리: (1) modify=루틴 수정 (2) question=일반 질문/대화. JSON으로만 응답.\n' +
     freeIntro + '\n' +
-    
+
     '═════════════════════════════════════\n' +
     '🎯 [데이터] 현재 루틴 자동 분석 (이 데이터 그대로 신뢰)\n' +
     '═════════════════════════════════════\n' +
     formatBalanceAnalysis(routineBalance) + '\n\n' +
-    
+
     '═════════════════════════════════════\n' +
     '📋 [데이터] 사용자 컨텍스트\n' +
     '═════════════════════════════════════\n' +
     context + '\n' +
+    (safetyBlock ? safetyBlock + '\n' : '') +
     
     '═════════════════════════════════════\n' +
     '⚙️ [규칙] 의도 판단 + 응답 형식\n' +
@@ -156,7 +158,7 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
+        model: 'claude-sonnet-5',
         // 4096: 6~7종목 전체 루틴 JSON(이유/note 포함)이 잘리지 않도록 충분히 확보.
         // (2048은 응답 중간 잘림 → JSON 파싱 실패 → 날 JSON 노출 + 적용버튼 사라짐 버그의 원인이었다)
         max_tokens: 4096,
@@ -221,9 +223,23 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
       Array.isArray(parsed.updatedRoutine.exercises) &&
       parsed.updatedRoutine.exercises.length > 0) ? parsed.updatedRoutine : null;
 
+    // VETO 가드레일: 수정안에 금기 종목이 들어왔으면 교체/제거하고 답변에 알림
+    var replyText = parsed.reply || '';
+    if (validRoutine) {
+      var guarded = applySafetyGuardrail(validRoutine.exercises);
+      if (guarded.changes.length) {
+        validRoutine.exercises = guarded.exercises;
+        var changeMsgs = guarded.changes.map(function(c) {
+          return c.to ? (c.from + ' → ' + c.to + ' (' + c.areaKr + ' 보호)') : (c.from + ' 제외 (' + c.areaKr + ' 보호)');
+        });
+        replyText += '\n\n🛡️ 안전 교체: ' + changeMsgs.join(', ');
+      }
+      if (!validRoutine.exercises.length) validRoutine = null;
+    }
+
     return {
       intent: parsed.intent || (validRoutine ? 'modify' : 'question'),
-      reply: parsed.reply || '',
+      reply: replyText,
       changes: Array.isArray(parsed.changes) ? parsed.changes : [],
       updatedRoutine: validRoutine
     };
@@ -604,13 +620,21 @@ function buildCoachSystemParts() {
     '- "체스트프레스 65kg 3회 연속 같음 = 정체기, +5kg 도전" (정체기 활용)\n' +
     '※ "부위별 주간 볼륨"은 그룹 합산(가슴 = chest+chest_upper+chest_lower 등). 그대로 인용 OK.\n\n' +
 
+    '## 답변 등급 (종목·통증 조언 시 — 안전)\n' +
+    '- 추천(RECOMMEND): 문제없으면 평소처럼 추천한다.\n' +
+    '- 조정(ADJUST): 부상·통증과 얽힌 종목이면 "하되 이렇게 바꿔라" — 그립·각도·가동범위·무게 수정을 구체적으로 제시한다.\n' +
+    '- 거부(VETO): 아래 "부상 안전 규칙"의 금기 종목은 사용자가 하겠다고 해도 명확히 거부하고 대체 종목을 제시한다. 얼버무리지 말 것.\n' +
+    '- 병원 권고: 날카로운 통증·저림·일상생활에 지장 주는 통증이 계속된다고 하면, 운동 조언 대신 병원 진료를 우선 권한다.\n\n' +
+
     '## 응답 스타일\n' +
     '- **길이**: 단순 질문은 2~4문장. 자세·부상·식단 전략처럼 설명이 필요한 질문은 필요한 만큼 충분히(소제목·목록 사용 가능). 묻지 않은 것까지 늘어놓지 말 것.\n' +
     '- **구체**: "더 무겁게" X → "65 → 67.5kg" O.\n' +
     '- **담백하고 전문적**: 군더더기 인사·응원 없이 본론부터. 코치다운 자신감으로 한국어로 답한다.\n' +
     '- 강조는 **굵게**, 운동명은 `백틱`.';
 
-  var dynamic = '## 📌 기억 노트 (이 사용자에 대해 장기 기억 — 부상·선호·목표·일정)\n' +
+  var safetyBlock = buildSafetyPromptBlock();
+  var dynamic = (safetyBlock ? safetyBlock + '\n' : '') +
+    '## 📌 기억 노트 (이 사용자에 대해 장기 기억 — 부상·선호·목표·일정)\n' +
     formatCoachMemoryForPrompt(state.coachMemory) + '\n\n' +
     '## 사용자 현재 데이터\n' +
     buildUserContext();
@@ -642,7 +666,7 @@ async function callCoachAPI(messages) {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
+        model: 'claude-sonnet-5',
         max_tokens: 1024,
         system: [
           { type: 'text', text: coachParts.stable, cache_control: { type: 'ephemeral' } },
@@ -730,6 +754,7 @@ async function fetchAIRecommendation() {
     '- 최근 추천 기록: ' + recentRecsNote + '\n' +
     '- 위 최근 추천과 같은 부위를 반복하지 마라. 단, 데이터상 부족 부위가 그것뿐이면 재추천 가능(reason에 이유 명시).\n\n' +
 
+    (function() { var sb = buildSafetyPromptBlock(); return sb ? sb + '(suggestion에 금기 종목을 제안하지 말 것)\n\n' : ''; })() +
     '## 사용자 데이터\n' + context;
   
   try {
@@ -742,7 +767,7 @@ async function fetchAIRecommendation() {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
+        model: 'claude-sonnet-5',
         max_tokens: 512,
         system: systemPrompt,
         messages: [
@@ -898,6 +923,7 @@ async function generateFullRoutine(bodyPart) {
   
   // 부상·제약(injury)만 안전 반영 — 선호/목표/일정은 루틴 생성에서 제외
   var injuryMemory = (state.coachMemory || []).filter(function(m) { return m.category === 'injury'; });
+  var safetyBlock = buildSafetyPromptBlock();
 
   var systemPrompt = '당신은 과학적 근거 기반 피트니스 코치다. ' +
     info.name + ' (' + info.kor + ') 루틴 5~7개 종목 생성. JSON으로만 응답.\n' +
@@ -907,6 +933,7 @@ async function generateFullRoutine(bodyPart) {
     '═════════════════════════════════════\n' +
     context + '\n' +
     (injuryMemory.length ? ('## 🩹 부상·제약 (안전 최우선 — 종목 선택 시 반드시 반영)\n' + formatCoachMemoryForPrompt(injuryMemory) + '\n\n') : '') +
+    (safetyBlock ? safetyBlock + '\n' : '') +
 
     '═════════════════════════════════════\n' +
     '🏋️ [데이터] ' + info.name + ' 사용 가능 종목 풀\n' +
@@ -1040,7 +1067,7 @@ async function generateFullRoutine(bodyPart) {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
+        model: 'claude-sonnet-5',
         // 4096: 7종목 루틴 + reason/note 가 잘리지 않도록 (2048은 중간 잘림 위험)
         max_tokens: 4096,
         // 지식 베이스는 고정 블록(cache_control)으로, 부위·종목풀·사용자데이터(systemPrompt)는 분기점 뒤
@@ -1079,28 +1106,43 @@ async function generateFullRoutine(bodyPart) {
     if (!Array.isArray(parsed.exercises) || parsed.exercises.length === 0) {
       return { error: '종목 목록이 없습니다' };
     }
-    
+
+    var mappedExercises = parsed.exercises.map(function(ex) {
+      return {
+        name: ex.name || '종목',
+        type: ex.type || '보조',
+        isMain: !!ex.isMain,
+        sets: ex.sets || 3,
+        reps: ex.reps || '8-12',
+        weight: ex.weight ? snapWeightToEquipment(ex.weight, ex.name) : null,
+        rir: ex.rir || 2,
+        rest: ex.rest || null,
+        note: ex.note || ''
+      };
+    });
+
+    // VETO 가드레일: AI가 프롬프트를 어기고 금기 종목을 넣었어도 여기서 교체/제거
+    var guarded = applySafetyGuardrail(mappedExercises);
+    if (!guarded.exercises.length) {
+      return { error: '부상 안전 필터로 모든 종목이 제외됐어요. 다시 시도해주세요.' };
+    }
+    var cautionText = parsed.caution || '';
+    if (guarded.changes.length) {
+      var changeMsgs = guarded.changes.map(function(c) {
+        return c.to ? (c.from + ' → ' + c.to + ' (' + c.areaKr + ' 보호)') : (c.from + ' 제외 (' + c.areaKr + ' 보호)');
+      });
+      cautionText = (cautionText ? cautionText + ' · ' : '') + '🛡️ 안전 교체: ' + changeMsgs.join(', ');
+    }
+
     return {
       bodyPart: bodyPart,
       headline: parsed.headline || (info.name + ' 루틴'),
       reason: parsed.reason || '',
       duration: parsed.duration || 60,
-      totalSets: parsed.totalSets || parsed.exercises.reduce(function(s, e) { return s + (e.sets || 3); }, 0),
+      totalSets: parsed.totalSets || guarded.exercises.reduce(function(s, e) { return s + (e.sets || 3); }, 0),
       intensity: parsed.intensity || 'moderate',
-      caution: parsed.caution || '',
-      exercises: parsed.exercises.map(function(ex) {
-        return {
-          name: ex.name || '종목',
-          type: ex.type || '보조',
-          isMain: !!ex.isMain,
-          sets: ex.sets || 3,
-          reps: ex.reps || '8-12',
-          weight: ex.weight ? snapWeightToEquipment(ex.weight, ex.name) : null,
-          rir: ex.rir || 2,
-          rest: ex.rest || null,
-          note: ex.note || ''
-        };
-      }),
+      caution: cautionText,
+      exercises: guarded.exercises,
       generatedAt: new Date().toISOString()
     };
   } catch (error) {
@@ -1311,6 +1353,7 @@ async function generateWeeklyReview(forceRefresh) {
     '- ' + profile.age + '세, ' + profile.height + 'cm, 목표: 린매스\n' +
     '- 목표: 주 ' + profile.workoutFreq + '회 운동\n' +
     '- 사이클: ' + profile.currentCycle + '차 / ' + profile.currentWeek + '주차 (' + profile.cyclePhase + ')\n\n' +
+    (function() { var sb = buildSafetyPromptBlock(); return sb ? sb + '(nextWeek 조정에 금기 종목을 제안하지 말 것)\n\n' : ''; })() +
     weekSummary;
   
   try {
@@ -1323,7 +1366,7 @@ async function generateWeeklyReview(forceRefresh) {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
+        model: 'claude-sonnet-5',
         max_tokens: 1500,
         // 주간 리뷰는 주 1회 호출이라 캐싱 효과 없음 → 지식 주입만(품질↑), cache_control 미적용
         system: '## 🧬 운동과학 지식 베이스 (주간 리뷰 평가에 활용)\n' + COACH_KNOWLEDGE + '\n\n' + systemPrompt,
@@ -1500,6 +1543,7 @@ async function analyzePlateauWithAI(signals) {
     '- 점진 과부하 실패: 중량/횟수 정체 → 디로드 또는 변형 자극\n' +
     '- 회복 부족: 빈도/수면 → 휴식일 늘리기\n' +
     '- 자극 적응: 같은 종목 6주 이상 → 종목 교체\n\n' +
+    (function() { var sb = buildSafetyPromptBlock(); return sb ? sb + '(조정안에 금기 종목을 제안하지 말 것)\n\n' : ''; })() +
     '## 사용자 데이터\n' + context;
   
   try {
@@ -1512,7 +1556,7 @@ async function analyzePlateauWithAI(signals) {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
+        model: 'claude-sonnet-5',
         max_tokens: 1024,
         system: systemPrompt,
         messages: [
@@ -1824,7 +1868,7 @@ ${cardioHistoryContext()}
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
+        model: 'claude-sonnet-5',
         max_tokens: 1500,
         system: systemPrompt,
         messages: [

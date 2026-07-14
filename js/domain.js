@@ -943,3 +943,118 @@ function generateLinePath(data, width, height, padding) {
     yMax: yMax
   };
 }
+
+// ═══════════════════════════════════════════════
+// 종목 안전 (부상 대조 + VETO 가드레일)
+// ═══════════════════════════════════════════════
+
+// 기억 노트(injury)의 자유 텍스트에서 부상 부위 키워드를 찾아 부위 키 배열 반환 (예: ['lower_back'])
+function getUserInjuryAreas() {
+  var notes = (state.coachMemory || []).filter(function(m) { return m.category === 'injury'; });
+  if (!notes.length) return [];
+  var areas = [];
+  Object.keys(INJURY_AREAS).forEach(function(key) {
+    var kws = INJURY_AREAS[key].keywords;
+    var hit = notes.some(function(n) {
+      var text = n.text || '';
+      return kws.some(function(kw) { return text.indexOf(kw) !== -1; });
+    });
+    if (hit) areas.push(key);
+  });
+  return areas;
+}
+
+// 종목 하나를 사용자 부상과 대조: { level: 'contra'|'caution'|null, area, sub, mod }
+// userAreas를 생략하면 getUserInjuryAreas()로 계산 (반복 호출 시엔 미리 구해 넘길 것)
+function checkExerciseSafety(exerciseName, userAreas) {
+  var safety = EXERCISE_SAFETY[exerciseName];
+  // 별칭(예: '인클라인 덤벨 프레스')으로 들어오면 표준명으로 한 번 더 조회
+  if (!safety && EXERCISE_ALIASES_1RM[exerciseName]) {
+    safety = EXERCISE_SAFETY[EXERCISE_ALIASES_1RM[exerciseName]];
+  }
+  if (!safety) return { level: null, area: null, sub: null, mod: null };
+  if (userAreas === undefined) userAreas = getUserInjuryAreas();
+  var result = { level: null, area: null, sub: null, mod: null };
+  userAreas.forEach(function(area) {
+    if (safety.contra && safety.contra.indexOf(area) !== -1) {
+      if (result.level !== 'contra') {
+        result = { level: 'contra', area: area, sub: (safety.sub && safety.sub[area]) || null, mod: null };
+      }
+    } else if (safety.caution && safety.caution.indexOf(area) !== -1 && result.level !== 'contra') {
+      result = { level: 'caution', area: area, sub: (safety.sub && safety.sub[area]) || null, mod: (safety.mod && safety.mod[area]) || null };
+    }
+  });
+  return result;
+}
+
+// AI 프롬프트 주입용 안전 블록: 등록된 부상에 걸리는 종목만 압축해 텍스트로.
+// 부상이 없으면 '' (프롬프트에 아무것도 안 들어감 = 토큰 0)
+function buildSafetyPromptBlock() {
+  var areas = getUserInjuryAreas();
+  if (!areas.length) return '';
+  var contraLines = [];
+  var cautionLines = [];
+  var rehabLines = [];
+  Object.keys(EXERCISE_SAFETY).forEach(function(name) {
+    var s = EXERCISE_SAFETY[name];
+    areas.forEach(function(area) {
+      var kr = INJURY_AREAS[area].kr;
+      if (s.contra && s.contra.indexOf(area) !== -1) {
+        var sub = s.sub && s.sub[area];
+        contraLines.push('- ' + name + ' (' + kr + ')' + (sub ? ' → 대체: ' + sub : ''));
+      } else if (s.caution && s.caution.indexOf(area) !== -1) {
+        var mod = (s.mod && s.mod[area]) || '가볍게·통증 없는 범위로';
+        cautionLines.push('- ' + name + ' (' + kr + '): ' + mod);
+      }
+      if (s.rehab && s.rehab.indexOf(area) !== -1) {
+        rehabLines.push('- ' + name + ' (' + kr + ' 재활)');
+      }
+    });
+  });
+  var areaKrs = areas.map(function(a) { return INJURY_AREAS[a].kr; }).join(', ');
+  var block = '## 🚫 부상 안전 규칙 (등록된 부상: ' + areaKrs + ' — 기억 노트와 자동 대조됨)\n';
+  if (contraLines.length) block += '**금기 — 절대 루틴에 넣지 말 것 (VETO). 사용자가 요구해도 거부하고 대체를 제시한다:**\n' + contraLines.join('\n') + '\n';
+  if (cautionLines.length) block += '**주의 — 이렇게 수정하면 가능 (ADJUST):**\n' + cautionLines.join('\n') + '\n';
+  if (rehabLines.length) block += '**재활 추천 — 이 부상에 오히려 도움:**\n' + rehabLines.join('\n') + '\n';
+  return block;
+}
+
+// VETO 코드 가드레일: AI가 만든 루틴 종목 배열에서 금기 종목을 대체로 교체(불가하면 제거).
+// AI가 프롬프트를 어겨도 금기 종목이 사용자 화면까지 못 오게 하는 마지막 방어선.
+// 반환: { exercises: 교정된 배열, changes: [{from, to, areaKr}] }
+function applySafetyGuardrail(exercises) {
+  if (!Array.isArray(exercises) || !exercises.length) return { exercises: exercises, changes: [] };
+  var areas = getUserInjuryAreas();
+  if (!areas.length) return { exercises: exercises, changes: [] };
+  var changes = [];
+  var names = {};
+  exercises.forEach(function(e) { if (e && e.name) names[e.name] = true; });
+  var out = exercises.map(function(ex) {
+    if (!ex || !ex.name) return ex;
+    var chk = checkExerciseSafety(ex.name, areas);
+    if (chk.level !== 'contra') return ex;
+    var areaKr = INJURY_AREAS[chk.area].kr;
+    if (chk.sub && !names[chk.sub]) {
+      changes.push({ from: ex.name, to: chk.sub, areaKr: areaKr });
+      names[chk.sub] = true;
+      var copy = {};
+      Object.keys(ex).forEach(function(k) { copy[k] = ex[k]; });
+      copy.name = chk.sub;
+      copy.weight = null; // 다른 종목이므로 무게는 기록 기반으로 다시 계산
+      // 메타데이터도 대체 종목 기준으로 갱신 (원 종목 값이 남으면 메인 표시·웜업·반복수가 잘못됨)
+      var subInfo = EXERCISE_BODY_PART_MAP[chk.sub];
+      if (subInfo) {
+        copy.type = subInfo.compound ? '복합' : '고립';
+        copy.isMain = !!(ex.isMain && subInfo.mainEligible);
+      }
+      if (copy.reps !== undefined) copy.reps = repRangeToStr(clampRepsToClass(chk.sub, copy.reps));
+      if (copy.rir !== undefined) copy.rir = (copy.type === '복합') ? '2-3' : '0-2';
+      if (copy.rest !== undefined && copy.rest) copy.rest = (copy.type === '복합') ? '120-180' : '60-120';
+      copy.note = areaKr + ' 부상 보호 — ' + ex.name + ' 대신 배치';
+      return copy;
+    }
+    changes.push({ from: ex.name, to: null, areaKr: areaKr });
+    return null; // 대체 불가(이미 루틴에 있음/대체 없음)면 제거
+  }).filter(Boolean);
+  return { exercises: out, changes: changes };
+}

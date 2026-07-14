@@ -1,6 +1,13 @@
 # PROGRESS — 헬스앱
 
-## 마지막 한 일 (2026-07-14 — 세션 20: 트래커→코치 개편 1단계 [브랜치 `conversational-coaching`])
+## 마지막 한 일 (2026-07-14 — 세션 21: 개편 2단계 종목 안전 태그 + VETO [브랜치 `safety-tags`])
+- **1단계 마무리**: PR#36(v35) 병합 후 폰 QA 2건 수정 — ①추천 카드와 세트 구성 무게 불일치 → `getSessionSetPlan` 단일 계산으로 통일 ②세트 삭제 확인창이 크롬 기본창 → 앱 스타일 `showConfirm` 5곳 적용. PR#37(v36) 병합·QA 통과.
+- **2단계 계획 수정(사용자 승인)**: REFER 삭제(중단 로직 없음, 병원 권유 프롬프트 한 줄만) · 폼 큐 데이터 삭제(모델이 이미 앎) · 금기 태그는 진단명 대신 **부위 5개**(허리·어깨·무릎·손목·팔꿈치) · 모델은 4.6 대신 **Sonnet 5**.
+- **안전 태그 표 작성 = 워크플로우**: 부위 5개 × (태그 에이전트 → 적대적 검증 에이전트) 10명 → `EXERCISE_SAFETY` **77종목**(contra/caution/rehab + sub 대체 + mod 수정법 + why 근거), 대체 종목 무효 0건. 손목 담당 1회 통신 실패 → resume 재실행(나머지 캐시).
+- **구현** (`b583f45`): ①`INJURY_AREAS` 키워드 ↔ 기억 노트(injury) 자유 글 대조(`getUserInjuryAreas`) ②`buildSafetyPromptBlock` — 등록 부상에 걸리는 종목만 AI 호출 6곳(코치 채팅·루틴 생성/수정·오늘 추천·주간 리뷰·정체기)에 주입, 부상 없으면 '' ③**VETO 가드레일** `applySafetyGuardrail` — AI 루틴의 금기 종목을 코드가 대체로 교체(불가 시 제거)+"🛡️ 안전 교체" 표기, 루틴 생성·수정 두 경로 ④코치 답변 등급 추천/조정/거부 + 심한 통증 지속 시 병원 권고 ⑤운동 중 직접 교체 시 금기/주의 토스트(비차단) ⑥모델 `claude-sonnet-4-5`→`claude-sonnet-5` 7곳 ⑦v37, 테스트 83/83(안전 15개 신설: 합성 표 로직 계약 + 실표 무결성 검사).
+- 주의: vm 샌드박스 배열은 deepStrictEqual 실패 → 테스트 비교는 `plain()`(JSON 정규화) 필수.
+
+### 이전 (2026-07-14 — 세션 20: 트래커→코치 개편 1단계 [브랜치 `conversational-coaching`])
 - **배경**: 사용자가 운동 중 클로드와 만든 개편 지시문 md("트래커를 코치로") 비판 검토 → grill로 계획 확정. **반려**: 서버 프록시(개인용 직호출 유지)·부상 하드코딩(기억 노트 방식 유지)·Opus 전환(컨텍스트 완성 후 재평가, 지금은 아님). **3단계 계획**: ①과부하 엔진+운동중 UX ②종목 안전정보+VETO/REFER+**모델 sonnet-4-5→4.6 교체** ③세트 사이 채팅(통증·자극 추출→다음 추천 반영). 이번 세션 = 1단계 완료.
 - **1단계-A 과부하 엔진 v2** (TDD, `53f5705`): 종목 클래스 5종(`EXERCISE_CLASS_RULES`: compound_heavy 5-8 / compound_moderate 8-12 / isolation 12-15 / light_isolation 15-25 / rehab 15-20) + `getExerciseClass`(오버라이드→재활 키워드→부위맵 휴리스틱). **가드레일**: `clampRepsToClass`가 세션 생성 2곳·종목 교체에서 targetReps 교정("사이드 레터럴 10회" 차단), heavy/light는 **상단 2세션 연속** 달성해야 증량, rehab 증량 금지, **통증 게이트**(`hasRecentPain` — 최근 14일 painFlag 시 증량 금지, 3단계 채팅이 painFlag 쓰면 자동 작동). `getRecentPerformances`(종목당 최근 3세션 캐시). 재활 종목 3종(밴드 외회전·클램쉘·터미널 니 익스텐션) 부위맵 추가, 페이스 풀=rehab 지정.
 - **1단계-B 세트 편집** (`cb414c8`): 완료 세트 재저장 시 휴식타이머 재시작 안 함, `uncompleteSet`/`deleteSet`(시트 하단 버튼)/`addSetToExercise`(목록 아래 + 버튼).
@@ -177,4 +184,4 @@
 - `af16e3f` — fix: Codex review — 1RM rollback, PR name escaping, rest-timer cleanup, legacy reps (브랜치 `conversational-coaching`)
 - `53f5705` — feat: progressive overload engine v2 — exercise classes + rep-range guardrails
 
-_다음 세션 재개: **개편 1단계 완료(브랜치 `conversational-coaching`, v35, 65/65)** — 사용자 폰 QA → PR·배포 → **2단계**(종목 금기·대체·폼큐 + VETO/REFER + 모델 claude-sonnet-4-5→**4.6** 교체) → **3단계**(세트 사이 채팅: 스트리밍 답변+통증·자극 추출 저장→painFlag로 통증 게이트 자동 연동). 반려 확정: 서버 프록시 X·부상 하드코딩 X(기억 노트 유지)·Opus 전환은 3단계 후 재평가._
+_다음 세션 재개: **개편 1단계 완료·배포·QA 통과(main, v36 = PR#36+#37)** → **2단계**(2026-07-14 사용자 승인으로 계획 수정: ①종목 안전 태그 — **부위 5개**(허리·어깨·무릎·손목·팔꿈치, 진단명 태그 아님)로 금기/주의/재활 + 대체 매핑, 기억 노트 injury 부상과 자동 대조, 프롬프트엔 걸리는 종목만 주입 ②출력 타입 RECOMMEND/ADJUST/**VETO 3종만** — **REFER 삭제**(중단 로직 없음, "심한 통증 지속 시 병원 권유" 프롬프트 한 줄만) ③**폼 큐 데이터 삭제**(모델이 이미 앎) ④모델 claude-sonnet-4-5→**claude-sonnet-5** 교체(ai.js 7곳, 정가 동일+2026-08-31까지 할인) ⑤VETO 코드 가드레일(AI 루틴에 금기 종목 들어오면 대체 교체/차단)) → **3단계**(세트 사이 채팅: 스트리밍 답변+통증·자극 추출 저장→painFlag로 통증 게이트 자동 연동). 반려 확정: 서버 프록시 X·부상 하드코딩 X(기억 노트 유지)·Opus 전환은 3단계 후 재평가._
