@@ -118,7 +118,7 @@ var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v35';
+var APP_VERSION = 'v36';
 // 백업에 담지 않는 키. 두 부류:
 // (1) 로컬 전용·민감 → 복원해도 그대로 보존 (API 키·코치 대화)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
@@ -346,6 +346,44 @@ function showToast(message, isError) {
     toast.style.transition = 'opacity 0.3s';
     setTimeout(function() { toast.remove(); }, 300);
   }, 2200);
+}
+
+// 앱 스타일 확인 팝업 (크롬 기본 confirm 대체 — 디자인 통일).
+// onConfirm은 "확인" 버튼을 눌렀을 때만 호출. opts: { confirmLabel, cancelLabel, danger }
+function showConfirm(message, onConfirm, opts) {
+  opts = opts || {};
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 9998; display: flex; align-items: center; justify-content: center; padding: 28px; animation: fadeIn 0.15s ease;';
+
+  var card = document.createElement('div');
+  card.style.cssText = 'background: var(--bg-1); border: 1px solid var(--bg-3); border-radius: 16px; padding: 20px; width: 100%; max-width: 320px; box-shadow: 0 20px 60px rgba(var(--black-rgb), 0.5);';
+
+  var msg = document.createElement('p');
+  msg.style.cssText = 'font-family: var(--font); font-size: 14px; line-height: 1.55; color: var(--text-soft); margin-bottom: 18px; white-space: pre-line; word-break: keep-all;';
+  msg.textContent = message;
+
+  var btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display: flex; gap: 8px;';
+
+  var cancelBtn = document.createElement('button');
+  cancelBtn.textContent = opts.cancelLabel || '취소';
+  cancelBtn.style.cssText = 'flex: 1; padding: 12px; border-radius: 10px; border: 1px solid var(--bg-3); background: transparent; color: var(--text-muted); font-family: var(--font); font-weight: 700; font-size: 13px;';
+
+  var okBtn = document.createElement('button');
+  okBtn.textContent = opts.confirmLabel || '확인';
+  okBtn.style.cssText = 'flex: 1; padding: 12px; border-radius: 10px; border: none; background: ' + (opts.danger ? 'var(--danger)' : 'var(--accent)') + '; color: ' + (opts.danger ? 'white' : 'var(--bg-0)') + '; font-family: var(--font); font-weight: 800; font-size: 13px;';
+
+  function close() { overlay.remove(); }
+  cancelBtn.onclick = close;
+  overlay.onclick = function(e) { if (e.target === overlay) close(); };
+  okBtn.onclick = function() { close(); onConfirm(); };
+
+  btnRow.appendChild(cancelBtn);
+  btnRow.appendChild(okBtn);
+  card.appendChild(msg);
+  card.appendChild(btnRow);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
 }
 
 // 채팅 스크롤 맨 아래로

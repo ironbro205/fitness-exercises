@@ -876,13 +876,14 @@ window.startGeneratedRoutine = function() {
   // 종목 데이터를 운동 세션 형식으로 변환
   var exercises = r.exercises.map(function(ex, idx) {
     var sets = [];
-    // 가드레일: AI 제안 반복을 종목 클래스 범위로 교정 (예: 사이드 레터럴 "10회" 차단)
-    var repRange = clampRepsToClass(ex.name, ex.reps || '8-12');
+    // 가드레일 + 추천 일치: 세트 시작 무게·횟수를 추천 카드와 같은 계산(getSessionSetPlan)으로.
+    // (AI 무게를 따로 스냅하면 "5kg 유지" 카드 옆 세트가 6kg로 어긋나는 문제 방지)
+    var plan = getSessionSetPlan(ex.name, ex.weight, ex.reps || '8-12');
 
     // 워밍업 1세트 (메인 종목만)
     if (ex.isMain) {
       sets.push({
-        weight: ex.weight ? snapWeightToEquipment(ex.weight * 0.5, ex.name) : null,
+        weight: plan.weight ? snapWeightToEquipment(plan.weight * 0.5, ex.name) : null,
         reps: 10,
         completed: false,
         isWarmup: true
@@ -892,8 +893,8 @@ window.startGeneratedRoutine = function() {
     // 본 세트
     for (var s = 0; s < (ex.sets || 3); s++) {
       sets.push({
-        weight: ex.weight ? snapWeightToEquipment(ex.weight, ex.name) : null,
-        reps: repRange.low,
+        weight: plan.weight,
+        reps: plan.reps,
         completed: false,
         isWarmup: false
       });
@@ -905,8 +906,8 @@ window.startGeneratedRoutine = function() {
       rest: ex.rest,
       sets: sets,
       reps: ex.reps,
-      targetReps: repRangeToStr(repRange),  // 세션 화면에서 사용 (클래스 범위로 교정됨)
-      lastWeight: ex.weight !== undefined ? ex.weight : null,
+      targetReps: repRangeToStr(plan.repRange),  // 세션 화면에서 사용 (클래스 범위로 교정됨)
+      lastWeight: (plan.prog && plan.prog.previousWeight !== undefined) ? plan.prog.previousWeight : (ex.weight !== undefined ? ex.weight : null),
       lastReps: null,
       reps_done: ex.reps,
       note: ex.note
@@ -1334,19 +1335,19 @@ window.startSession = function(sessionType) {
   // 세션 데이터 초기화
   var exercises = sessionData.exercises.map(function(ex) {
     var sets = [];
-    // 가드레일: 템플릿 반복도 종목 클래스 범위로 교정
-    var repRange = clampRepsToClass(ex.name, ex.reps || '8-10');
+    // 가드레일 + 추천 일치: 템플릿 세트도 추천 카드와 같은 계산(getSessionSetPlan)으로
+    var plan = getSessionSetPlan(ex.name, ex.lastWeight, ex.reps || '8-10');
     // 워밍업 1세트 + 본 세트 3개
     sets.push({
-      weight: ex.lastWeight ? Math.round(ex.lastWeight * 0.5) : null,
+      weight: plan.weight ? snapWeightToEquipment(plan.weight * 0.5, ex.name) : null,
       reps: 10,
       isWarmup: true,
       completed: false
     });
     for (var i = 0; i < ex.sets; i++) {
       sets.push({
-        weight: ex.lastWeight,
-        reps: repRange.low,
+        weight: plan.weight,
+        reps: plan.reps,
         isWarmup: false,
         completed: false
       });
@@ -1354,8 +1355,8 @@ window.startSession = function(sessionType) {
     return {
       name: ex.name,
       type: ex.type,
-      targetReps: repRangeToStr(repRange),
-      lastWeight: ex.lastWeight,
+      targetReps: repRangeToStr(plan.repRange),
+      lastWeight: (plan.prog && plan.prog.previousWeight !== undefined) ? plan.prog.previousWeight : ex.lastWeight,
       lastReps: ex.reps_done,
       sets: sets
     };
@@ -1395,16 +1396,16 @@ window.endSession = function(fromBack) {
   }
 
   if (fromBack) {
-    // 폰 뒤로가기 = 완료 세트 유무와 무관하게 항상 "종료할까요?" 팝업
-    if (!confirm('운동을 종료하시겠어요?')) return;
-    if (hasCompleted) finalizeSession(); else cancelSession();
+    // 폰 뒤로가기 = 완료 세트 유무와 무관하게 항상 "종료할까요?" 팝업 (앱 스타일)
+    showConfirm('운동을 종료할까요?', function() {
+      if (hasCompleted) finalizeSession(); else cancelSession();
+    }, { confirmLabel: '종료' });
     return;
   }
 
   // 화면 안 종료 버튼: 완료 본세트 없으면 취소 확인, 있으면 완료 화면으로
   if (!hasCompleted) {
-    if (!confirm('운동을 취소하시겠어요? 기록이 저장되지 않습니다.')) return;
-    cancelSession();
+    showConfirm('운동을 취소할까요?\n기록이 저장되지 않습니다.', cancelSession, { confirmLabel: '운동 취소', danger: true });
     return;
   }
   finalizeSession();
@@ -1761,7 +1762,7 @@ window.uncompleteSet = function() {
   render();
 };
 
-// 세트 삭제 (진행 중 세션에서 세트 줄 자체를 제거)
+// 세트 삭제 (진행 중 세션에서 세트 줄 자체를 제거) — 앱 스타일 확인 팝업
 window.deleteSet = function() {
   if (!state.editingSet) return;
   var s = state.editingSet;
@@ -1770,7 +1771,11 @@ window.deleteSet = function() {
     showToast('마지막 세트는 삭제할 수 없어요');
     return;
   }
-  if (!confirm('이 세트를 삭제할까요?')) return;
+  showConfirm('이 세트를 삭제할까요?', function() { applyDeleteSet(s); }, { confirmLabel: '삭제', danger: true });
+};
+
+function applyDeleteSet(s) {
+  var exercise = state.activeSession.exercises[s.exerciseIdx];
   var removed = exercise.sets.splice(s.setIdx, 1)[0];
   // 삭제한 세트가 올려놓은 1RM 되돌리기
   if (removed && removed.is1RMUpdate) {
@@ -2044,14 +2049,21 @@ window.swapCurrentExercise = function(newName) {
     return;
   }
 
-  // 완료된 본 세트가 있으면 경고
+  // 완료된 본 세트가 있으면 경고 (앱 스타일 확인 팝업)
   var doneCount = (ex.sets || []).filter(function(s) { return s.completed && !s.isWarmup; }).length;
   if (doneCount > 0) {
-    if (!confirm('이미 완료한 ' + doneCount + '세트가 있어요. 종목을 바꾸면 그 기록이 새 종목으로 옮겨갑니다. 진행할까요?')) {
-      return;
-    }
+    showConfirm(
+      '이미 완료한 ' + doneCount + '세트가 있어요.\n종목을 바꾸면 그 기록이 새 종목으로 옮겨갑니다.',
+      function() { applyExerciseSwap(ex, newName); },
+      { confirmLabel: '종목 변경' }
+    );
+    return;
   }
+  applyExerciseSwap(ex, newName);
+};
 
+// 종목 교체 실제 적용 (확인 팝업 통과 후)
+function applyExerciseSwap(ex, newName) {
   // 종목명/타입 갱신 (정확 매칭 없으면 fuzzy)
   var info = EXERCISE_BODY_PART_MAP[newName] || getExercisePart(newName);
   ex.name = newName;
@@ -2059,19 +2071,16 @@ window.swapCurrentExercise = function(newName) {
     ex.type = info.compound ? '복합' : '고립';
   }
 
-  // 목표 반복을 새 종목 클래스 범위로 교정 (가드레일)
-  var newRange = clampRepsToClass(newName, ex.targetReps);
-  ex.targetReps = repRangeToStr(newRange);
-
-  // 미완료 세트의 무게/횟수를 새 종목 기준으로 재추천
-  var prog = getProgressiveRecommendation(newName, ex.targetReps);
-  if (prog && prog.weight) {
+  // 목표 반복 교정 + 미완료 세트의 무게/횟수를 새 종목 기준으로 재추천 (추천 카드와 동일 계산)
+  var plan = getSessionSetPlan(newName, null, ex.targetReps);
+  ex.targetReps = repRangeToStr(plan.repRange);
+  if (plan.weight) {
     (ex.sets || []).forEach(function(s) {
       if (s.completed) return;
-      s.weight = prog.weight;
-      if (!s.isWarmup) s.reps = newRange.low;
+      s.weight = plan.weight;
+      if (!s.isWarmup) s.reps = plan.reps;
     });
-    ex.lastWeight = prog.previousWeight !== undefined ? prog.previousWeight : null;
+    ex.lastWeight = (plan.prog && plan.prog.previousWeight !== undefined) ? plan.prog.previousWeight : null;
   } else {
     ex.lastWeight = null;
   }
@@ -2079,7 +2088,7 @@ window.swapCurrentExercise = function(newName) {
   state.exerciseSwapOpen = false;
   saveActiveSession();
   render();
-};
+}
 
 // ═══════════════════════════════════════════════
 // 운동 세션 화면 (운동 중)
@@ -4760,10 +4769,14 @@ function finishCardio() {
   saveActiveCardio();          // rpe 단계로 저장(RPE 입력 중 회수돼도 복원 가능)
   render();
 }
-// 화면 종료 버튼 / 폰 뒤로가기(fromBack) — 둘 다 확인 팝업(1단계 endSession 패턴).
+// 화면 종료 버튼 / 폰 뒤로가기(fromBack) — 둘 다 확인 팝업(1단계 endSession 패턴, 앱 스타일).
 window.stopCardio = function(fromBack) {
+  var c0 = state.cardio; if (!c0 || !c0.run) return;
+  showConfirm('운동을 종료할까요?', function() { applyStopCardio(); }, { confirmLabel: '종료' });
+};
+
+function applyStopCardio() {
   var c = state.cardio; var run = c && c.run; if (!run) return;
-  if (typeof confirm === 'function' && !confirm('운동을 종료하시겠어요?')) return;
   cardioIntegrate();
   var elapsed = (cardioNow() - run.startPerf) / 1000; if (elapsed < 0) elapsed = 0; if (elapsed > run.totalSec) elapsed = run.totalSec;
   run.elapsedAtEnd = elapsed; run.completed = false;
@@ -4778,7 +4791,7 @@ window.stopCardio = function(fromBack) {
   c.phase = 'rpe';
   saveActiveCardio();          // rpe 단계로 저장(RPE 입력 중 회수 대비)
   render();
-};
+}
 // RPE(1~10 또는 null=건너뛰기) → 세션 저장(saveCardioSession) 후 초기화
 window.submitCardioRpe = function(rpe) {
   var c = state.cardio; var run = c && c.run;

@@ -357,6 +357,32 @@ function calculateRollingMax1RM(exerciseName, windowSessions) {
   return { value: Math.round(max * 10) / 10, sessions: recent.length };
 }
 
+// 세션 세트 구성용 시작 무게·횟수 — 추천 카드(getProgressiveRecommendation)와 반드시 일치.
+// · 수행 기록 있음: 추천 무게 그대로 (유지=지난 실제 무게, 증량=스냅된 새 무게 — 5kg처럼 격자 밖 무게도 보존)
+// · 기록 없음: AI/템플릿 제안 무게를 장비 단위로 스냅
+// · 횟수: 유지/재활이면 지난 세션 최고 반복(범위로 클램프) = "지난 기록에 도전", 증량이면 범위 하단부터 다시
+function getSessionSetPlan(exerciseName, fallbackWeight, targetReps) {
+  var range = clampRepsToClass(exerciseName, targetReps);
+  var prog = getProgressiveRecommendation(exerciseName, targetReps);
+
+  var weight = null;
+  if (prog && prog.source !== 'rm_estimate') {
+    weight = prog.weight;
+  } else if (fallbackWeight) {
+    weight = snapWeightToEquipment(fallbackWeight, exerciseName);
+  } else if (prog) {
+    weight = prog.weight; // 1RM 추정 폴백
+  }
+
+  var reps = range.low;
+  if (prog && prog.source !== 'progress' && prog.previousReps && prog.previousReps.length) {
+    var lastMax = Math.max.apply(null, prog.previousReps);
+    reps = Math.min(Math.max(lastMax, range.low), range.high);
+  }
+
+  return { weight: weight, reps: reps, repRange: range, prog: prog };
+}
+
 // 세트 완료취소/삭제 후 1RM 되돌리기.
 // 후보(과거 로그 rolling max, 세션에 남은 완료 세트 최고 e1RM, 갱신 직전 값) 중
 // 최댓값이 현재 1RM보다 낮으면 그 값으로 내린다 — 잘못 입력한 세트로 부풀려진 1RM 교정.

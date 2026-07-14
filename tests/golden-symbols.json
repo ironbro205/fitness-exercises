@@ -1,5 +1,5 @@
 {
-  "functionCount": 230,
+  "functionCount": 235,
   "objectCount": 19,
   "functions": [
     "_buildRecentSetsMap",
@@ -15,7 +15,10 @@
     "analyzeRoutineBalance",
     "animateSheetCloseThen",
     "applyCoachQuickQuestion",
+    "applyDeleteSet",
+    "applyExerciseSwap",
     "applyRoutineQuickChip",
+    "applyStopCardio",
     "approveRoutineChange",
     "backToStep1",
     "backToStep2",
@@ -116,6 +119,7 @@
     "getRecentPerformances",
     "getRecentVolumeByPart",
     "getRecommendedSession",
+    "getSessionSetPlan",
     "getTodayStr",
     "getTopLayer",
     "getVolumeDiagnosis",
@@ -206,6 +210,7 @@
     "setStatsPeriod",
     "setTab",
     "shouldShowWeeklyReview",
+    "showConfirm",
     "showToast",
     "skipRest",
     "snapWeightToEquipment",
