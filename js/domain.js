@@ -968,6 +968,10 @@ function getUserInjuryAreas() {
 // userAreas를 생략하면 getUserInjuryAreas()로 계산 (반복 호출 시엔 미리 구해 넘길 것)
 function checkExerciseSafety(exerciseName, userAreas) {
   var safety = EXERCISE_SAFETY[exerciseName];
+  // 별칭(예: '인클라인 덤벨 프레스')으로 들어오면 표준명으로 한 번 더 조회
+  if (!safety && EXERCISE_ALIASES_1RM[exerciseName]) {
+    safety = EXERCISE_SAFETY[EXERCISE_ALIASES_1RM[exerciseName]];
+  }
   if (!safety) return { level: null, area: null, sub: null, mod: null };
   if (userAreas === undefined) userAreas = getUserInjuryAreas();
   var result = { level: null, area: null, sub: null, mod: null };
@@ -1037,6 +1041,15 @@ function applySafetyGuardrail(exercises) {
       Object.keys(ex).forEach(function(k) { copy[k] = ex[k]; });
       copy.name = chk.sub;
       copy.weight = null; // 다른 종목이므로 무게는 기록 기반으로 다시 계산
+      // 메타데이터도 대체 종목 기준으로 갱신 (원 종목 값이 남으면 메인 표시·웜업·반복수가 잘못됨)
+      var subInfo = EXERCISE_BODY_PART_MAP[chk.sub];
+      if (subInfo) {
+        copy.type = subInfo.compound ? '복합' : '고립';
+        copy.isMain = !!(ex.isMain && subInfo.mainEligible);
+      }
+      if (copy.reps !== undefined) copy.reps = repRangeToStr(clampRepsToClass(chk.sub, copy.reps));
+      if (copy.rir !== undefined) copy.rir = (copy.type === '복합') ? '2-3' : '0-2';
+      if (copy.rest !== undefined && copy.rest) copy.rest = (copy.type === '복합') ? '120-180' : '60-120';
       copy.note = areaKr + ' 부상 보호 — ' + ex.name + ' 대신 배치';
       return copy;
     }

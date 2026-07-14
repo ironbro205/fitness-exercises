@@ -80,6 +80,17 @@ test('판정: 주의 종목 → caution + 수정법', () => {
   });
 });
 
+test('판정: 별칭으로 조회해도 표준명 태그를 찾는다 (Codex 리뷰 반영)', () => {
+  const origMem = app.state.coachMemory;
+  const orig = app.EXERCISE_SAFETY;
+  app.EXERCISE_SAFETY = { '덤벨 인클라인 벤치 프레스': { caution: ['shoulder'], mod: { shoulder: '가볍게' } } };
+  app.state.coachMemory = [injuryNote('어깨 회전근개')];
+  // '인클라인 덤벨 프레스'는 EXERCISE_ALIASES_1RM에서 표준명으로 매핑되는 별칭
+  assert.equal(app.checkExerciseSafety('인클라인 덤벨 프레스').level, 'caution');
+  app.EXERCISE_SAFETY = orig;
+  app.state.coachMemory = origMem;
+});
+
 test('판정: 태그 없는 종목·부상 없는 사용자 → null', () => {
   withSynth(() => {
     app.state.coachMemory = [injuryNote('허리 디스크')];
@@ -122,6 +133,21 @@ test('가드레일: 금기 종목을 대체로 교체 (무게 리셋 + note)', (
     assert.ok(r.exercises[0].note.includes('허리'));
     assert.equal(r.changes.length, 1);
     assert.equal(r.changes[0].from, '바벨 로우');
+  });
+});
+
+test('가드레일: 대체 종목의 메타데이터 갱신 — 메인 자격 없으면 isMain 해제 (Codex 리뷰 반영)', () => {
+  withSynth(() => {
+    app.state.coachMemory = [injuryNote('허리 디스크')];
+    // 바벨 로우(메인가능)를 메인으로 쓰던 루틴 → 대체 머신 시티드 로우는 mainEligible=false
+    const routine = [{ name: '바벨 로우', type: '복합', isMain: true, sets: 3, reps: '6-10', rir: '2-3', rest: '120-180', weight: 60 }];
+    const r = app.applySafetyGuardrail(routine);
+    const sub = r.exercises[0];
+    assert.equal(sub.name, '머신 시티드 로우');
+    assert.equal(sub.isMain, false);      // 머신 복합은 메인 불가
+    assert.equal(sub.type, '복합');
+    assert.equal(sub.reps, '8-10');       // 원래 6-10과 compound_moderate(8-12)의 교집합
+    assert.equal(sub.rir, '2-3');
   });
 });
 
