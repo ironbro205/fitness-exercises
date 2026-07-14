@@ -1,10 +1,11 @@
 {
-  "functionCount": 224,
+  "functionCount": 227,
   "objectCount": 19,
   "functions": [
     "_buildRecentSetsMap",
     "addBodyRecord",
     "addRestTime",
+    "addSetToExercise",
     "adjustCardioSpeed",
     "adjustReps",
     "adjustWeight",
@@ -73,6 +74,7 @@
     "deleteApiKey",
     "deleteItem",
     "deleteMemoryNote",
+    "deleteSet",
     "detectPlateauSignals",
     "dismissPlateau",
     "editMemoryNote",
@@ -219,6 +221,7 @@
     "toggleRoutinePreview",
     "toggleSetting",
     "toggleWarmup",
+    "uncompleteSet",
     "update1RM",
     "updateApiKeyInput",
     "updateCoachInput",

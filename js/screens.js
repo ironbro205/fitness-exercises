@@ -1743,12 +1743,63 @@ window.toggleWarmup = function() {
   updateEditSheetDisplay();
 };
 
-// 세트 완료 → 휴식 타이머 시작
+// 이미 완료한 세트의 완료 취소 (기록 실수 복구)
+window.uncompleteSet = function() {
+  if (!state.editingSet) return;
+  var s = state.editingSet;
+  var set = state.activeSession.exercises[s.exerciseIdx].sets[s.setIdx];
+  set.completed = false;
+  set.is1RMUpdate = false;
+  state.editingSet = null;
+  saveActiveSession();
+  render();
+};
+
+// 세트 삭제 (진행 중 세션에서 세트 줄 자체를 제거)
+window.deleteSet = function() {
+  if (!state.editingSet) return;
+  var s = state.editingSet;
+  var exercise = state.activeSession.exercises[s.exerciseIdx];
+  if (exercise.sets.length <= 1) {
+    showToast('마지막 세트는 삭제할 수 없어요');
+    return;
+  }
+  if (!confirm('이 세트를 삭제할까요?')) return;
+  exercise.sets.splice(s.setIdx, 1);
+  // 삭제한 세트를 가리키는 휴식 타이머 인덱스 꼬임 방지
+  if (state.restTimer && state.restTimer.exerciseIdx === s.exerciseIdx && state.restTimer.setIdx >= s.setIdx) {
+    state.restTimer.setIdx = Math.max(0, state.restTimer.setIdx - 1);
+    saveRestTimer();
+  }
+  state.editingSet = null;
+  saveActiveSession();
+  render();
+};
+
+// 세트 추가 (마지막 본 세트의 무게·횟수를 이어받음)
+window.addSetToExercise = function(exerciseIdx) {
+  if (!state.activeSession) return;
+  var exercise = state.activeSession.exercises[exerciseIdx];
+  if (!exercise) return;
+  var working = exercise.sets.filter(function(s) { return !s.isWarmup; });
+  var lastSet = working.length ? working[working.length - 1] : exercise.sets[exercise.sets.length - 1];
+  exercise.sets.push({
+    weight: lastSet ? lastSet.weight : null,
+    reps: lastSet ? lastSet.reps : (clampRepsToClass(exercise.name, exercise.targetReps).low),
+    isWarmup: false,
+    completed: false
+  });
+  saveActiveSession();
+  render();
+};
+
+// 세트 완료 → 휴식 타이머 시작 (이미 완료된 세트는 값만 저장, 타이머 재시작 안 함)
 window.completeSet = function() {
   if (!state.editingSet) return;
   var s = state.editingSet;
   var exercise = state.activeSession.exercises[s.exerciseIdx];
   var set = exercise.sets[s.setIdx];
+  var wasCompleted = set.completed;
   set.completed = true;
 
   // 1RM 자동 갱신 (워밍업 세트 제외)
@@ -1759,13 +1810,21 @@ window.completeSet = function() {
     }
   }
   
+  // 이미 완료된 세트의 재저장이면 휴식 타이머·pop 없이 값만 저장하고 닫기
+  if (wasCompleted) {
+    state.editingSet = null;
+    saveActiveSession();
+    render();
+    return;
+  }
+
   // 휴식 시간 결정: AI가 지정한 rest(초) 우선, 없으면 복합/고립 기본값 (B안)
   var isCompound = ['프레스', '풀업', '랫풀다운', '로우', '스쿼트', '데드리프트', '레그 프레스', '핵 스쿼트'].some(function(k) {
     return exercise.name.indexOf(k) !== -1;
   });
   var aiRest = exercise.rest ? parseInt(String(exercise.rest), 10) : NaN; // 범위 "120-180"이면 하단 120초
   var restDuration = set.isWarmup ? 60 : ((!isNaN(aiRest) && aiRest > 0) ? aiRest : (isCompound ? 150 : 90));
-  
+
   state.restTimer = {
     startTime: Date.now(),
     duration: restDuration,
@@ -2173,7 +2232,15 @@ function renderWorkoutSession() {
           '<button class="sheet-submit" onclick="completeSet()">' +
             (set.completed ? '저장' : '세트 완료 · 휴식 시작') +
           '</button>' +
-          
+
+          // 세트 관리: 완료 취소(완료된 세트만) / 세트 삭제
+          '<div class="flex gap-2 mt-2">' +
+            (set.completed
+              ? '<button class="adj-btn" style="flex:1;" onclick="uncompleteSet()">완료 취소</button>'
+              : '') +
+            '<button class="adj-btn" style="flex:1; color: #f87171;" onclick="deleteSet()">세트 삭제</button>' +
+          '</div>' +
+
         '</div>' +
       '</div>';
   }
@@ -2292,6 +2359,9 @@ function renderWorkoutSession() {
       '<div class="mb-3">' +
         '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-3 px-1">세트</p>' +
         '<div style="display: flex; flex-direction: column; gap: 8px;">' + setRows + '</div>' +
+        '<button class="option-card" style="width: 100%; margin-top: 8px; text-align: center;" onclick="addSetToExercise(' + session.currentExerciseIdx + ')">' +
+          '<p class="text-xs font-mono text-stone-400">＋ 세트 추가</p>' +
+        '</button>' +
       '</div>' +
       
       // 이전/다음 종목
