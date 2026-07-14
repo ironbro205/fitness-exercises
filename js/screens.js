@@ -1246,7 +1246,7 @@ function renderItemDetailSheet() {
           setSummary = ex.weight + 'kg × ' + (ex.reps || '?') + ' · ' + (ex.completedSets || ex.setsCount || '?') + '세트';
         }
         return '<div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--bg-3); font-size: 12px;">' +
-          '<span><strong>' + (idx + 1) + '.</strong> ' + exName + '</span>' +
+          '<span><strong>' + (idx + 1) + '.</strong> ' + escapeHtml(exName) + '</span>' +
           '<span class="font-mono text-stone-400">' + setSummary + '</span>' +
         '</div>';
       }).join('');
@@ -2349,7 +2349,7 @@ function renderWorkoutSession() {
       // 현재 종목 정보
       '<div class="exercise-info-card">' +
         '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">현재 종목</p>' +
-        '<h2 class="font-bebas text-2xl mb-1">' + exercise.name + '</h2>' +
+        '<h2 class="font-bebas text-2xl mb-1">' + escapeHtml(exercise.name) + '</h2>' +
         '<p class="text-xs font-mono text-stone-400">' + exercise.type + '</p>' +
       '</div>' +
       
@@ -2490,7 +2490,7 @@ function renderWorkoutComplete() {
         '<div class="flex items-center gap-3">' +
           '<div class="ex-num" style="width: 30px; height: 30px; font-size: 10px;">' + String(i+1).padStart(2,'0') + '</div>' +
           '<div>' +
-            '<p class="text-sm font-display font-bold">' + ex.name + '</p>' +
+            '<p class="text-sm font-display font-bold">' + escapeHtml(ex.name) + '</p>' +
             '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + detail + '</p>' +
           '</div>' +
         '</div>' +
