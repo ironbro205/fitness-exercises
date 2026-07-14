@@ -27,7 +27,8 @@ var KEYS = {
   WORKOUT_WIZARD: 'fitness_workout_wizard',
   CYCLE_HISTORY: 'fitness_cycle_history',
   COACH_MEMORY: 'fitness_coach_memory',
-  AI_RECOMMENDATION_HISTORY: 'fitness_ai_recommendation_history'
+  AI_RECOMMENDATION_HISTORY: 'fitness_ai_recommendation_history',
+  CHAT_SIGNALS: 'fitness_chat_signals'
 };
 
 var storage = {

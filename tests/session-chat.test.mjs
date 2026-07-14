@@ -166,3 +166,36 @@ test('통증 게이트: 완료 세트 0개(signalOnly) 항목의 painFlag도 읽
   app.state.data.workoutLog = origLog;
   app._lastSetsCache = null;
 });
+
+// ═══ 6. 신호 전용 저장소 (Codex 리뷰 반영 — 취소·0세트·교체에도 보존) ═══
+function withMemStorage(fn) {
+  const orig = app.storage;
+  const mem = {};
+  app.storage = {
+    get: (k, fb) => (k in mem ? JSON.parse(JSON.stringify(mem[k])) : (fb === undefined ? null : fb)),
+    set: (k, v) => { mem[k] = JSON.parse(JSON.stringify(v)); return true; }
+  };
+  try { fn(); } finally { app.storage = orig; }
+}
+
+test('신호 저장소: 확인 즉시 기록 → 세트 0개·운동기록 없어도 통증 게이트 작동', () => {
+  withMemStorage(() => {
+    const origLog = app.state.data.workoutLog;
+    app.state.data.workoutLog = []; // 운동 기록이 전혀 없어도
+    app.recordChatSignal('바벨 로우', { pain: true, painNote: '허리 뻐근' });
+    assert.equal(app.hasRecentPain('바벨 로우', 14), true);
+    assert.equal(app.hasRecentPain('레그 프레스', 14), false);
+    app.state.data.workoutLog = origLog;
+  });
+});
+
+test('신호 저장소: 자극 평가도 저장소에서 읽는다 (최신 우선)', () => {
+  withMemStorage(() => {
+    const origLog = app.state.data.workoutLog;
+    app.state.data.workoutLog = [];
+    app.recordChatSignal('랫풀다운', { feel: 'bad' });
+    app.recordChatSignal('랫풀다운', { feel: 'good' }); // 더 나중 기록
+    assert.equal(app.getRecentFeel('랫풀다운', 14), 'good');
+    app.state.data.workoutLog = origLog;
+  });
+});

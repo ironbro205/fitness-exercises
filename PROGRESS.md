@@ -1,6 +1,13 @@
 # PROGRESS — 헬스앱
 
-## 마지막 한 일 (2026-07-14 — 세션 21: 개편 2단계 종목 안전 태그 + VETO [브랜치 `safety-tags`])
+## 마지막 한 일 (2026-07-14 — 세션 22: 개편 3단계 세트 사이 채팅 [브랜치 `session-chat`])
+- **2단계 배포·QA 통과** (PR#38 → main, v37 운영 확인).
+- **3단계 UI 결정(사용자)**: 하단 시트(타이머 보임) / 대화는 세션 동안만(완료 시 폐기) / 통증·RPE는 **확인 후 저장**(칩에서 [기록]/[아니오]).
+- **구현** (`b479dc3`): 세션 헤더 💬 → 하단 시트 채팅. ①**스트리밍** — `callSessionCoachAPI`(stream:true)+`parseSSEStream`(순수 파서), 코치 채팅과 같은 stable 블록 재사용(캐시 공유) ②**컨텍스트** — 현재 종목·완료 세트·지난 수행·안전 태그(`buildSessionChatContext`)+"1~3문장 짧게" 모드 ③**신호 추출** — `extractWorkoutSignals`(haiku, 병렬)→확인 칩→`applyChatSignalToExercise`(painFlag/painNote/feel/chatRpe)→`finalizeSession`이 workoutLog로 복사 ④**피드백 루프** — painFlag→기존 통증 게이트(증량 중단), 최근 수행 표에 ⚠️통증/😕자극 표식(`getRecentFeel`)→루틴 생성이 회피. 대화는 activeSession.chat(새로고침 생존, 세션과 소멸).
+- **워크플로우 적대 리뷰(4관점×검증, 24에이전트)** → **확정 17건 → 9수정** (`151c167`): 세대 토큰+세션 동일성 가드(늦은 콜백이 다음 세션 오염 차단) / `buildChatApiMessages`(이력이 assistant로 시작하면 7번째 메시지부터 400 영구 먹통 — user 시작 보장) / **완료 0세트 종목의 신호 유실 방지**(signalOnly 항목) / 종목 교체 시 신호를 옛 이름으로 `signalCarryover` 보존+칩 폐기+confirm 이름 검사 / 휴식 타이머 tick·만료 시 채팅 열려 있으면 부분 갱신(입력 끊김 방지, 만료는 타이머 DOM만 제거) / 칩 DOM 직접 삽입+병합 / navBack에 sessionChat / 바닥 근처만 자동 스크롤 / disabled 스타일. + 자체 발견: 초안 `_sessionChatDraft` 보존.
+- v38, 테스트 **98/98**(session-chat 13개 신설), 스모크 통과. Codex 리뷰 진행.
+
+### 이전 (2026-07-14 — 세션 21: 개편 2단계 종목 안전 태그 + VETO [브랜치 `safety-tags`])
 - **1단계 마무리**: PR#36(v35) 병합 후 폰 QA 2건 수정 — ①추천 카드와 세트 구성 무게 불일치 → `getSessionSetPlan` 단일 계산으로 통일 ②세트 삭제 확인창이 크롬 기본창 → 앱 스타일 `showConfirm` 5곳 적용. PR#37(v36) 병합·QA 통과.
 - **2단계 계획 수정(사용자 승인)**: REFER 삭제(중단 로직 없음, 병원 권유 프롬프트 한 줄만) · 폼 큐 데이터 삭제(모델이 이미 앎) · 금기 태그는 진단명 대신 **부위 5개**(허리·어깨·무릎·손목·팔꿈치) · 모델은 4.6 대신 **Sonnet 5**.
 - **안전 태그 표 작성 = 워크플로우**: 부위 5개 × (태그 에이전트 → 적대적 검증 에이전트) 10명 → `EXERCISE_SAFETY` **77종목**(contra/caution/rehab + sub 대체 + mod 수정법 + why 근거), 대체 종목 무효 0건. 손목 담당 1회 통신 실패 → resume 재실행(나머지 캐시).
@@ -184,4 +191,4 @@
 - `af16e3f` — fix: Codex review — 1RM rollback, PR name escaping, rest-timer cleanup, legacy reps (브랜치 `conversational-coaching`)
 - `53f5705` — feat: progressive overload engine v2 — exercise classes + rep-range guardrails
 
-_다음 세션 재개: **개편 1단계 완료·배포·QA 통과(main, v36 = PR#36+#37)** → **2단계**(2026-07-14 사용자 승인으로 계획 수정: ①종목 안전 태그 — **부위 5개**(허리·어깨·무릎·손목·팔꿈치, 진단명 태그 아님)로 금기/주의/재활 + 대체 매핑, 기억 노트 injury 부상과 자동 대조, 프롬프트엔 걸리는 종목만 주입 ②출력 타입 RECOMMEND/ADJUST/**VETO 3종만** — **REFER 삭제**(중단 로직 없음, "심한 통증 지속 시 병원 권유" 프롬프트 한 줄만) ③**폼 큐 데이터 삭제**(모델이 이미 앎) ④모델 claude-sonnet-4-5→**claude-sonnet-5** 교체(ai.js 7곳, 정가 동일+2026-08-31까지 할인) ⑤VETO 코드 가드레일(AI 루틴에 금기 종목 들어오면 대체 교체/차단)) → **3단계**(세트 사이 채팅: 스트리밍 답변+통증·자극 추출 저장→painFlag로 통증 게이트 자동 연동). 반려 확정: 서버 프록시 X·부상 하드코딩 X(기억 노트 유지)·Opus 전환은 3단계 후 재평가._
+_다음 세션 재개: **트래커→코치 개편 1·2단계 완료·배포·QA 통과(main, v37) / 3단계 구현·워크플로우 리뷰 반영 완료(브랜치 `session-chat`, v38, 98/98)** — 남은 것: Codex 리뷰 반영 → PR → 사용자 병합 → 배포 확인 → 폰 QA(운동 중 💬 채팅: 스트리밍·통증 칩·기록·다음 추천 반영). 그 후: **Opus 전환 재평가**(3단계 완료 조건 충족 — 코치 1마디 Sonnet ~30원 vs Opus ~45원 기준 재검토), (선택) Phase B 잔여(fetchAIRecommendation·analyzePlateauWithAI·analyzeFoodWithAI 리메이크)+영양 탄수/지방 undefined 버그. 반려 확정: 서버 프록시 X·부상 하드코딩 X(기억 노트 유지)·세션 취소 시 통증 기록은 세션과 함께 폐기(의도된 한계)._

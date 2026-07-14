@@ -168,6 +168,11 @@ function repRangeToStr(range) {
 
 // 최근 N일 내 이 종목에 통증 기록이 있는지 (세트별 painFlag 또는 종목별 painFlag)
 function hasRecentPain(exerciseName, days) {
+  // 세트 사이 채팅에서 확인된 통증 신호 (전용 저장소 — 세션 취소·0세트 종료에도 보존됨)
+  var chatSignals = _recentChatSignals(exerciseName, days);
+  for (var c = 0; c < chatSignals.length; c++) {
+    if (chatSignals[c].pain) return true;
+  }
   var cutoff = new Date(Date.now() - (days || 14) * 86400000).toISOString().slice(0, 10);
   var log = state.data.workoutLog || [];
   for (var i = 0; i < log.length; i++) {
@@ -1065,6 +1070,11 @@ function applySafetyGuardrail(exercises) {
 
 // 최근 N일 내 이 종목의 자극 평가 ('bad'|'good'|null). 가장 최근 기록 우선.
 function getRecentFeel(exerciseName, days) {
+  // 채팅 신호 저장소 먼저 ([0]=최신)
+  var chatSignals = _recentChatSignals(exerciseName, days);
+  for (var c = 0; c < chatSignals.length; c++) {
+    if (chatSignals[c].feel === 'bad' || chatSignals[c].feel === 'good') return chatSignals[c].feel;
+  }
   var cutoff = new Date(Date.now() - (days || 14) * 86400000).toISOString().slice(0, 10);
   var log = state.data.workoutLog || [];
   for (var i = 0; i < log.length; i++) {
@@ -1078,6 +1088,30 @@ function getRecentFeel(exerciseName, days) {
     }
   }
   return null;
+}
+
+// 확인된 채팅 신호를 전용 저장소에 즉시 기록 (세션 취소·0세트 종료·종목 교체와 무관하게 보존).
+// 통증 게이트(hasRecentPain)·자극 조회(getRecentFeel)가 workoutLog와 함께 이 저장소도 읽는다.
+function recordChatSignal(exerciseName, signal) {
+  if (!exerciseName || !signal) return;
+  var log = storage.get(KEYS.CHAT_SIGNALS, []);
+  log.unshift({
+    date: getTodayStr(),
+    name: exerciseName,
+    pain: !!signal.pain,
+    painNote: signal.painNote || null,
+    feel: signal.feel || null,
+    rpe: signal.rpe || null
+  });
+  storage.set(KEYS.CHAT_SIGNALS, log.slice(0, 200));
+}
+
+// 최근 N일 내 채팅 신호 조회 (내부용 — [0]=최신)
+function _recentChatSignals(exerciseName, days) {
+  var cutoff = new Date(Date.now() - (days || 14) * 86400000).toISOString().slice(0, 10);
+  return storage.get(KEYS.CHAT_SIGNALS, []).filter(function(s) {
+    return s && s.name === exerciseName && s.date && s.date >= cutoff;
+  });
 }
 
 // 추출된 채팅 신호를 세션 종목 객체에 적용 (사용자 확인 후 호출).

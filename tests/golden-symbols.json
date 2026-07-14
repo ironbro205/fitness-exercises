@@ -1,7 +1,8 @@
 {
-  "functionCount": 256,
+  "functionCount": 258,
   "functions": [
     "_buildRecentSetsMap",
+    "_recentChatSignals",
     "addBodyRecord",
     "addRestTime",
     "addSetToExercise",
@@ -176,6 +177,7 @@
     "parseSSEStream",
     "recalc1RMAfterEdit",
     "reconcile1RMFromLog",
+    "recordChatSignal",
     "refreshAIRecommendation",
     "refreshWeeklyReview",
     "regenerateRoutine",

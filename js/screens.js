@@ -1507,25 +1507,9 @@ function finalizeSession() {
           date: getTodayStr()
         });
       }
-    } else if (ex.painFlag || ex.feel || ex.chatRpe) {
-      // 완료 세트가 0개여도 채팅 신호가 있으면 최소 항목으로 보존.
-      // 특히 통증 때문에 세트를 못 채운 경우가 통증 게이트의 핵심 시나리오다.
-      var signalEntry = { name: ex.name, type: ex.type, sets: 0, setsCount: 0, setsDetail: [], signalOnly: true };
-      if (ex.painFlag) { signalEntry.painFlag = true; if (ex.painNote) signalEntry.painNote = ex.painNote; }
-      if (ex.feel) signalEntry.feel = ex.feel;
-      if (ex.chatRpe) signalEntry.chatRpe = ex.chatRpe;
-      exercisesDone.push(signalEntry);
     }
-  });
-
-  // 종목 교체로 넘어온 신호 보존 (교체 전 종목 이름으로 기록 — 통증 원인 종목이 게이트를 유지)
-  (session.signalCarryover || []).forEach(function(c) {
-    if (!c || !c.name) return;
-    var entry = { name: c.name, type: c.type || '보조', sets: 0, setsCount: 0, setsDetail: [], signalOnly: true };
-    if (c.painFlag) { entry.painFlag = true; if (c.painNote) entry.painNote = c.painNote; }
-    if (c.feel) entry.feel = c.feel;
-    if (c.chatRpe) entry.chatRpe = c.chatRpe;
-    exercisesDone.push(entry);
+    // 완료 세트 0개 종목·취소된 세션의 채팅 신호는 여기 안 담겨도 유실되지 않는다 —
+    // 확인 시점에 recordChatSignal이 전용 저장소(CHAT_SIGNALS)에 이미 기록했다.
   });
   
   // workoutLog에 추가
@@ -2103,14 +2087,9 @@ window.swapCurrentExercise = function(newName) {
 
 // 종목 교체 실제 적용 (확인 팝업 통과 후)
 function applyExerciseSwap(ex, newName) {
-  // 채팅 신호는 옛 종목의 것 — 새 종목에 귀속되지 않게 세션 캐리오버로 옮겨 보존
-  // (통증 원인 종목이 증량 게이트를 유지하고, 대체 종목은 게이트되지 않게)
+  // 채팅 신호는 옛 종목의 것 — 새 종목에 귀속되지 않게 객체에서 제거
+  // (신호 자체는 확인 시점에 recordChatSignal이 옛 이름으로 이미 저장했다)
   if (ex.painFlag || ex.feel || ex.chatRpe) {
-    var sess = state.activeSession;
-    if (sess) {
-      if (!sess.signalCarryover) sess.signalCarryover = [];
-      sess.signalCarryover.push({ name: ex.name, type: ex.type, painFlag: !!ex.painFlag, painNote: ex.painNote || null, feel: ex.feel || null, chatRpe: ex.chatRpe || null });
-    }
     delete ex.painFlag; delete ex.painNote; delete ex.feel; delete ex.chatRpe;
   }
   // 확인 대기 중인 신호 칩이 이 슬롯 것이면 폐기 (엉뚱한 종목에 기록 방지)
@@ -2720,6 +2699,8 @@ function confirmChatSignal() {
     if (ex && sig.exName && ex.name !== sig.exName) {
       showToast('종목이 바뀌어 기록을 취소했어요 (' + sig.exName + ' → ' + ex.name + ')');
     } else if (ex && applyChatSignalToExercise(ex, sig)) {
+      // 전용 저장소에 즉시 기록 — 세션 취소·0세트 종료·종목 교체에도 신호가 보존된다
+      recordChatSignal(sig.exName || ex.name, sig);
       saveActiveSession();
       showToast(sig.pain ? '🩹 통증 기록됨 — 이 종목 증량을 중단해요' : '기록했어요 — 다음 추천에 반영돼요');
     }
