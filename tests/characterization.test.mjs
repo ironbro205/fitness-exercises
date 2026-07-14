@@ -552,10 +552,16 @@ test('묶음6-D navBack — 위 레이어부터 한 겹씩 닫음(오버레이·
   assert.equal(s.completedSession, null, '완료화면 닫힘');
   assert.equal(s.currentTab, 'home', '홈으로');
 
-  // 진행 세션(완료 본세트 없음) → 뒤로 → 확인(stub=동의) → 세션 폐기
+  // 진행 세션(완료 본세트 없음) → 뒤로 → 앱 확인 팝업(showConfirm) → 동의 시 세션 폐기.
+  // 하네스엔 실제 DOM이 없어 팝업 버튼을 누를 수 없으므로, showConfirm을 "즉시 동의"로 대체해 확인.
+  const origShowConfirm = a.showConfirm;
+  let confirmMessage = null;
+  a.showConfirm = (message, onConfirm) => { confirmMessage = message; onConfirm(); };
   s.activeSession = { exercises: [{ sets: [{ completed: false, isWarmup: false }] }], startTime: 1, currentExerciseIdx: 0 };
   a.navBack();
+  assert.ok(confirmMessage && confirmMessage.indexOf('종료') !== -1, '종료 확인 팝업이 뜸');
   assert.equal(s.activeSession, null, '세션 종료(확인창 동의 시)');
+  a.showConfirm = origShowConfirm;
 });
 
 test('묶음6-D 탭 방문순서 — setTab이 스택 기록, navBack은 직전 탭으로', () => {
