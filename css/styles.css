@@ -2853,3 +2853,43 @@ button {
   }
   .confetti-layer { display: none !important; }
 }
+
+/* ── 세트 사이 코치 (운동 중 채팅, 3단계) ── */
+.chat-line {
+  padding: 10px 14px;
+  margin: 4px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.chat-line.coach {
+  background: rgba(var(--accent-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
+  border-radius: 16px 16px 16px 4px;
+  max-width: 88%;
+  color: white;
+}
+.chat-line.user {
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  border-radius: 16px 16px 4px 16px;
+  max-width: 82%;
+  margin-left: auto;
+  color: white;
+}
+.chat-cursor {
+  display: inline-block;
+  color: var(--accent);
+  animation: chatBlink 1s steps(1) infinite;
+}
+@keyframes chatBlink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .chat-cursor { animation: none; } }
+.chat-signal-chip {
+  background: var(--bg-1);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 8px 0 4px;
+}
+#session-chat-input:disabled { opacity: 0.5; }
+.rest-done-btn:disabled { opacity: 0.5; cursor: not-allowed; }

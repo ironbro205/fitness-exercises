@@ -168,6 +168,11 @@ function repRangeToStr(range) {
 
 // 최근 N일 내 이 종목에 통증 기록이 있는지 (세트별 painFlag 또는 종목별 painFlag)
 function hasRecentPain(exerciseName, days) {
+  // 세트 사이 채팅에서 확인된 통증 신호 (전용 저장소 — 세션 취소·0세트 종료에도 보존됨)
+  var chatSignals = _recentChatSignals(exerciseName, days);
+  for (var c = 0; c < chatSignals.length; c++) {
+    if (chatSignals[c].pain) return true;
+  }
   var cutoff = new Date(Date.now() - (days || 14) * 86400000).toISOString().slice(0, 10);
   var log = state.data.workoutLog || [];
   for (var i = 0; i < log.length; i++) {
@@ -1057,4 +1062,79 @@ function applySafetyGuardrail(exercises) {
     return null; // 대체 불가(이미 루틴에 있음/대체 없음)면 제거
   }).filter(Boolean);
   return { exercises: out, changes: changes };
+}
+
+// ═══════════════════════════════════════════════
+// 세트 사이 채팅 신호 (3단계 — 통증·자극·RPE 피드백 루프)
+// ═══════════════════════════════════════════════
+
+// 최근 N일 내 이 종목의 자극 평가 ('bad'|'good'|null). 가장 최근 기록 우선.
+function getRecentFeel(exerciseName, days) {
+  // 채팅 신호 저장소 먼저 ([0]=최신)
+  var chatSignals = _recentChatSignals(exerciseName, days);
+  for (var c = 0; c < chatSignals.length; c++) {
+    if (chatSignals[c].feel === 'bad' || chatSignals[c].feel === 'good') return chatSignals[c].feel;
+  }
+  var cutoff = new Date(Date.now() - (days || 14) * 86400000).toISOString().slice(0, 10);
+  var log = state.data.workoutLog || [];
+  for (var i = 0; i < log.length; i++) {
+    var w = log[i];
+    if (!w.date || w.date < cutoff) continue;
+    var exList = w.exercises || w.exercisesData;
+    if (!Array.isArray(exList)) continue;
+    for (var j = 0; j < exList.length; j++) {
+      var ex = exList[j];
+      if (ex.name === exerciseName && (ex.feel === 'bad' || ex.feel === 'good')) return ex.feel;
+    }
+  }
+  return null;
+}
+
+// 확인된 채팅 신호를 전용 저장소에 즉시 기록 (세션 취소·0세트 종료·종목 교체와 무관하게 보존).
+// 통증 게이트(hasRecentPain)·자극 조회(getRecentFeel)가 workoutLog와 함께 이 저장소도 읽는다.
+function recordChatSignal(exerciseName, signal) {
+  if (!exerciseName || !signal) return false;
+  var log = storage.get(KEYS.CHAT_SIGNALS, []);
+  if (!Array.isArray(log)) log = []; // 손상됐지만 JSON으로는 읽히는 값 방어
+  log.unshift({
+    date: getTodayStr(),
+    name: exerciseName,
+    pain: !!signal.pain,
+    painNote: signal.painNote || null,
+    feel: signal.feel || null,
+    rpe: signal.rpe || null
+  });
+  return storage.set(KEYS.CHAT_SIGNALS, log.slice(0, 200));
+}
+
+// 최근 N일 내 채팅 신호 조회 (내부용 — [0]=최신)
+// 저장된 date가 KST(getTodayStr) 기준이므로 cutoff도 KST로 계산 (UTC면 오전 9시 전 하루 오차)
+function _recentChatSignals(exerciseName, days) {
+  var cutoff = getDateStr(new Date(Date.now() - (days || 14) * 86400000));
+  var log = storage.get(KEYS.CHAT_SIGNALS, []);
+  if (!Array.isArray(log)) return [];
+  return log.filter(function(s) {
+    return s && s.name === exerciseName && s.date && s.date >= cutoff;
+  });
+}
+
+// 추출된 채팅 신호를 세션 종목 객체에 적용 (사용자 확인 후 호출).
+// painFlag는 1단계 통증 게이트(hasRecentPain)가 읽어 증량을 자동 중단한다.
+function applyChatSignalToExercise(ex, signal) {
+  if (!ex || !signal) return false;
+  var applied = false;
+  if (signal.pain) {
+    ex.painFlag = true;
+    if (signal.painNote) ex.painNote = signal.painNote;
+    applied = true;
+  }
+  if (signal.feel === 'good' || signal.feel === 'bad') {
+    ex.feel = signal.feel;
+    applied = true;
+  }
+  if (typeof signal.rpe === 'number') {
+    ex.chatRpe = signal.rpe;
+    applied = true;
+  }
+  return applied;
 }
