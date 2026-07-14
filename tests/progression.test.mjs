@@ -191,3 +191,30 @@ test('통증 게이트: 15일 지난 통증은 게이트 해제', () => {
   const rec = app.getProgressiveRecommendation('레그 프레스', '8-12');
   assert.equal(rec.source, 'progress');
 });
+
+test('1RM 되돌리기: 완료 세트 재저장으로 또 갱신돼도 최초 기준값(prev1RM) 보존', () => {
+  seedLog([]);
+  app.storage.set(app.KEYS.ONE_RM_DATA, { '레그 프레스': 150 });
+  app.state.activeSession = {
+    sessionType: 'legs', sessionName: 'LEGS', startTime: 0, currentExerciseIdx: 0,
+    exercises: [{ name: '레그 프레스', type: '복합', targetReps: '8-12',
+      sets: [{ weight: 180, reps: 5, isWarmup: false, completed: false }] }],
+  };
+  // 1차 완료: 150 → 210 (prev1RM=150 보관)
+  app.state.editingSet = { exerciseIdx: 0, setIdx: 0 };
+  app.completeSet();
+  const set = app.state.activeSession.exercises[0].sets[0];
+  assert.equal(app.get1RM('레그 프레스'), 210);
+  assert.equal(set.prev1RM, 150);
+  // 재저장: 무게 300으로 수정 → 350으로 또 갱신돼도 prev1RM은 150 유지
+  set.weight = 300;
+  app.state.editingSet = { exerciseIdx: 0, setIdx: 0 };
+  app.completeSet();
+  assert.equal(app.get1RM('레그 프레스'), 350);
+  assert.equal(set.prev1RM, 150, '최초 기준값 보존 (자기 갱신값으로 덮어쓰기 금지)');
+  // 완료취소 → 150까지 완전 롤백
+  app.state.editingSet = { exerciseIdx: 0, setIdx: 0 };
+  app.uncompleteSet();
+  assert.equal(app.get1RM('레그 프레스'), 150, '부풀려진 1RM 완전 롤백');
+  app.state.activeSession = null;
+});

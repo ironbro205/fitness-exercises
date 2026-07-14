@@ -1817,13 +1817,14 @@ window.completeSet = function() {
   var wasCompleted = set.completed;
   set.completed = true;
 
-  // 1RM 자동 갱신 (워밍업 세트 제외). 갱신 직전 값을 세트에 보관 — 완료취소/삭제 시 되돌리기용
+  // 1RM 자동 갱신 (워밍업 세트 제외). 갱신 직전 값을 세트에 보관 — 완료취소/삭제 시 되돌리기용.
+  // 재저장으로 또 갱신돼도 최초 기준값을 보존해야 완전한 롤백이 됨 (자기 자신이 올린 값으로 덮어쓰기 방지)
   if (!set.isWarmup && set.weight && set.reps) {
     var prevRM = get1RM(exercise.name);
     var updated = update1RM(exercise.name, set.weight, set.reps);
     if (updated) {
       set.is1RMUpdate = true; // PR 표시용
-      set.prev1RM = prevRM;
+      if (set.prev1RM === undefined) set.prev1RM = prevRM;
     }
   }
   
