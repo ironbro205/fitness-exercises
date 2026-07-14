@@ -126,3 +126,43 @@ test('세션 컨텍스트: 세션 없으면 빈 문자열', () => {
   assert.equal(app.buildSessionChatContext(), '');
   app.state.activeSession = origSession;
 });
+
+// ═══ 5. 리뷰 반영 회귀 잠금 ═══
+test('API 이력: 자르기 후에도 반드시 user로 시작 (assistant 시작 = 400 영구 실패 방지)', () => {
+  // 13개 대화 (u,a 번갈아) → slice(-12)가 assistant부터 시작하는 상황
+  const chat = [];
+  for (let i = 0; i < 6; i++) {
+    chat.push({ role: 'user', content: 'q' + i });
+    chat.push({ role: 'assistant', content: 'a' + i });
+  }
+  chat.push({ role: 'user', content: 'q6' }); // 13번째
+  const msgs = app.buildChatApiMessages(chat);
+  assert.equal(msgs[0].role, 'user');
+  assert.equal(msgs[msgs.length - 1].content, 'q6');
+});
+
+test('API 이력: 에러 메시지는 제외, 빈 이력은 빈 배열', () => {
+  const chat = [
+    { role: 'user', content: 'q' },
+    { role: 'assistant', content: '⚠️ API 오류', isError: true },
+    { role: 'user', content: 'q2' }
+  ];
+  const msgs = app.buildChatApiMessages(chat);
+  assert.equal(msgs.length, 2);
+  assert.ok(msgs.every(m => !m.isError));
+  assert.deepEqual(plain(app.buildChatApiMessages([])), []);
+});
+
+test('통증 게이트: 완료 세트 0개(signalOnly) 항목의 painFlag도 읽는다', () => {
+  const origLog = app.state.data.workoutLog;
+  app.state.data.workoutLog = [{
+    date: daysAgo(1),
+    exercises: [{ name: '바벨 로우', sets: 0, setsCount: 0, setsDetail: [], signalOnly: true, painFlag: true, painNote: '허리 뻐근' }]
+  }];
+  app._lastSetsCache = null;
+  assert.equal(app.hasRecentPain('바벨 로우', 14), true);
+  // 진행도 계산에는 영향 없어야 함 (세트가 없으니 최근 수행으로 안 잡힘)
+  assert.equal(app.getLastPerformedSets('바벨 로우'), null);
+  app.state.data.workoutLog = origLog;
+  app._lastSetsCache = null;
+});

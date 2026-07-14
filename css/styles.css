@@ -2891,3 +2891,5 @@ button {
   padding: 12px;
   margin: 8px 0 4px;
 }
+#session-chat-input:disabled { opacity: 0.5; }
+.rest-done-btn:disabled { opacity: 0.5; cursor: not-allowed; }

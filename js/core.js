@@ -290,6 +290,7 @@ var state = {
   sessionChatOpen: false,
   sessionChatPending: null,     // 확인 대기 중인 추출 신호 {pain, painNote, feel, rpe, exIdx}
   _sessionChatStreaming: false,
+  _sessionChatDraft: '',        // 입력 초안 (전체 렌더에도 살아남게 DOM 밖 보존)
   // AI 추천
   aiRecommendation: null,
   aiRecLoading: false,

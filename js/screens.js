@@ -1392,6 +1392,7 @@ window.endSession = function(fromBack) {
     state.sessionChatOpen = false;      // 세트 사이 채팅은 세션과 함께 소멸
     state.sessionChatPending = null;
     state._sessionChatStreaming = false;
+    invalidateSessionChat();            // 아직 도착 안 한 스트림·신호 콜백 무효화
     saveActiveSession();
     saveRestTimer();
     if (restTickerInterval) { clearInterval(restTickerInterval); restTickerInterval = null; }
@@ -1484,7 +1485,7 @@ function finalizeSession() {
       if (ex.feel) doneEntry.feel = ex.feel;
       if (ex.chatRpe) doneEntry.chatRpe = ex.chatRpe;
       exercisesDone.push(doneEntry);
-      
+
       // PR 감지
       if (ex.lastWeight !== null && maxWeight > ex.lastWeight) {
         newPRs.push({
@@ -1506,7 +1507,25 @@ function finalizeSession() {
           date: getTodayStr()
         });
       }
+    } else if (ex.painFlag || ex.feel || ex.chatRpe) {
+      // 완료 세트가 0개여도 채팅 신호가 있으면 최소 항목으로 보존.
+      // 특히 통증 때문에 세트를 못 채운 경우가 통증 게이트의 핵심 시나리오다.
+      var signalEntry = { name: ex.name, type: ex.type, sets: 0, setsCount: 0, setsDetail: [], signalOnly: true };
+      if (ex.painFlag) { signalEntry.painFlag = true; if (ex.painNote) signalEntry.painNote = ex.painNote; }
+      if (ex.feel) signalEntry.feel = ex.feel;
+      if (ex.chatRpe) signalEntry.chatRpe = ex.chatRpe;
+      exercisesDone.push(signalEntry);
     }
+  });
+
+  // 종목 교체로 넘어온 신호 보존 (교체 전 종목 이름으로 기록 — 통증 원인 종목이 게이트를 유지)
+  (session.signalCarryover || []).forEach(function(c) {
+    if (!c || !c.name) return;
+    var entry = { name: c.name, type: c.type || '보조', sets: 0, setsCount: 0, setsDetail: [], signalOnly: true };
+    if (c.painFlag) { entry.painFlag = true; if (c.painNote) entry.painNote = c.painNote; }
+    if (c.feel) entry.feel = c.feel;
+    if (c.chatRpe) entry.chatRpe = c.chatRpe;
+    exercisesDone.push(entry);
   });
   
   // workoutLog에 추가
@@ -1574,6 +1593,7 @@ function finalizeSession() {
   state.sessionChatOpen = false;        // 세트 사이 채팅은 세션과 함께 소멸
   state.sessionChatPending = null;
   state._sessionChatStreaming = false;
+  invalidateSessionChat();              // 아직 도착 안 한 스트림·신호 콜백 무효화
   saveActiveSession();
   saveRestTimer();
   if (restTickerInterval) { clearInterval(restTickerInterval); restTickerInterval = null; }
@@ -1912,11 +1932,19 @@ function startRestTimerTick() {
       saveRestTimer();
       clearInterval(restTickerInterval);
       restTickerInterval = null;
-      render();
+      // 시트(편집/종목변경/채팅)가 열려 있으면 전체 렌더 대신 타이머 UI만 제거
+      // (채팅 입력·스트리밍 중 전체 렌더는 키보드/포커스/말풍선을 끊는다)
+      if (state.editingSet || state.exerciseSwapOpen || state.sessionChatOpen) {
+        var wrapEl = document.querySelector('.rest-timer-wrap');
+        if (wrapEl && wrapEl.parentNode) wrapEl.parentNode.removeChild(wrapEl);
+      } else {
+        render();
+      }
       return;
     }
-    // 시트(편집/종목변경)가 열려 있으면 시트가 깜빡이지 않도록 타이머만 부분 갱신
-    if (state.editingSet || state.exerciseSwapOpen) {
+    // 시트(편집/종목변경/세트사이채팅)가 열려 있으면 시트가 깜빡이지 않도록 타이머만 부분 갱신
+    // (채팅은 입력·스트리밍 중이라 전체 렌더가 매초 돌면 입력이 초기화된다)
+    if (state.editingSet || state.exerciseSwapOpen || state.sessionChatOpen) {
       var remaining = state.restTimer.duration - elapsed;
       var el = document.getElementById('rest-time-text');
       if (el) {
@@ -2075,6 +2103,22 @@ window.swapCurrentExercise = function(newName) {
 
 // 종목 교체 실제 적용 (확인 팝업 통과 후)
 function applyExerciseSwap(ex, newName) {
+  // 채팅 신호는 옛 종목의 것 — 새 종목에 귀속되지 않게 세션 캐리오버로 옮겨 보존
+  // (통증 원인 종목이 증량 게이트를 유지하고, 대체 종목은 게이트되지 않게)
+  if (ex.painFlag || ex.feel || ex.chatRpe) {
+    var sess = state.activeSession;
+    if (sess) {
+      if (!sess.signalCarryover) sess.signalCarryover = [];
+      sess.signalCarryover.push({ name: ex.name, type: ex.type, painFlag: !!ex.painFlag, painNote: ex.painNote || null, feel: ex.feel || null, chatRpe: ex.chatRpe || null });
+    }
+    delete ex.painFlag; delete ex.painNote; delete ex.feel; delete ex.chatRpe;
+  }
+  // 확인 대기 중인 신호 칩이 이 슬롯 것이면 폐기 (엉뚱한 종목에 기록 방지)
+  if (state.sessionChatPending && state.activeSession &&
+      state.activeSession.exercises[state.sessionChatPending.exIdx] === ex) {
+    state.sessionChatPending = null;
+  }
+
   // 종목명/타입 갱신 (정확 매칭 없으면 fuzzy)
   var info = EXERCISE_BODY_PART_MAP[newName] || getExercisePart(newName);
   ex.name = newName;
@@ -2502,25 +2546,7 @@ function buildSessionChatSheetHtml(session, exercise) {
     : '';
 
   // 추출 신호 확인 칩 (확인 후 저장)
-  var pendingHtml = '';
-  if (state.sessionChatPending && !state._sessionChatStreaming) {
-    var p = state.sessionChatPending;
-    var parts = [];
-    if (p.pain) parts.push('🩹 통증' + (p.painNote ? ' (' + escapeHtml(p.painNote) + ')' : ''));
-    if (p.feel === 'bad') parts.push('😕 자극 나쁨');
-    if (p.feel === 'good') parts.push('👍 자극 좋음');
-    if (p.rpe) parts.push('RPE ' + p.rpe);
-    var targetEx = session.exercises[p.exIdx];
-    pendingHtml =
-      '<div class="chat-signal-chip">' +
-        '<p class="text-xs">' + parts.join(' · ') + ' — <b>' + escapeHtml(targetEx ? targetEx.name : '') + '</b>에 기록할까요?' +
-          (p.pain ? '<br/><span class="text-stone-400">통증 기록 시 이 종목 증량이 자동 중단돼요</span>' : '') + '</p>' +
-        '<div class="flex gap-2 mt-2">' +
-          '<button class="adj-btn accent-btn" style="flex:1;" onclick="confirmChatSignal()">기록</button>' +
-          '<button class="adj-btn" style="flex:1;" onclick="dismissChatSignal()">아니오</button>' +
-        '</div>' +
-      '</div>';
-  }
+  var pendingHtml = (state.sessionChatPending && !state._sessionChatStreaming) ? buildChatSignalChipHtml() : '';
 
   return '' +
     '<div class="sheet-overlay" onclick="closeSessionChat()">' +
@@ -2541,10 +2567,33 @@ function buildSessionChatSheetHtml(session, exercise) {
         '<div class="flex gap-2 mt-3">' +
           '<input id="session-chat-input" type="text" placeholder="메시지 입력…" ' +
             (state._sessionChatStreaming ? 'disabled ' : '') +
+            'value="' + escapeHtml(state._sessionChatDraft || '') + '" ' +
+            'oninput="state._sessionChatDraft = this.value" ' +
             'onkeydown="if(event.key===\'Enter\')sendSessionChatMessage()" onclick="event.stopPropagation()" ' +
             'style="flex:1; padding:10px 12px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:10px; color:inherit; font-size:14px; outline:none;" />' +
           '<button class="rest-done-btn" onclick="sendSessionChatMessage()"' + (state._sessionChatStreaming ? ' disabled' : '') + '>전송</button>' +
         '</div>' +
+      '</div>' +
+    '</div>';
+}
+
+// 추출 신호 확인 칩 HTML (시트 렌더와 DOM 직접 삽입 양쪽에서 사용)
+function buildChatSignalChipHtml() {
+  var p = state.sessionChatPending;
+  var session = state.activeSession;
+  if (!p || !session) return '';
+  var parts = [];
+  if (p.pain) parts.push('🩹 통증' + (p.painNote ? ' (' + escapeHtml(p.painNote) + ')' : ''));
+  if (p.feel === 'bad') parts.push('😕 자극 나쁨');
+  if (p.feel === 'good') parts.push('👍 자극 좋음');
+  if (p.rpe) parts.push('RPE ' + p.rpe);
+  var targetEx = session.exercises[p.exIdx];
+  return '<div class="chat-signal-chip" id="session-chat-chip">' +
+      '<p class="text-xs">' + parts.join(' · ') + ' — <b>' + escapeHtml(p.exName || (targetEx ? targetEx.name : '')) + '</b>에 기록할까요?' +
+        (p.pain ? '<br/><span class="text-stone-400">통증 기록 시 이 종목 증량이 자동 중단돼요</span>' : '') + '</p>' +
+      '<div class="flex gap-2 mt-2">' +
+        '<button class="adj-btn accent-btn" style="flex:1;" onclick="confirmChatSignal()">기록</button>' +
+        '<button class="adj-btn" style="flex:1;" onclick="dismissChatSignal()">아니오</button>' +
       '</div>' +
     '</div>';
 }
@@ -2563,9 +2612,19 @@ function closeSessionChat() {
   render();
 }
 
-function scrollSessionChatToBottom() {
+// 바닥 근처일 때만 자동 스크롤 (위로 올려 읽는 중이면 방해 안 함). force=true면 무조건.
+function scrollSessionChatToBottom(force) {
   var list = document.getElementById('session-chat-list');
-  if (list) list.scrollTop = list.scrollHeight;
+  if (!list) return;
+  var nearBottom = (list.scrollHeight - list.scrollTop - list.clientHeight) < 60;
+  if (force || nearBottom) list.scrollTop = list.scrollHeight;
+}
+
+// 진행 중인 전송의 세대 토큰 — 세션 종료/새 전송 시 증가해, 늦게 도착한
+// 스트림·신호 추출 콜백이 다음 세션이나 다음 전송을 오염시키지 못하게 한다.
+var _sessionChatGen = 0;
+function invalidateSessionChat() {
+  _sessionChatGen++;
 }
 
 function sendSessionChatMessage() {
@@ -2580,31 +2639,45 @@ function sendSessionChatMessage() {
   session.chat.push({ role: 'user', content: text });
   if (session.chat.length > 40) session.chat = session.chat.slice(-40); // 세션 내 캡
   state._sessionChatStreaming = true;
+  state._sessionChatDraft = '';
   saveActiveSession();
   render();
-  scrollSessionChatToBottom();
+  scrollSessionChatToBottom(true);
 
+  var gen = ++_sessionChatGen;
   var exIdx = session.currentExerciseIdx;
   var exName = session.exercises[exIdx].name;
 
   // 신호 추출 (haiku, 병렬) — 결과는 확인 칩으로만, 저장은 사용자 확인 후
   extractWorkoutSignals(text, exName).then(function(sig) {
-    if (sig) {
-      sig.exIdx = exIdx;
-      state.sessionChatPending = sig;
-      if (!state._sessionChatStreaming && state.sessionChatOpen) { render(); scrollSessionChatToBottom(); }
+    // 세션이 바뀌었거나(종료 후 새 세션) 다른 전송으로 넘어갔으면 폐기
+    if (!sig || gen !== _sessionChatGen || state.activeSession !== session) return;
+    sig.exIdx = exIdx;
+    sig.exName = exName;
+    // 미확정 칩이 같은 종목이면 병합 (덮어쓰기로 이전 신호가 사라지지 않게)
+    var prev = state.sessionChatPending;
+    if (prev && prev.exIdx === exIdx && prev.exName === exName) {
+      sig.pain = sig.pain || prev.pain;
+      sig.painNote = sig.painNote || prev.painNote;
+      sig.feel = sig.feel || prev.feel;
+      sig.rpe = sig.rpe || prev.rpe;
     }
+    state.sessionChatPending = sig;
+    if (!state.sessionChatOpen) return;
+    // 전체 렌더 대신 칩만 DOM에 삽입 — 사용자가 다음 메시지를 입력 중이어도 끊지 않는다
+    if (!state._sessionChatStreaming) insertPendingChipDom();
   });
 
-  // 코치 응답 (스트리밍) — 에러 메시지는 API 이력에서 제외되도록 isError 표시
-  var apiMessages = session.chat.slice(-12)
-    .filter(function(m) { return !m.isError; })
-    .map(function(m) { return { role: m.role, content: m.content }; });
+  // 코치 응답 (스트리밍)
+  var apiMessages = buildChatApiMessages(session.chat);
 
   callSessionCoachAPI(apiMessages, function(fullText) {
+    if (gen !== _sessionChatGen) return; // 옛 스트림이 새 화면을 덮어쓰지 않게
     var el = document.getElementById('session-chat-stream');
     if (el) { el.textContent = fullText; scrollSessionChatToBottom(); }
   }).then(function(result) {
+    if (state.activeSession !== session) return; // 세션 종료 후 도착 → 통째로 폐기
+    if (gen !== _sessionChatGen) return;         // 다른 전송으로 대체됨 → 폐기
     state._sessionChatStreaming = false;
     if (result.error) {
       session.chat.push({ role: 'assistant', content: '⚠️ ' + result.error, isError: true });
@@ -2612,8 +2685,30 @@ function sendSessionChatMessage() {
       session.chat.push({ role: 'assistant', content: result.text });
     }
     saveActiveSession();
-    if (state.sessionChatOpen) { render(); scrollSessionChatToBottom(); }
+    if (state.sessionChatOpen) { render(); scrollSessionChatToBottom(true); }
   });
+}
+
+// 대화 이력 → API 메시지 배열 (순수 함수 — 테스트 대상).
+// 에러 메시지 제외 후 최근 12개로 자르고, 반드시 user로 시작하게 앞부분을 정리한다
+// (Anthropic API는 첫 메시지가 assistant면 400을 반환 → 자르기가 어긋나면 채팅이 영구 먹통).
+function buildChatApiMessages(chat) {
+  var msgs = (chat || [])
+    .filter(function(m) { return !m.isError; })
+    .slice(-12)
+    .map(function(m) { return { role: m.role, content: m.content }; });
+  while (msgs.length && msgs[0].role !== 'user') msgs.shift();
+  return msgs;
+}
+
+// 확인 칩을 전체 렌더 없이 채팅 목록 끝에 삽입 (입력 포커스 보존)
+function insertPendingChipDom() {
+  var list = document.getElementById('session-chat-list');
+  if (!list) return;
+  var old = document.getElementById('session-chat-chip');
+  if (old && old.parentNode) old.parentNode.removeChild(old);
+  list.insertAdjacentHTML('beforeend', buildChatSignalChipHtml());
+  scrollSessionChatToBottom();
 }
 
 function confirmChatSignal() {
@@ -2621,7 +2716,10 @@ function confirmChatSignal() {
   state.sessionChatPending = null;
   if (sig && state.activeSession) {
     var ex = state.activeSession.exercises[sig.exIdx];
-    if (ex && applyChatSignalToExercise(ex, sig)) {
+    // 종목이 교체됐으면(이름 불일치) 엉뚱한 종목에 기록하지 않는다
+    if (ex && sig.exName && ex.name !== sig.exName) {
+      showToast('종목이 바뀌어 기록을 취소했어요 (' + sig.exName + ' → ' + ex.name + ')');
+    } else if (ex && applyChatSignalToExercise(ex, sig)) {
       saveActiveSession();
       showToast(sig.pain ? '🩹 통증 기록됨 — 이 종목 증량을 중단해요' : '기록했어요 — 다음 추천에 반영돼요');
     }
@@ -5415,6 +5513,7 @@ function getTopLayer() {
   if (state.itemDetailSheet) return 'itemDetail';     // 기록 상세 (탭 위)
   if (state.editingSet) return 'setEditor';           // 세트 편집 (세션 위)
   if (state.exerciseSwapOpen) return 'exerciseSwap';  // 종목 교체 (세션 위)
+  if (state.sessionChatOpen) return 'sessionChat';    // 세트 사이 채팅 (세션 위)
   if (state.apiKeyModalOpen) return 'apiKey';         // (더보기 위)
   if (state.profileEditModalOpen) return 'profileEdit';
   if (state.resetConfirming) return 'resetConfirm';
@@ -5452,6 +5551,7 @@ function navBack() {
     case 'itemDetail': closeItemDetail(); break;
     case 'setEditor': closeSetEditor(); break;
     case 'exerciseSwap': closeExerciseSwap(); break;
+    case 'sessionChat': closeSessionChat(); break;
     case 'apiKey': closeApiKeyModal(); break;
     case 'profileEdit': closeProfileEditModal(); break;
     case 'resetConfirm': cancelResetAll(); break;

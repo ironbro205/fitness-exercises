@@ -1,5 +1,5 @@
 {
-  "functionCount": 252,
+  "functionCount": 256,
   "functions": [
     "_buildRecentSetsMap",
     "addBodyRecord",
@@ -25,6 +25,8 @@
     "backToStep2",
     "buildBackupObject",
     "buildCardioPlan",
+    "buildChatApiMessages",
+    "buildChatSignalChipHtml",
     "buildCoachSystemParts",
     "buildFallbackInterval",
     "buildSafetyPromptBlock",
@@ -146,7 +148,9 @@
     "icon",
     "init",
     "initializeOneRMData",
+    "insertPendingChipDom",
     "installPWA",
+    "invalidateSessionChat",
     "loadAIRecommendationIfNeeded",
     "loadPlateauCheckIfNeeded",
     "loadWeeklyReviewIfNeeded",
