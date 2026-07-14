@@ -172,6 +172,7 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-5',
+        thinking: { type: 'disabled' }, // Sonnet 5 기본 생각모드가 max_tokens를 소진해 빈 응답이 오는 사고 방지 (+생각 토큰 요금 절감)
         // 4096: 6~7종목 전체 루틴 JSON(이유/note 포함)이 잘리지 않도록 충분히 확보.
         // (2048은 응답 중간 잘림 → JSON 파싱 실패 → 날 JSON 노출 + 적용버튼 사라짐 버그의 원인이었다)
         max_tokens: 4096,
@@ -683,6 +684,7 @@ async function callCoachAPI(messages) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-5',
+        thinking: { type: 'disabled' }, // Sonnet 5 기본 생각모드가 max_tokens를 소진해 빈 응답이 오는 사고 방지 (+생각 토큰 요금 절감)
         max_tokens: 1024,
         system: [
           { type: 'text', text: coachParts.stable, cache_control: { type: 'ephemeral' } },
@@ -784,6 +786,7 @@ async function fetchAIRecommendation() {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-5',
+        thinking: { type: 'disabled' }, // Sonnet 5 기본 생각모드가 max_tokens를 소진해 빈 응답이 오는 사고 방지 (+생각 토큰 요금 절감)
         max_tokens: 512,
         system: systemPrompt,
         messages: [
@@ -1084,6 +1087,7 @@ async function generateFullRoutine(bodyPart) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-5',
+        thinking: { type: 'disabled' }, // Sonnet 5 기본 생각모드가 max_tokens를 소진해 빈 응답이 오는 사고 방지 (+생각 토큰 요금 절감)
         // 4096: 7종목 루틴 + reason/note 가 잘리지 않도록 (2048은 중간 잘림 위험)
         max_tokens: 4096,
         // 지식 베이스는 고정 블록(cache_control)으로, 부위·종목풀·사용자데이터(systemPrompt)는 분기점 뒤
@@ -1383,6 +1387,7 @@ async function generateWeeklyReview(forceRefresh) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-5',
+        thinking: { type: 'disabled' }, // Sonnet 5 기본 생각모드가 max_tokens를 소진해 빈 응답이 오는 사고 방지 (+생각 토큰 요금 절감)
         max_tokens: 1500,
         // 주간 리뷰는 주 1회 호출이라 캐싱 효과 없음 → 지식 주입만(품질↑), cache_control 미적용
         system: '## 🧬 운동과학 지식 베이스 (주간 리뷰 평가에 활용)\n' + COACH_KNOWLEDGE + '\n\n' + systemPrompt,
@@ -1573,6 +1578,7 @@ async function analyzePlateauWithAI(signals) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-5',
+        thinking: { type: 'disabled' }, // Sonnet 5 기본 생각모드가 max_tokens를 소진해 빈 응답이 오는 사고 방지 (+생각 토큰 요금 절감)
         max_tokens: 1024,
         system: systemPrompt,
         messages: [
@@ -1885,6 +1891,7 @@ ${cardioHistoryContext()}
       },
       body: JSON.stringify({
         model: 'claude-sonnet-5',
+        thinking: { type: 'disabled' }, // Sonnet 5 기본 생각모드가 max_tokens를 소진해 빈 응답이 오는 사고 방지 (+생각 토큰 요금 절감)
         max_tokens: 1500,
         system: systemPrompt,
         messages: [
@@ -2007,6 +2014,7 @@ async function callSessionCoachAPI(messages, onDelta) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-5',
+        thinking: { type: 'disabled' }, // Sonnet 5 기본 생각모드가 max_tokens를 소진해 빈 응답이 오는 사고 방지 (+생각 토큰 요금 절감)
         max_tokens: 512,
         stream: true,
         // 코치 채팅과 같은 stable 블록 재사용 → 프롬프트 캐시 공유로 비용 절감
