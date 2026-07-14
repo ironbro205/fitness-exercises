@@ -1917,12 +1917,103 @@ window.goToExercise = function(idx) {
 // 운동 중 현재 종목을 다른 종목으로 교체
 window.openExerciseSwap = function() {
   state.exerciseSwapOpen = true;
+  state._swapQuery = '';
   render();
 };
 
 window.closeExerciseSwap = function() {
   state.exerciseSwapOpen = false;
+  state._swapQuery = '';
   render();
+};
+
+// 교체 후보 목록 HTML. 검색어 없음 = 같은 부위(기존 동작), 검색어 있음 = 전체 종목 검색.
+// 등록 안 된 이름은 "그대로 추가" 카드로 자유 교체 허용.
+function buildSwapListHtml(query) {
+  var session = state.activeSession;
+  if (!session) return '';
+  var exercise = session.exercises[session.currentExerciseIdx];
+  if (!exercise) return '';
+  var curInfo = EXERCISE_BODY_PART_MAP[exercise.name] || getExercisePart(exercise.name);
+  var primary = curInfo ? curInfo.primary : null;
+  var compound = curInfo ? curInfo.compound : null;
+
+  var norm = function(s) { return String(s).replace(/\s+/g, '').toLowerCase(); };
+  var q = String(query || '').trim();
+  var nq = norm(q);
+
+  var candidates;
+  if (!nq) {
+    // 같은 primary 부위의 다른 종목 — compound 일치 우선 정렬 (기존 동작)
+    candidates = (primary ? (EXERCISES_BY_PRIMARY[primary] || []) : [])
+      .filter(function(name) { return name !== exercise.name; })
+      .sort(function(a, b) {
+        var ai = EXERCISE_BODY_PART_MAP[a].compound === compound ? 0 : 1;
+        var bi = EXERCISE_BODY_PART_MAP[b].compound === compound ? 0 : 1;
+        return ai - bi;
+      });
+  } else {
+    // 전체 종목에서 검색 (공백 무시 부분일치), 같은 부위 우선
+    candidates = Object.keys(EXERCISE_BODY_PART_MAP)
+      .filter(function(name) { return name !== exercise.name && norm(name).indexOf(nq) !== -1; })
+      .sort(function(a, b) {
+        var ap = EXERCISE_BODY_PART_MAP[a].primary === primary ? 0 : 1;
+        var bp = EXERCISE_BODY_PART_MAP[b].primary === primary ? 0 : 1;
+        if (ap !== bp) return ap - bp;
+        return a.localeCompare(b, 'ko');
+      });
+  }
+
+  var partKr = function(name) {
+    var info = EXERCISE_BODY_PART_MAP[name];
+    return (info && BODY_PART_KR[info.primary]) || '';
+  };
+
+  var listHtml = candidates.map(function(name) {
+    var info = EXERCISE_BODY_PART_MAP[name];
+    var tag = info && info.compound ? '복합' : '고립';
+    var part = partKr(name);
+    var prog = getProgressiveRecommendation(name, exercise.targetReps);
+    var hint = prog && prog.previousWeight !== undefined
+      ? '지난 ' + prog.previousWeight + 'kg → ' + prog.weight + 'kg'
+      : (prog ? prog.weight + 'kg (1RM 추정)' : '무게 미정');
+    return '<button class="option-card" style="width: 100%; margin-bottom: 6px; text-align: left;" onclick="swapCurrentExercise(\'' + name.replace(/'/g, "\\'") + '\')">' +
+      '<div class="flex items-center justify-between gap-2">' +
+        '<div>' +
+          '<p class="font-display text-sm">' + name + '</p>' +
+          '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + (nq && part ? part + ' · ' : '') + tag + ' · ' + hint + '</p>' +
+        '</div>' +
+        '<span class="text-xs accent">교체 →</span>' +
+      '</div>' +
+    '</button>';
+  }).join('');
+
+  // 등록 안 된 이름 → 입력한 그대로 추가 허용
+  // XSS 방지: 사용자 입력을 onclick 문자열에 넣지 않고 전역 state에서 직접 읽는다
+  if (q && !EXERCISE_BODY_PART_MAP[q]) {
+    listHtml +=
+      '<button class="option-card" style="width: 100%; margin-bottom: 6px; text-align: left; border-style: dashed;" onclick="swapCurrentExercise(String(state._swapQuery || \'\').trim())">' +
+        '<div class="flex items-center justify-between gap-2">' +
+          '<div>' +
+            '<p class="font-display text-sm">“' + escapeHtml(q) + '”</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">목록에 없는 종목 — 이 이름 그대로 교체</p>' +
+          '</div>' +
+          '<span class="text-xs accent">추가 →</span>' +
+        '</div>' +
+      '</button>';
+  }
+
+  if (!listHtml) {
+    listHtml = '<p class="text-xs text-stone-500 text-center py-4">교체 가능한 종목이 없어요. 검색해서 전체 종목에서 찾아보세요.</p>';
+  }
+  return listHtml;
+}
+
+// 검색 입력 → 목록만 부분 갱신 (전체 render 시 input 포커스가 날아가는 것 방지)
+window.updateSwapSearch = function(q) {
+  state._swapQuery = q;
+  var el = document.getElementById('swap-list');
+  if (el) el.innerHTML = buildSwapListHtml(q);
 };
 
 window.swapCurrentExercise = function(newName) {
@@ -2102,43 +2193,6 @@ function renderWorkoutSession() {
   // 종목 변경 시트
   var swapSheetHtml = '';
   if (state.exerciseSwapOpen) {
-    // 현재 종목 정보 (정확 매칭 우선, 없으면 fuzzy)
-    var curInfo = EXERCISE_BODY_PART_MAP[exercise.name] || getExercisePart(exercise.name);
-    var primary = curInfo ? curInfo.primary : null;
-    var compound = curInfo ? curInfo.compound : null;
-
-    // 같은 primary 부위의 다른 종목 — 인덱스에서 O(1) 조회, compound 일치 우선 정렬
-    var candidates = (primary ? (EXERCISES_BY_PRIMARY[primary] || []) : [])
-      .filter(function(name) { return name !== exercise.name; })
-      .sort(function(a, b) {
-        var ai = EXERCISE_BODY_PART_MAP[a].compound === compound ? 0 : 1;
-        var bi = EXERCISE_BODY_PART_MAP[b].compound === compound ? 0 : 1;
-        return ai - bi;
-      });
-
-    var listHtml = '';
-    if (candidates.length === 0) {
-      listHtml = '<p class="text-xs text-stone-500 text-center py-4">교체 가능한 종목이 없어요.</p>';
-    } else {
-      listHtml = candidates.map(function(name) {
-        var info = EXERCISE_BODY_PART_MAP[name];
-        var tag = info && info.compound ? '복합' : '고립';
-        var prog = getProgressiveRecommendation(name, exercise.targetReps);
-        var hint = prog && prog.previousWeight !== undefined
-          ? '지난 ' + prog.previousWeight + 'kg → ' + prog.weight + 'kg'
-          : (prog ? prog.weight + 'kg (1RM 추정)' : '무게 미정');
-        return '<button class="option-card" style="width: 100%; margin-bottom: 6px; text-align: left;" onclick="swapCurrentExercise(\'' + name.replace(/'/g, "\\'") + '\')">' +
-          '<div class="flex items-center justify-between gap-2">' +
-            '<div>' +
-              '<p class="font-display text-sm">' + name + '</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + tag + ' · ' + hint + '</p>' +
-            '</div>' +
-            '<span class="text-xs accent">교체 →</span>' +
-          '</div>' +
-        '</button>';
-      }).join('');
-    }
-
     swapSheetHtml =
       '<div class="sheet-overlay" onclick="closeExerciseSwap()">' +
         '<div class="sheet" onclick="event.stopPropagation()">' +
@@ -2146,13 +2200,17 @@ function renderWorkoutSession() {
           '<div class="flex items-center justify-between mb-3">' +
             '<div>' +
               '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">종목 변경</p>' +
-              '<p class="font-bebas text-2xl mt-1">' + exercise.name + '</p>' +
+              '<p class="font-bebas text-2xl mt-1">' + escapeHtml(exercise.name) + '</p>' +
             '</div>' +
             '<button class="session-header-btn" onclick="closeExerciseSwap()">' + icon('close', 18) + '</button>' +
           '</div>' +
-          '<p class="text-xs font-mono text-stone-400 mb-3">같은 부위의 다른 종목으로 교체합니다.</p>' +
-          '<div style="max-height: 55vh; overflow-y: auto; padding-right: 4px;">' +
-            listHtml +
+          '<input id="swap-search" type="search" placeholder="종목 검색 — 모든 부위에서 찾기" ' +
+            'value="' + escapeHtml(state._swapQuery || '') + '" ' +
+            'oninput="updateSwapSearch(this.value)" onclick="event.stopPropagation()" ' +
+            'style="width:100%; padding:10px 12px; margin-bottom:10px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:10px; color:inherit; font-size:14px; outline:none;" />' +
+          '<p class="text-xs font-mono text-stone-400 mb-3">검색 없이는 같은 부위 종목을 보여줘요. 검색하면 전체 종목에서 찾고, 없는 종목은 이름 그대로 추가할 수 있어요.</p>' +
+          '<div id="swap-list" style="max-height: 48vh; overflow-y: auto; padding-right: 4px;">' +
+            buildSwapListHtml(state._swapQuery || '') +
           '</div>' +
         '</div>' +
       '</div>';

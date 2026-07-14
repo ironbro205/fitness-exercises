@@ -1,5 +1,5 @@
 {
-  "functionCount": 227,
+  "functionCount": 229,
   "objectCount": 19,
   "functions": [
     "_buildRecentSetsMap",
@@ -23,6 +23,7 @@
     "buildCardioPlan",
     "buildCoachSystemParts",
     "buildFallbackInterval",
+    "buildSwapListHtml",
     "buildUserContext",
     "calculate1RM",
     "calculateRollingMax1RM",
@@ -228,7 +229,8 @@
     "updateEditSheetDisplay",
     "updateMemoryInput",
     "updateProfileEditField",
-    "updateRoutineChatInput"
+    "updateRoutineChatInput",
+    "updateSwapSearch"
   ],
   "objects": [
     "BACKUP_EXCLUDE_KEYS",
