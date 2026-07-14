@@ -83,7 +83,7 @@ function renderHome() {
   recentPRs.forEach(function(pr) {
     prCards += '<div class="pr-badge">' +
       '<div>' +
-        '<p class="text-sm font-display font-bold">' + pr.exerciseName + '</p>' +
+        '<p class="text-sm font-display font-bold">' + escapeHtml(pr.exerciseName) + '</p>' +
         '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + daysAgo(pr.date) + (pr.weight ? ' · ' + pr.reps + '회' : '') + '</p>' +
       '</div>' +
       '<div class="text-right">' +
@@ -1747,9 +1747,15 @@ window.toggleWarmup = function() {
 window.uncompleteSet = function() {
   if (!state.editingSet) return;
   var s = state.editingSet;
-  var set = state.activeSession.exercises[s.exerciseIdx].sets[s.setIdx];
+  var exercise = state.activeSession.exercises[s.exerciseIdx];
+  var set = exercise.sets[s.setIdx];
   set.completed = false;
+  // 이 세트가 올려놓은 1RM 되돌리기 (다른 세트·과거 기록이 세운 값은 유지)
+  if (set.is1RMUpdate) {
+    recalc1RMAfterEdit(exercise.name, set.prev1RM);
+  }
   set.is1RMUpdate = false;
+  delete set.prev1RM;
   state.editingSet = null;
   saveActiveSession();
   render();
@@ -1765,10 +1771,19 @@ window.deleteSet = function() {
     return;
   }
   if (!confirm('이 세트를 삭제할까요?')) return;
-  exercise.sets.splice(s.setIdx, 1);
-  // 삭제한 세트를 가리키는 휴식 타이머 인덱스 꼬임 방지
-  if (state.restTimer && state.restTimer.exerciseIdx === s.exerciseIdx && state.restTimer.setIdx >= s.setIdx) {
-    state.restTimer.setIdx = Math.max(0, state.restTimer.setIdx - 1);
+  var removed = exercise.sets.splice(s.setIdx, 1)[0];
+  // 삭제한 세트가 올려놓은 1RM 되돌리기
+  if (removed && removed.is1RMUpdate) {
+    recalc1RMAfterEdit(exercise.name, removed.prev1RM);
+  }
+  // 휴식 타이머 정리: 삭제된 그 세트의 타이머면 종료, 뒤 세트를 가리키면 인덱스 당김
+  if (state.restTimer && state.restTimer.exerciseIdx === s.exerciseIdx) {
+    if (state.restTimer.setIdx === s.setIdx) {
+      if (restTickerInterval) { clearInterval(restTickerInterval); restTickerInterval = null; }
+      state.restTimer = null;
+    } else if (state.restTimer.setIdx > s.setIdx) {
+      state.restTimer.setIdx -= 1;
+    }
     saveRestTimer();
   }
   state.editingSet = null;
@@ -1802,11 +1817,13 @@ window.completeSet = function() {
   var wasCompleted = set.completed;
   set.completed = true;
 
-  // 1RM 자동 갱신 (워밍업 세트 제외)
+  // 1RM 자동 갱신 (워밍업 세트 제외). 갱신 직전 값을 세트에 보관 — 완료취소/삭제 시 되돌리기용
   if (!set.isWarmup && set.weight && set.reps) {
+    var prevRM = get1RM(exercise.name);
     var updated = update1RM(exercise.name, set.weight, set.reps);
     if (updated) {
       set.is1RMUpdate = true; // PR 표시용
+      set.prev1RM = prevRM;
     }
   }
   
@@ -2467,7 +2484,7 @@ function renderWorkoutComplete() {
             '<div class="pr-alert-icon">' + icon('trophy', 20) + '</div>' +
             '<div class="flex-1">' +
               '<p class="text-[10px] font-mono accent uppercase tracking-widest mb-0\\.5">PR 갱신!</p>' +
-              '<p class="text-sm font-display font-bold">' + pr.exerciseName + '</p>' +
+              '<p class="text-sm font-display font-bold">' + escapeHtml(pr.exerciseName) + '</p>' +
               '<p class="text-[11px] font-mono text-stone-400 mt-0\\.5">' + prChange + '</p>' +
             '</div>' +
           '</div>' +
@@ -4103,7 +4120,7 @@ function renderStats() {
           '<div class="flex items-center justify-between mb-2">' +
             '<div class="flex items-center gap-2">' +
               '<div style="color: var(--accent);">' + icon('trophy', 14) + '</div>' +
-              '<p class="text-sm font-display font-bold">' + pr.exerciseName + '</p>' +
+              '<p class="text-sm font-display font-bold">' + escapeHtml(pr.exerciseName) + '</p>' +
             '</div>' +
             '<p class="text-[10px] font-mono text-stone-500">' + daysAgo(pr.date) + '</p>' +
           '</div>' +

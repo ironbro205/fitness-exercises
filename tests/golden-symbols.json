@@ -1,5 +1,5 @@
 {
-  "functionCount": 229,
+  "functionCount": 230,
   "objectCount": 19,
   "functions": [
     "_buildRecentSetsMap",
@@ -152,6 +152,7 @@
     "openWeeklyReview",
     "parseCoachMemoryBlock",
     "parseRepRange",
+    "recalc1RMAfterEdit",
     "reconcile1RMFromLog",
     "refreshAIRecommendation",
     "refreshWeeklyReview",

@@ -91,10 +91,14 @@ function _buildRecentSetsMap() {
           var working = ex.setsDetail.filter(function(s) { return !s.isWarmup; });
           if (working.length > 0) entry = { sets: working, date: w.date };
         }
-        // 폴백: 요약된 maxWeight + reps (legacy 데이터)
+        // 폴백: 요약된 maxWeight + reps (legacy 데이터). reps가 배열([12,12,12])이거나
+        // 문자열이어도 숫자로 정규화 — 아니면 진행도 계산에서 조용히 누락됨.
         if (!entry && (ex.maxWeight !== undefined || ex.weight !== undefined)) {
           var wt = ex.maxWeight !== undefined ? ex.maxWeight : ex.weight;
-          var rp = ex.reps || (Array.isArray(ex.repsArr) ? ex.repsArr[0] : 0);
+          var rp = ex.reps;
+          if (Array.isArray(rp)) rp = rp[0];
+          if (!rp && Array.isArray(ex.repsArr)) rp = ex.repsArr[0];
+          rp = parseInt(rp, 10) || 0;
           entry = { sets: [{ weight: wt, reps: rp }], date: w.date };
         }
         if (entry) {
@@ -351,6 +355,40 @@ function calculateRollingMax1RM(exerciseName, windowSessions) {
     if (recent[m].e1rm > max) max = recent[m].e1rm;
   }
   return { value: Math.round(max * 10) / 10, sessions: recent.length };
+}
+
+// 세트 완료취소/삭제 후 1RM 되돌리기.
+// 후보(과거 로그 rolling max, 세션에 남은 완료 세트 최고 e1RM, 갱신 직전 값) 중
+// 최댓값이 현재 1RM보다 낮으면 그 값으로 내린다 — 잘못 입력한 세트로 부풀려진 1RM 교정.
+function recalc1RMAfterEdit(exerciseName, prevRM) {
+  var key = EXERCISE_ALIASES_1RM[exerciseName] || exerciseName;
+  var data = storage.get(KEYS.ONE_RM_DATA, {});
+  var cur = data[key];
+  if (cur === undefined) return;
+
+  var candidates = [];
+  var roll = calculateRollingMax1RM(exerciseName);
+  if (roll) candidates.push(roll.value);
+  if (prevRM !== null && prevRM !== undefined) candidates.push(prevRM);
+
+  // 진행 중 세션에 남아 있는 완료 본 세트들의 e1RM (다른 세트가 세운 기록은 유지)
+  if (state.activeSession && Array.isArray(state.activeSession.exercises)) {
+    state.activeSession.exercises.forEach(function(ex) {
+      if (ex.name !== exerciseName) return;
+      (ex.sets || []).forEach(function(s) {
+        if (!s.completed || s.isWarmup || !s.weight || !s.reps) return;
+        if (s.reps > ROLLING_1RM_MAX_REPS) return;
+        candidates.push(calculate1RM(s.weight, s.reps));
+      });
+    });
+  }
+
+  if (!candidates.length) return; // 근거 없음 — 건드리지 않음 (보수적)
+  var best = Math.max.apply(null, candidates);
+  if (best < cur) {
+    data[key] = best;
+    storage.set(KEYS.ONE_RM_DATA, data);
+  }
 }
 
 // 세션 종료 후 호출: 로그 기반 rolling max로 추적 1RM 보정.
