@@ -5,7 +5,8 @@
 - **3단계 UI 결정(사용자)**: 하단 시트(타이머 보임) / 대화는 세션 동안만(완료 시 폐기) / 통증·RPE는 **확인 후 저장**(칩에서 [기록]/[아니오]).
 - **구현** (`b479dc3`): 세션 헤더 💬 → 하단 시트 채팅. ①**스트리밍** — `callSessionCoachAPI`(stream:true)+`parseSSEStream`(순수 파서), 코치 채팅과 같은 stable 블록 재사용(캐시 공유) ②**컨텍스트** — 현재 종목·완료 세트·지난 수행·안전 태그(`buildSessionChatContext`)+"1~3문장 짧게" 모드 ③**신호 추출** — `extractWorkoutSignals`(haiku, 병렬)→확인 칩→`applyChatSignalToExercise`(painFlag/painNote/feel/chatRpe)→`finalizeSession`이 workoutLog로 복사 ④**피드백 루프** — painFlag→기존 통증 게이트(증량 중단), 최근 수행 표에 ⚠️통증/😕자극 표식(`getRecentFeel`)→루틴 생성이 회피. 대화는 activeSession.chat(새로고침 생존, 세션과 소멸).
 - **워크플로우 적대 리뷰(4관점×검증, 24에이전트)** → **확정 17건 → 9수정** (`151c167`): 세대 토큰+세션 동일성 가드(늦은 콜백이 다음 세션 오염 차단) / `buildChatApiMessages`(이력이 assistant로 시작하면 7번째 메시지부터 400 영구 먹통 — user 시작 보장) / **완료 0세트 종목의 신호 유실 방지**(signalOnly 항목) / 종목 교체 시 신호를 옛 이름으로 `signalCarryover` 보존+칩 폐기+confirm 이름 검사 / 휴식 타이머 tick·만료 시 채팅 열려 있으면 부분 갱신(입력 끊김 방지, 만료는 타이머 DOM만 제거) / 칩 DOM 직접 삽입+병합 / navBack에 sessionChat / 바닥 근처만 자동 스크롤 / disabled 스타일. + 자체 발견: 초안 `_sessionChatDraft` 보존.
-- v38, 테스트 **98/98**(session-chat 13개 신설), 스모크 통과. Codex 리뷰 진행.
+- Codex 리뷰 3건(완료화면 크래시·취소 시 신호 유실·종목수 오염) → **CHAT_SIGNALS 전용 저장소 재설계**로 원인째 해결(`recordChatSignal` 확인 즉시 기록, hasRecentPain/getRecentFeel이 저장소+workoutLog 둘 다 읽음). 재확인 resolved + 낮음 3건(KST 오차·손상 방어) 반영. PR#39 병합·v38 운영 확인.
+- **★핫픽스 v39 (PR#40)**: Sonnet 5가 답 앞에 thinking 블록을 붙일 수 있어(adaptive, 요청마다 다름) `content[0].text`만 읽던 8곳이 간헐적 "AI 응답이 비어있어요" — **`getResponseText`**(텍스트 블록 전부 이어붙임)로 일괄 교체, 테스트 mock도 실제 형태(`{type:'text'}`)로 교정. **★교훈: Anthropic 응답은 반드시 getResponseText로 읽을 것(새 AI 호출 추가 시 포함).** 테스트 101/101, v39 운영 확인.
 
 ### 이전 (2026-07-14 — 세션 21: 개편 2단계 종목 안전 태그 + VETO [브랜치 `safety-tags`])
 - **1단계 마무리**: PR#36(v35) 병합 후 폰 QA 2건 수정 — ①추천 카드와 세트 구성 무게 불일치 → `getSessionSetPlan` 단일 계산으로 통일 ②세트 삭제 확인창이 크롬 기본창 → 앱 스타일 `showConfirm` 5곳 적용. PR#37(v36) 병합·QA 통과.
