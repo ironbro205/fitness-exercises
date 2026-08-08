@@ -631,7 +631,7 @@ test('renderMore — 데이터 백업 섹션 + 마지막 백업 표시 + 오래�
   const fresh = loadApp();
   fresh.localStorage.removeItem('fitness_last_backup');
   const never = fresh.renderMore();
-  assert.ok(never.includes('데이터 백업'), '백업 섹션 제목');
+  assert.ok(never.includes('내 데이터 · 백업'), '백업은 "내 데이터" 섹션 안에 있다(섹션 7→3 통합)');
   assert.ok(never.includes('exportData()') && never.includes('openBackupImport()'), '내보내기/가져오기 연결');
   assert.ok(never.includes('마지막 백업') && never.includes('아직 백업한 적이 없어요'), '백업 이력 없음 표시');
   assert.ok(never.includes('backup-reminder'), '백업 이력이 없으면 리마인더 노출');
@@ -704,9 +704,11 @@ test('묶음5 renderHome — 요약판: 코치카드/빠른입력/최근PR 제�
   assert.ok(!home.includes('빠른 입력'), '빠른 입력 섹션 제거');
   assert.ok(!home.includes("setTab('workout')") && !home.includes("setTab('running')") && !home.includes("setTab('stats')"), '하단 바로가기 버튼 제거');
   assert.ok(!home.includes('최근 PR'), '홈 최근 PR 카드 제거(기록 탭으로)');
-  // 유지
-  assert.ok(home.includes('이번 주 운동'), '이번 주 운동 카드 유지');
+  // 유지 — 디자인 정돈에서 "이번 주 운동 N회 / 목표 주 N회" 숫자는 사이클 카드와 같은 사실이라
+  //        지웠다(감사 H1). 카드 자체(요일 박스)는 남아야 한다.
+  assert.ok(home.includes('이번 주') && home.includes('day-box'), '이번 주 요일 카드 유지');
   assert.ok(home.includes('현재 단계'), '사이클 단계 카드 유지');
+  assert.ok(!/이번 주 운동 *<\/p>/.test(home), '주간 횟수 숫자는 사이클 카드 한 곳에만');
 });
 
 test('묶음5 renderMore — 죽은 사이클 메뉴 2개 + 잘못된 모델 배지 제거, 현재 사이클/기억 노트 유지', () => {
@@ -727,7 +729,10 @@ test('묶음5 renderStats — 체지방 토글 제거, 핵심지표 카드 유�
   assert.ok(!stats.includes('체지방'), '체지방 토글 제거(입력 경로 없음)');
   assert.ok(!stats.includes('toggleChartView'), '차트뷰 토글 버튼 제거');
   assert.ok(!stats.includes(' 세션</p>'), '주간운동 제목의 중복 "N 세션" 배지 제거');
-  assert.ok(stats.includes('stat-mini-card'), '핵심지표 카드 유지');
+  // 디자인 정돈: 큰 카드 3장 → 완료 화면과 같은 한 줄 3칸(stat-card)
+  assert.ok(stats.includes('stat-card') && !stats.includes('stat-mini-card'), '핵심지표는 한 줄 3칸');
+  assert.ok(!stats.includes('현재 사이클'), '사이클 카드는 홈에만(중복 제거)');
+  assert.ok(!stats.includes('클릭하여'), "'클릭하여 …' 안내 삭제 — > 아이콘으로 충분");
   assert.ok(stats.includes('PR 히스토리'), 'PR 히스토리 섹션 유지');
 });
 
@@ -783,7 +788,9 @@ test('묶음6-B renderMore — U 아바타 + 린매스 배지 + Built with scien
   assert.ok(more.includes('사용자'), '프로필 이름 유지');
   assert.ok(more.includes('목표'), '프로필 목표 요약(주 N회) 유지');
   assert.ok(more.includes('app-footer'), '앱 푸터 블록 유지');
-  assert.ok(more.includes('Personal fitness tracker'), '푸터 기본 설명 유지');
+  // 디자인 정돈: 영어 태그라인·브랜드 줄은 뺐다. 푸터에는 버전만 남는다.
+  assert.ok(!more.includes('Personal fitness tracker') && !more.includes('app-footer-brand'), '푸터 영어 태그라인 제거');
+  assert.ok(/버전 v\d+/.test(more), '푸터 버전 표기 유지');
 });
 
 // CSS/HTML은 render 하네스가 실행하지 않으므로 파일 텍스트로 특성화한다.
@@ -806,9 +813,10 @@ test('묶음6-B 코치 온라인점 — 점/규칙은 유지하되 발광(box-sh
   assert.ok(screens.includes('온라인'), '상태 텍스트(온라인) 유지');
 });
 
-// ── 묶음6-C① : 진입/피드백 애니메이션 (화면 떠오르기·세트완료 pop·완료축하 컨페티 + reduced-motion) ──
+// ── 묶음6-C① : 진입/피드백 애니메이션 (화면 떠오르기·세트완료 pop·완료 축하 + reduced-motion) ──
+//    컨페티(색종이)는 디자인 정돈에서 뺐다 — 축하 연출은 화면당 하나(체크 아이콘 pop-in).
 // CSS는 render 하네스가 실행하지 않으므로 파일 텍스트로 특성화. (#app.innerHTML은 스텁이라 검사 불가 → CSS 규칙으로 가드)
-test('묶음6-C① 애니메이션 CSS — 진입/팝/축하/컨페티 keyframes·규칙 정의', () => {
+test('묶음6-C① 애니메이션 CSS — 진입/팝/축하 keyframes·규칙 정의', () => {
   const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
   assert.match(css, /@keyframes\s+screenRise\b/, '화면 진입 keyframe');
   assert.match(css, /\.screen-enter\s*>\s*\*/, '화면 진입은 자식 요소에만 적용(고정요소 보호)');
@@ -818,16 +826,14 @@ test('묶음6-C① 애니메이션 CSS — 진입/팝/축하/컨페티 keyframes
   assert.match(css, /\.complete-icon\.pop-in\b/, '완료 아이콘 pop-in 규칙');
   assert.match(css, /@keyframes\s+cardRise\b/, '완료 카드 스태거 keyframe');
   assert.match(css, /\.complete-celebrate-list\s*>\s*\*/, '완료 카드 스태거 규칙');
-  assert.match(css, /@keyframes\s+confettiFall\b/, '컨페티 낙하 keyframe');
-  assert.match(css, /\.confetti-piece\b/, '컨페티 조각 규칙');
+  assert.ok(!/\.confetti-piece\b/.test(css), '컨페티 규칙은 삭제됐다(축하는 체크 아이콘 하나)');
 });
 
-test('묶음6-C① 접근성 — prefers-reduced-motion에서 동작 끔 + 컨페티 숨김', () => {
+test('묶음6-C① 접근성 — prefers-reduced-motion에서 동작 끔', () => {
   const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
   const m = css.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?\n\})/);
   assert.ok(m, 'prefers-reduced-motion 미디어 블록 존재');
   assert.match(m[1], /animation-duration:\s*0\.0*1m?s\s*!important/i, '애니메이션 사실상 제거');
-  assert.match(m[1], /confetti-layer[\s\S]*display:\s*none/i, '컨페티는 reduced-motion에서 숨김');
 });
 
 test('묶음6-C① renderWorkoutComplete — 축하 연출은 첫 진입 1회만(평점 재렌더 시 반복 안 함)', () => {
@@ -843,10 +849,9 @@ test('묶음6-C① renderWorkoutComplete — 축하 연출은 첫 진입 1회만
   const first = fresh.renderWorkoutComplete();
   assert.ok(first.includes('complete-icon pop-in'), '첫 진입: 아이콘 pop-in');
   assert.ok(first.includes('complete-celebrate-list'), '첫 진입: 카드 스태거');
-  assert.ok(first.includes('confetti-layer') && first.includes('confetti-piece'), '첫 진입: 컨페티');
+  assert.ok(!first.includes('confetti'), '컨페티는 없다(축하 연출은 화면당 하나)');
   // 평점 탭 등으로 재렌더 → 축하 연출 빠짐(반복 방지)
   const second = fresh.renderWorkoutComplete();
-  assert.ok(!second.includes('confetti-piece'), '재렌더: 컨페티 없음');
   assert.ok(!second.includes('pop-in'), '재렌더: 아이콘 pop-in 없음');
   assert.ok(!second.includes('complete-celebrate-list'), '재렌더: 카드 스태거 없음');
 });
@@ -1405,18 +1410,55 @@ test('경사걷기 generateCardioWalk — 키 없으면 null, API 오류면 로�
 });
 
 // ── 하위 호환: mode 인자를 안 주면 기존(인터벌) 라벨·아이콘 그대로 ──
-test('경사걷기 cardioTypeLabel/Icon — mode 없으면 기존 인터벌 표기 유지', () => {
+test('경사걷기 cardioTypeLabel — mode 없으면 기존 인터벌 표기 유지', () => {
   assert.equal(app.cardioTypeLabel('run'), '뛰기');
   assert.equal(app.cardioTypeLabel('walk'), '걷기');
   assert.equal(app.cardioTypeLabel('warmup'), '워밍업');
-  assert.equal(app.cardioTypeIcon('run'), '🏃');
   // 걷기 모드에서는 구간 이름이 바뀐다
   assert.equal(app.cardioTypeLabel('walk', 'walk'), '본 구간');
   assert.equal(app.cardioTypeLabel('warmup', 'walk'), '몸풀기');
   assert.equal(app.cardioTypeLabel('cooldown', 'walk'), '정리');
-  assert.equal(app.cardioTypeIcon('walk', 'walk'), '⛰️');
   // 램프 구간은 계획 label('준비 구간')을 우선 표시한다
   assert.equal(app.cardioSegDisplayLabel({ type: 'warmup', label: '준비 구간' }, 'walk'), '준비 구간');
+  // 구간 이모지(🏃⛰️🔥🧊🚶)는 디자인 정돈에서 뺐다 — 라벨이 이미 뜻을 말한다.
+  assert.equal(typeof app.cardioTypeIcon, 'undefined', '구간 이모지 헬퍼는 삭제됐다');
+});
+
+// ── 구간 요약: 인터벌 17줄을 "반복 × N회"로 접는다(디자인 정돈 N1) ──
+test('cardioPlanSummary — 되풀이 구간을 단위 × 횟수로 접고, 규칙이 없으면 접지 않는다', () => {
+  const seg = (type, start, end, speed) => ({ type, startSec: start, endSec: end, speed, incline: 0 });
+  // 워밍업 5분 + (뛰기 1분 / 걷기 2분) × 4 + 쿨다운 5분
+  const segs = [seg('warmup', 0, 300, 5)];
+  let t = 300;
+  for (let i = 0; i < 4; i++) {
+    segs.push(seg('run', t, t + 60, 8)); t += 60;
+    segs.push(seg('walk', t, t + 120, 5)); t += 120;
+  }
+  segs.push(seg('cooldown', t, t + 300, 5));
+
+  const sum = app.cardioPlanSummary(segs);
+  assert.ok(sum, '규칙이 있으면 접는다');
+  assert.equal(sum.times, 4, '반복 횟수');
+  assert.equal(sum.unit.length, 2, '반복 단위는 뛰기+걷기');
+  assert.equal(sum.head.length, 1, '워밍업은 따로');
+  assert.equal(sum.tail.length, 1, '쿨다운은 따로');
+  assert.equal(segs.length, 10, '원본 배열은 그대로');
+
+  assert.equal(sum.rest.length, 0, '남는 구간 없음');
+
+  // 총 시간을 맞추느라 마지막 걷기만 1분으로 잘린 계획 — 반복은 접고 잘린 구간은 따로 남긴다
+  const trimmed = segs.map((s) => ({ ...s }));
+  trimmed[trimmed.length - 2].endSec = trimmed[trimmed.length - 2].startSec + 60;
+  const sum2 = app.cardioPlanSummary(trimmed);
+  assert.ok(sum2, '꼬리가 잘려도 접는다');
+  assert.equal(sum2.times, 3, '온전한 반복은 3회');
+  assert.equal(sum2.rest.length, 2, '잘린 마지막 한 벌은 따로 보여준다');
+
+  // 속력이 매 구간 달라 규칙이 없으면 접지 않는다
+  const varied = segs.map((s, i) => ({ ...s, speed: s.speed + i }));
+  assert.equal(app.cardioPlanSummary(varied), null, '규칙이 없으면 null');
+  // 짧은 계획도 접지 않는다
+  assert.equal(app.cardioPlanSummary(segs.slice(0, 4)), null, '짧으면 null');
 });
 
 // ── §7-7: 모드 기본값은 interval — 기존 사용자 흐름이 바뀌지 않아야 한다 ──
@@ -1774,7 +1816,7 @@ test('volumeByPartCardHtml — 2주 미만은 판정 보류, 이후는 프롬프
   // 3일 사용자 → 판정하지 않는다
   app.state.data.workoutLog = [{ date: isoDaysAgo(2), completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 4 }] }];
   const early = app.volumeByPartCardHtml();
-  assert.ok(early.includes('아직 판단하기 이릅니다'), '최소 표본 가드 문구');
+  assert.ok(early.includes('아직 판단하기 일러요'), '최소 표본 가드 문구');
   assert.ok(!early.includes('meal-status-pill'), '가드 중에는 판정 배지 없음');
 
   // 오래 쉬다 복귀 → 첫 기록만 오래됐을 뿐 최근 2주 표본이 1회뿐이면 판정하지 않는다.
@@ -1784,7 +1826,7 @@ test('volumeByPartCardHtml — 2주 미만은 판정 보류, 이후는 프롬프
     { date: isoDaysAgo(1),   completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 4 }] }
   ];
   const comeback = app.volumeByPartCardHtml();
-  assert.ok(comeback.includes('아직 판단하기 이릅니다'), '복귀 직후는 최근 2주 표본 부족 → 판정 보류');
+  assert.ok(comeback.includes('아직 판단하기 일러요'), '복귀 직후는 최근 2주 표본 부족 → 판정 보류');
   assert.ok(!comeback.includes('meal-status-pill'), '복귀 직후 판정 배지 없음');
 
   // 21일 사용자 + 최근 2주 안에 2회 이상 → 판정 표시. 창(최근 2주) 밖 기록은 볼륨에 안 잡힌다
@@ -1794,13 +1836,13 @@ test('volumeByPartCardHtml — 2주 미만은 판정 보류, 이후는 프롬프
     { date: isoDaysAgo(3),  completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 3 }] }
   ];
   const html = app.volumeByPartCardHtml();
-  assert.ok(!html.includes('아직 판단하기 이릅니다'));
+  assert.ok(!html.includes('아직 판단하기 일러요'));
   assert.ok(html.includes('직접 3.0 · 간접 포함 3.0세트/주'), '2주 평균 = 6세트 / 2주');
   assert.equal(((app.groupVolumeBy(app.getRecentVolumeByPart(2)).chest) / 2).toFixed(1), '3.0', 'AI 프롬프트 경로와 같은 값');
   assert.ok(html.includes('부족'));
   assert.ok(!html.includes('과잉'), "'과잉'은 근거를 넘어선 표현이라 쓰지 않는다");
   assert.ok(!html.includes('MEV'), '사용자 화면에 전문 약어 노출 금지');
-  assert.ok(html.includes('이 범위는 연구 평균이고 본인 반응은 다를 수 있어요.'));
+  assert.ok(html.includes('연구 평균이라 본인 반응은 다를 수 있어요.'), '근거 범위의 한계를 계속 밝힌다(ⓘ 안으로 접혔을 뿐)');
 });
 
 // ═══════════════════════════════════════════════
@@ -2165,4 +2207,137 @@ test('XSS 회귀 — AI 응답·사용자 입력을 심어도 어떤 화면에�
   // 이스케이프가 "값을 지운" 게 아니라 "무해하게 바꾼" 것인지도 확인한다
   const step2 = fresh.renderWorkoutStep2();
   assert.ok(step2.includes('&lt;img src=x onerror=eeek()&gt;'), '이스케이프된 형태가 화면에 보이지 않는다');
+});
+
+// ═══════════════════════════════════════════════
+// 디자인 규칙 회귀 가드 (docs/research/design-audit.md §5 · CLAUDE.md "디자인 규칙")
+// 감사에서 정한 규칙을 사람이 기억하지 않아도 되게, 파일 텍스트로 고정한다.
+// ═══════════════════════════════════════════════
+
+// 화면 코드에 이모지가 다시 들어오면 바로 잡는다. AI 프롬프트 문자열(ai.js / data.js 지식 블록)은
+// 화면이 아니라 대상이 아니다 — 규칙이 걸린 곳은 "사용자가 보는 화면을 그리는 파일"뿐이다.
+// 주석은 사람이 읽는 메모라 대상이 아니다(★·⚠️ 같은 표시는 코드 설명에 계속 쓴다).
+const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/u;
+
+test('디자인 규칙 — 화면 코드(screens/bodymap)에 이모지가 없다', () => {
+  for (const f of ['screens.js', 'bodymap.js']) {
+    const src = fs.readFileSync(path.join(DIR, '..', 'js', f), 'utf8');
+    const hits = src.split('\n')
+      .map((line, i) => ({ line, n: i + 1 }))
+      .filter(({ line }) => !line.trim().startsWith('//') && !line.trim().startsWith('*'))
+      .filter(({ line }) => EMOJI_RE.test(line));
+    assert.deepEqual(hits.map((h) => `js/${f}:${h.n} ${h.line.trim().slice(0, 80)}`), [],
+      '화면 코드에 이모지가 들어갔다 — ICONS 의 SVG 아이콘을 쓰거나 글자만 쓴다');
+  }
+});
+
+test('디자인 규칙 — UI 문자열에 색을 직접 적지 않는다(토큰만)', () => {
+  const HEX = /#[0-9a-fA-F]{6}\b/g;
+  for (const f of ['screens.js', 'domain.js', 'core.js', 'bodymap.js']) {
+    const src = fs.readFileSync(path.join(DIR, '..', 'js', f), 'utf8');
+    const bad = src.split('\n')
+      .map((line, i) => ({ line, n: i + 1 }))
+      .filter(({ line }) => !line.trim().startsWith('//'))    // 주석 속 색 이름은 설명일 뿐
+      .filter(({ line }) => (line.match(HEX) || []).length > 0);
+    assert.deepEqual(bad.map((b) => `js/${f}:${b.n} ${b.line.trim().slice(0, 80)}`), [],
+      'JS 에 색을 직접 적었다 — var(--accent/--warn/--danger/--success/--purple) 를 쓴다');
+  }
+  // CSS 도 :root 토큰 정의 블록 밖에서는 상태색을 직접 적지 않는다
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
+  const afterRoot = css.slice(css.indexOf('}', css.indexOf(':root')) + 1);
+  for (const hex of ['#fbbf24', '#ef4444', '#22c55e', '#a78bfa', '#34d399', '#10b981', '#f472b6', '#f87171']) {
+    assert.ok(!afterRoot.toLowerCase().includes(hex), `CSS 본문에 상태색 ${hex} 가 직접 적혀 있다`);
+  }
+});
+
+test('디자인 규칙 — 잔글씨 하한 11px (탭바·단위 첨자만 예외)', () => {
+  const screens = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
+  assert.ok(!screens.includes('text-[9px]'), '9px 잔글씨는 쓰지 않는다');
+  // 10px 은 큰 숫자 옆 단위 첨자(kg/%)에만 남는다 — 문단·라벨에는 쓰지 않는다.
+  const tenPx = screens.split('\n').filter((l) => l.includes('text-[10px]'));
+  for (const l of tenPx) {
+    assert.match(l, /text-\[10px\][^>]*">\s*(kg|%|보조)/,
+      '10px 은 단위 첨자에만 허용된다: ' + l.trim().slice(0, 100));
+  }
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
+  assert.ok(!/font-size:\s*9px/.test(css), 'CSS 에도 9px 글씨가 남으면 안 된다');
+});
+
+test('디자인 규칙 — 화면 이름은 탭바에만 있고 한국어다', () => {
+  const fresh = loadApp();
+  for (const [tab, fn] of [['home', 'renderHome'], ['workout', 'renderWorkout'], ['stats', 'renderStats'], ['more', 'renderMore']]) {
+    fresh.state.currentTab = tab;
+    const html = fresh[fn]();
+    assert.ok(!/<h1[^>]*>(홈|오늘 운동|러닝|기록|더보기)</.test(html), tab + ' 화면에 큰 제목이 남아 있다');
+  }
+  const bar = fresh.renderTabbar();
+  ['홈', '운동', '러닝', '기록', '더보기'].forEach((l) => assert.ok(bar.includes('>' + l + '<'), '탭바 라벨: ' + l));
+  ['HOME', 'STATS', 'MORE'].forEach((l) => assert.ok(!bar.includes(l), '탭바에 영어 라벨이 남아 있다: ' + l));
+});
+
+test('디자인 규칙 — 접이식 안내 noteBlock 은 네이티브 details 라 재렌더가 없다', () => {
+  const html = app.noteBlock('요약 줄', '자세한 설명');
+  assert.ok(html.startsWith('<details class="note">'), '네이티브 details 사용');
+  assert.ok(html.includes('요약 줄') && html.includes('자세한 설명'));
+  assert.ok(!html.includes('onclick'), '펼치기에 JS 핸들러를 붙이지 않는다(스크롤 튐 방지)');
+});
+
+// ── 결함 수정 회귀 (design-audit 부록) ──
+test('기록 정렬 — 최신이 위. 기록이 N개를 넘어도 오래된 것만 남지 않는다', () => {
+  const fresh = loadApp();
+  const mk = (d, name) => ({ id: name, startTime: new Date(d + 'T10:00:00').getTime(), date: d,
+    sessionType: 'push', sessionName: name, sessionKr: name, duration: 40, sets: 12, exercises: [], completed: true });
+  // 저장 순서(최신 먼저)와 데모 데이터(오래된 먼저)가 섞여 있어도 결과는 날짜 내림차순이어야 한다
+  const log = [mk('2026-08-08', 'A'), mk('2026-08-03', 'B'), mk('2026-08-04', 'C')];
+  const sorted = fresh.sortByDateDesc(log);
+  assert.deepEqual(sorted.map((w) => w.date), ['2026-08-08', '2026-08-04', '2026-08-03']);
+  assert.deepEqual(log.map((w) => w.date), ['2026-08-08', '2026-08-03', '2026-08-04'], '원본 배열은 그대로');
+
+  // 화면에서도 최신이 먼저 나온다 (홈 = 이번 주, 기록 = 기간 전체)
+  fresh.state.data.workoutLog = log;
+  fresh.state.statsPeriod = 'all';
+  const stats = fresh.renderStats();
+  assert.ok(stats.indexOf('2026-08-08') < stats.indexOf('2026-08-03'), '기록 탭: 최신이 위');
+});
+
+test('AI 배지 — 폴백(기본 루틴)에는 "AI 분석 완료"를 붙이지 않는다', () => {
+  const fresh = loadApp();
+  fresh.state.workoutWizardStep = 2;
+  fresh.state.selectedBodyPart = 'push';
+  const base = {
+    bodyPart: 'push', headline: '기본 루틴', duration: 50, totalSets: 18, intensity: 'moderate', caution: '',
+    exercises: [{ name: '머신 체스트 프레스', type: '복합', sets: 3, reps: '8-12', weight: 60, rir: 2, note: '' }]
+  };
+  fresh.state.generatedRoutine = Object.assign({}, base, { isFallback: true });
+  const fallback = fresh.renderWorkoutStep2();
+  assert.ok(!fallback.includes('AI 분석 완료'), '폴백에 AI 배지가 붙으면 배지와 본문이 반대말을 한다');
+  assert.ok(fallback.includes('기본 루틴'), '폴백은 "기본 루틴"으로 표시');
+
+  fresh.state.generatedRoutine = base;                        // isFallback 없음 = AI 생성
+  assert.ok(fresh.renderWorkoutStep2().includes('AI 분석 완료'), 'AI 루틴에는 배지를 붙인다');
+});
+
+test('주간 리뷰 — API 키가 없어도 막다른 길이 아니다(키 설정 진입점)', () => {
+  const fresh = loadApp();
+  fresh.state.apiKey = null;
+  fresh.state.weeklyReview = null;
+  fresh.state.weeklyReviewLoading = false;
+  const html = fresh.renderWeeklyReviewDetail();
+  assert.ok(html.includes('API 키가 필요해요'), '상태 안내');
+  assert.ok(html.includes('openApiKeyModal()'), '키 설정으로 가는 버튼이 있어야 한다');
+});
+
+test('없는 탭 id — 빈 화면 대신 홈으로 되돌린다', () => {
+  const fresh = loadApp();
+  fresh.state.currentTab = 'fuel';       // 리메이크 전 옛 탭 id
+  fresh.render();
+  assert.equal(fresh.state.currentTab, 'home', '알 수 없는 탭은 홈으로 정규화된다');
+});
+
+test('문서 — CLAUDE.md·QA 체크리스트가 실제 탭 구성과 맞는다', () => {
+  const md = fs.readFileSync(path.join(DIR, '..', 'CLAUDE.md'), 'utf8');
+  const qa = fs.readFileSync(path.join(DIR, '..', '.claude', 'QA_CHECKLIST.md'), 'utf8');
+  assert.ok(md.includes('홈 · 운동 · 러닝 · 기록 · 더보기'), 'CLAUDE.md 가 실제 5개 탭을 적어야 한다');
+  assert.ok(!/`fuel`/.test(md), "CLAUDE.md 에 없는 탭 id('fuel')가 남아 있다");
+  assert.ok(!qa.includes('연료'), 'QA 체크리스트에 없는 탭(연료)이 남아 있다');
 });

@@ -1,5 +1,5 @@
 {
-  "functionCount": 420,
+  "functionCount": 422,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -87,6 +87,7 @@
     "cardioNormalizePlan",
     "cardioNow",
     "cardioPaintDynamic",
+    "cardioPlanSummary",
     "cardioPushTones",
     "cardioReleaseWakeLock",
     "cardioRequestWakeLock",
@@ -102,7 +103,6 @@
     "cardioSummaryCardHtml",
     "cardioTabIconName",
     "cardioTick",
-    "cardioTypeIcon",
     "cardioTypeLabel",
     "cardioWalkBodyWeight",
     "cardioWalkClampTotalSec",
@@ -281,6 +281,7 @@
     "muscleMapJsArg",
     "navBack",
     "normalizeMemoryKey",
+    "noteBlock",
     "openApiKeyModal",
     "openBackupImport",
     "openCoachChat",
@@ -388,6 +389,7 @@
     "skipCurrentExercise",
     "skipRest",
     "snapWeightToEquipment",
+    "sortByDateDesc",
     "startCardio",
     "startGeneratedRoutine",
     "startRestTimerTick",
