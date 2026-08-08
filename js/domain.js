@@ -1056,6 +1056,10 @@ function applySafetyGuardrail(exercises) {
       if (copy.rir !== undefined) copy.rir = (copy.type === '복합') ? '2-3' : '0-2';
       if (copy.rest !== undefined && copy.rest) copy.rest = (copy.type === '복합') ? '120-180' : '60-120';
       copy.note = areaKr + ' 부상 보호 — ' + ex.name + ' 대신 배치';
+      // 대체 종목 자체가 같은 부상에 '주의'면 그 수정 지침까지 붙인다.
+      // (예: 바벨 스쿼트 → 핵 스쿼트는 "골반이 말리지 않는 깊이까지만"이 있어야 안전 교체가 완성된다)
+      var subChk = checkExerciseSafety(chk.sub, areas);
+      if (subChk.level === 'caution' && subChk.mod) copy.note += ' · ' + subChk.mod;
       return copy;
     }
     changes.push({ from: ex.name, to: null, areaKr: areaKr });
