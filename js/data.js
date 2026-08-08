@@ -189,10 +189,12 @@ var SESSIONS = {
     exercises: [
       { name: '레그 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 120 },
       { name: '레그 익스텐션', type: '머신', sets: 3, reps: '12-15', lastWeight: 45 },
-      { name: '시티드 햄스트링 컬', type: '머신', sets: 3, reps: '10-12', lastWeight: 35 },
+      // 종목명은 EXERCISE_BODY_PART_MAP의 정확 키를 쓴다 — 퍼지 매칭에 의존하면 부위·장비 판정이 어긋난다.
+      // ('시티드 햄스트링 컬'·'카프 레이즈 머신'은 맵에 없는 이름이었고, 후자는 이 헬스장에 없는 전용 카프 머신을 가리켰다)
+      { name: '시티드 레그 컬', type: '머신', sets: 3, reps: '10-12', lastWeight: 35 },
       { name: '힙 어덕션', type: '머신', sets: 3, reps: '15', lastWeight: 40 },
       { name: '핵 스쿼트', type: '머신', sets: 3, reps: '8-10', lastWeight: 60 },
-      { name: '카프 레이즈 머신', type: '머신', sets: 3, reps: '15-20', lastWeight: 80 }
+      { name: '레그 프레스 카프 레이즈', type: '머신', sets: 3, reps: '15-20', lastWeight: 80 }
     ]
   },
   upper: {
@@ -227,123 +229,203 @@ var SESSIONS = {
 
 // 사용자 데이터 컨텍스트 생성 (코치가 알아야 할 모든 정보)
 // ═══════════════════════════════════════════════
+// 보유 장비 (사용자 헬스장) — 종목 추천 필터의 단일 원천
+// ═══════════════════════════════════════════════
+// 모든 종목은 EXERCISE_BODY_PART_MAP의 equipment 필드로 여기 id 하나를 가리킨다.
+// owned:false 인 장비를 쓰는 종목은 "이 헬스장에서 불가" → AI 종목 풀·추천에서 제외된다.
+// 헬스장을 옮기거나 장비가 늘면 **이 표만** 고치면 된다(종목 표는 그대로).
+//
+// source: 'stated'   = 사용자가 직접 확인해 준 보유 목록
+//         'inferred' = 사용자 목록엔 없지만 기존 1RM 기록(INITIAL_1RM)으로 보유가 증명된 장비
+//         'universal'= 장비가 필요 없음(맨몸)
+//         'none'     = 보유하지 않음
+var GYM_EQUIPMENT = {
+  // ── 장비 불필요 ──
+  bodyweight:                 { kr: '맨몸',                          owned: true,  source: 'universal' },
+
+  // ── 프리웨이트 (벤치·랙·EZ바 포함) ──
+  barbell:                    { kr: '바벨',                          owned: true,  source: 'stated' },
+  dumbbell:                   { kr: '덤벨',                          owned: true,  source: 'stated' },
+  cable:                      { kr: '케이블',                        owned: true,  source: 'stated' },
+  smith:                      { kr: '스미스 머신',                    owned: true,  source: 'stated' },
+
+  // ── 사용자 확인 머신 ──
+  assist_machine:             { kr: '어시스트 기구(풀업·딥스)',        owned: true,  source: 'stated' },
+  chest_press_machine:        { kr: '체스트 프레스 머신',              owned: true,  source: 'stated' },
+  hammer_chest_press:         { kr: '해머 체스트 프레스 머신',          owned: true,  source: 'stated' },
+  hammer_incline_chest_press: { kr: '해머 인클라인 체스트 프레스 머신',  owned: true,  source: 'stated' },
+  incline_barbell_press:      { kr: '인클라인 바벨 프레스 기구',        owned: true,  source: 'stated' },
+  shoulder_press_machine:     { kr: '숄더 프레스 머신',                owned: true,  source: 'stated' },
+  lat_pulldown:               { kr: '랫풀다운 머신',                  owned: true,  source: 'stated' },
+  plate_lat_pulldown:         { kr: '플레이트 랫풀다운 머신',           owned: true,  source: 'stated' },
+  wide_pulldown_rear:         { kr: '와이드 풀다운 리어 머신',          owned: true,  source: 'stated' },
+  seated_row_machine:         { kr: '시티드 로우 머신',                owned: true,  source: 'stated' },
+  cable_row_machine:          { kr: '케이블 로우 머신',                owned: true,  source: 'stated' },
+  hammer_row:                 { kr: '해머 로우 머신',                  owned: true,  source: 'stated' },
+  t_bar_row:                  { kr: 'T바 로우 머신(체스트 고정 없음)',   owned: true,  source: 'stated' },
+  hack_squat:                 { kr: '핵스쿼트 머신',                  owned: true,  source: 'stated' },
+  leg_press:                  { kr: '레그프레스 머신',                 owned: true,  source: 'stated' },
+  v_squat:                    { kr: '브이스쿼트 머신',                 owned: true,  source: 'stated' },
+  leg_extension:              { kr: '레그익스텐션 머신',               owned: true,  source: 'stated' },
+  leg_curl:                   { kr: '레그컬 머신(라잉·시티드)',         owned: true,  source: 'stated' },
+  hip_thrust_machine:         { kr: '힙쓰러스트 머신',                 owned: true,  source: 'stated' },
+  adduction_machine:          { kr: '이너타이(힙 어덕션) 머신',         owned: true,  source: 'stated' },
+
+  // ── 사용자 목록엔 없지만 기존 1RM 기록으로 보유가 확인된 장비 ──
+  // (임의로 지우면 사용자의 실제 기록·PR이 있는 종목이 추천에서 사라진다)
+  pec_deck:                   { kr: '펙 덱 머신',                     owned: true,  source: 'inferred' },
+  rear_pec_deck:              { kr: '리버스 펙 덱 머신',               owned: true,  source: 'inferred' },
+  ab_crunch_machine:          { kr: '복근 크런치 머신',                owned: true,  source: 'inferred' },
+  abduction_machine:          { kr: '힙 어브덕션 머신',                owned: true,  source: 'inferred' },
+  preacher_bench:             { kr: '프리처 컬 벤치',                  owned: true,  source: 'inferred' },
+  band:                       { kr: '탄력 밴드',                      owned: true,  source: 'inferred' },
+
+  // ── 미보유 (이 장비를 쓰는 종목은 추천되지 않는다) ──
+  seated_calf_machine:        { kr: '시티드 카프 레이즈 머신',          owned: false, source: 'none' }
+};
+
+// ═══════════════════════════════════════════════
 // 종목 → 부위 매핑 (균형 분석용)
 // ═══════════════════════════════════════════════
+// equipment: GYM_EQUIPMENT의 id. 종목 하나당 "가장 대표적인 장비" 1개만 적는다(단순함 우선).
 var EXERCISE_BODY_PART_MAP = {
   // 가슴 (chest)
-  '머신 체스트 프레스': { primary: 'chest', secondary: ['triceps', 'shoulders_front'], compound: true, mainEligible: false, angle: 'flat' },
-  '체스트 프레스 머신': { primary: 'chest', secondary: ['triceps', 'shoulders_front'], compound: true, mainEligible: false, angle: 'flat' },
-  '스미스 인클라인 벤치 프레스': { primary: 'chest_upper', secondary: ['shoulders_front', 'triceps'], compound: true, mainEligible: true, angle: 'incline' },
-  '덤벨 인클라인 벤치 프레스': { primary: 'chest_upper', secondary: ['shoulders_front', 'triceps'], compound: true, mainEligible: true, angle: 'incline' },  // 표준명 (1RM 데이터 키)
-  '덤벨 벤치 프레스': { primary: 'chest', secondary: ['shoulders_front', 'triceps'], compound: true, mainEligible: true, angle: 'flat' },
-  '머신 펙 덱 플라이': { primary: 'chest', secondary: [], compound: false, mainEligible: false, angle: 'flat', stretched: true },
-  '펙덱 플라이': { primary: 'chest', secondary: [], compound: false, mainEligible: false, angle: 'flat', stretched: true },
-  '케이블 플라이': { primary: 'chest', secondary: [], compound: false, mainEligible: false, angle: 'flat', stretched: true },
-  '케이블 크로스오버': { primary: 'chest_lower', secondary: [], compound: false, mainEligible: false, angle: 'decline', stretched: true },
-  '덤벨 플라이': { primary: 'chest', secondary: [], compound: false, mainEligible: false, angle: 'flat', stretched: true },
+  '머신 체스트 프레스': { primary: 'chest', secondary: ['triceps', 'shoulders_front'], compound: true, mainEligible: false, angle: 'flat', equipment: 'chest_press_machine' },
+  '체스트 프레스 머신': { primary: 'chest', secondary: ['triceps', 'shoulders_front'], compound: true, mainEligible: false, angle: 'flat', equipment: 'chest_press_machine' },
+  '스미스 인클라인 벤치 프레스': { primary: 'chest_upper', secondary: ['shoulders_front', 'triceps'], compound: true, mainEligible: true, angle: 'incline', equipment: 'smith' },
+  '덤벨 인클라인 벤치 프레스': { primary: 'chest_upper', secondary: ['shoulders_front', 'triceps'], compound: true, mainEligible: true, angle: 'incline', equipment: 'dumbbell' },  // 표준명 (1RM 데이터 키)
+  '인클라인 덤벨 프레스': { primary: 'chest_upper', secondary: ['shoulders_front', 'triceps'], compound: true, mainEligible: true, angle: 'incline', equipment: 'dumbbell' },  // SESSIONS PUSH 템플릿 표시명 — 없으면 부위 판정이 null이 된다
+  '덤벨 벤치 프레스': { primary: 'chest', secondary: ['shoulders_front', 'triceps'], compound: true, mainEligible: true, angle: 'flat', equipment: 'dumbbell' },
+  '머신 펙 덱 플라이': { primary: 'chest', secondary: [], compound: false, mainEligible: false, angle: 'flat', stretched: true, equipment: 'pec_deck' },
+  '펙덱 플라이': { primary: 'chest', secondary: [], compound: false, mainEligible: false, angle: 'flat', stretched: true, equipment: 'pec_deck' },
+  '케이블 플라이': { primary: 'chest', secondary: [], compound: false, mainEligible: false, angle: 'flat', stretched: true, equipment: 'cable' },
+  '케이블 크로스오버': { primary: 'chest_lower', secondary: [], compound: false, mainEligible: false, angle: 'decline', stretched: true, equipment: 'cable' },
+  '덤벨 플라이': { primary: 'chest', secondary: [], compound: false, mainEligible: false, angle: 'flat', stretched: true, equipment: 'dumbbell' },
+  '해머 체스트 프레스': { primary: 'chest', secondary: ['triceps', 'shoulders_front'], compound: true, mainEligible: false, angle: 'flat', equipment: 'hammer_chest_press' },
+  '해머 인클라인 체스트 프레스': { primary: 'chest_upper', secondary: ['shoulders_front', 'triceps'], compound: true, mainEligible: false, angle: 'incline', equipment: 'hammer_incline_chest_press' },
+  '바벨 인클라인 벤치 프레스': { primary: 'chest_upper', secondary: ['shoulders_front', 'triceps'], compound: true, mainEligible: true, angle: 'incline', equipment: 'incline_barbell_press' },
+  '스미스 머신 벤치 프레스': { primary: 'chest', secondary: ['shoulders_front', 'triceps'], compound: true, mainEligible: true, angle: 'flat', equipment: 'smith' },
+  '덤벨 인클라인 플라이': { primary: 'chest_upper', secondary: [], compound: false, mainEligible: false, angle: 'incline', stretched: true, equipment: 'dumbbell' },
   
   // 어깨 (shoulders)
   // 프레스류 보조부위에서 '어깨 측면(shoulders_side)' 제외: 오버헤드 프레스는 전면(front) 주동 + 삼두 보조이며,
   // 측면 델트 근비대 자극은 미미하다(측면은 사이드 레터럴 레이즈 같은 직접 고립이 필요). 근거: RP/Helms/Schoenfeld.
-  '머신 시티드 숄더 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: false },
-  '숄더 프레스 머신': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: false },
-  '덤벨 숄더 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: true },
-  '덤벨 아놀드 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: true },
-  '덤벨 사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false },
-  '사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false },
-  '케이블 원 암 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, stretched: true },
-  '리버스 펙 덱 플라이': { primary: 'shoulders_rear', secondary: ['upper_back'], compound: false, mainEligible: false },
-  '원암 리버스 펙 덱 플라이': { primary: 'shoulders_rear', secondary: [], compound: false, mainEligible: false },
-  '페이스 풀': { primary: 'shoulders_rear', secondary: ['upper_back'], compound: false, mainEligible: false },
+  '머신 시티드 숄더 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: false, equipment: 'shoulder_press_machine' },
+  '숄더 프레스 머신': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: false, equipment: 'shoulder_press_machine' },
+  '덤벨 숄더 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: true, equipment: 'dumbbell' },
+  '덤벨 아놀드 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: true, equipment: 'dumbbell' },
+  '덤벨 사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'dumbbell' },
+  '사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'dumbbell' },
+  '케이블 원 암 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'cable' },
+  '리버스 펙 덱 플라이': { primary: 'shoulders_rear', secondary: ['upper_back'], compound: false, mainEligible: false, equipment: 'rear_pec_deck' },
+  '원암 리버스 펙 덱 플라이': { primary: 'shoulders_rear', secondary: [], compound: false, mainEligible: false, equipment: 'rear_pec_deck' },
+  '페이스 풀': { primary: 'shoulders_rear', secondary: ['upper_back'], compound: false, mainEligible: false, equipment: 'cable' },
+  '스미스 머신 오버헤드 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: true, equipment: 'smith' },
   
   // 삼두 (triceps)
-  '케이블 푸시 다운': { primary: 'triceps', secondary: [], compound: false, mainEligible: false },
-  '트라이셉스 푸시다운': { primary: 'triceps', secondary: [], compound: false, mainEligible: false },
-  '케이블 오버헤드 트라이셉스 익스텐션': { primary: 'triceps', secondary: [], compound: false, mainEligible: false, stretched: true },
-  '케이블 트라이셉스 킥백': { primary: 'triceps', secondary: [], compound: false, mainEligible: false },
-  '어시스트 딥스': { primary: 'chest_lower', secondary: ['triceps', 'shoulders_front'], compound: true, mainEligible: true },  // 상체 전방 기울임 = 가슴 강조 (사용자 기본). 직립 + 좁은 그립이면 삼두 강조.
-  '딥스': { primary: 'chest_lower', secondary: ['triceps', 'shoulders_front'], compound: true, mainEligible: true },
-  '클로즈 그립 벤치 프레스': { primary: 'triceps', secondary: ['chest', 'shoulders_front'], compound: true, mainEligible: false },
+  '케이블 푸시 다운': { primary: 'triceps', secondary: [], compound: false, mainEligible: false, equipment: 'cable' },
+  '트라이셉스 푸시다운': { primary: 'triceps', secondary: [], compound: false, mainEligible: false, equipment: 'cable' },
+  '케이블 오버헤드 트라이셉스 익스텐션': { primary: 'triceps', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'cable' },
+  '케이블 트라이셉스 킥백': { primary: 'triceps', secondary: [], compound: false, mainEligible: false, equipment: 'cable' },
+  '어시스트 딥스': { primary: 'chest_lower', secondary: ['triceps', 'shoulders_front'], compound: true, mainEligible: true, equipment: 'assist_machine' },  // 상체 전방 기울임 = 가슴 강조 (사용자 기본). 직립 + 좁은 그립이면 삼두 강조.
+  '딥스': { primary: 'chest_lower', secondary: ['triceps', 'shoulders_front'], compound: true, mainEligible: true, equipment: 'assist_machine' },
+  '클로즈 그립 벤치 프레스': { primary: 'triceps', secondary: ['chest', 'shoulders_front'], compound: true, mainEligible: false, equipment: 'barbell' },
+  '스미스 머신 클로즈 그립 벤치 프레스': { primary: 'triceps', secondary: ['chest', 'shoulders_front'], compound: true, mainEligible: false, equipment: 'smith' },
   
   // 등/광배 (back/lats)
-  '풀업': { primary: 'lats', secondary: ['biceps', 'upper_back'], compound: true, mainEligible: true },
-  '친업': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: true },
-  '랫풀다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false },
-  '랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false },
-  '클로즈 그립 랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false },
-  '리버스 그립 랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false },
-  '머신 시티드 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: false },
-  '시티드 로우 머신': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: false },
-  '케이블 시티드 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: false },
-  'T 바 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: false },
-  '덤벨 인클라인 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: true },
-  '덤벨 로우': { primary: 'lats', secondary: ['upper_back', 'biceps'], compound: true, mainEligible: true },
-  '바벨 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: true },
-  '케이블 암 풀 다운': { primary: 'lats', secondary: [], compound: false, mainEligible: false, stretched: true },
-  '풀오버': { primary: 'lats', secondary: ['chest'], compound: false, mainEligible: false, stretched: true },
-  '케이블 슈러그': { primary: 'traps', secondary: [], compound: false, mainEligible: false },
-  '켈소 슈러그': { primary: 'upper_back', secondary: ['traps'], compound: false, mainEligible: false },
-  '덤벨 슈러그': { primary: 'traps', secondary: [], compound: false, mainEligible: false },
+  '풀업': { primary: 'lats', secondary: ['biceps', 'upper_back'], compound: true, mainEligible: true, equipment: 'assist_machine' },
+  '친업': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: true, equipment: 'assist_machine' },
+  '랫풀다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false, equipment: 'lat_pulldown' },
+  '랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false, equipment: 'lat_pulldown' },
+  '클로즈 그립 랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false, equipment: 'lat_pulldown' },
+  '리버스 그립 랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false, equipment: 'lat_pulldown' },
+  '머신 시티드 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: false, equipment: 'seated_row_machine' },
+  '시티드 로우 머신': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: false, equipment: 'seated_row_machine' },
+  '케이블 시티드 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: false, equipment: 'cable_row_machine' },
+  'T 바 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: false, equipment: 't_bar_row' },
+  '덤벨 인클라인 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: true, equipment: 'dumbbell' },
+  '덤벨 로우': { primary: 'lats', secondary: ['upper_back', 'biceps'], compound: true, mainEligible: true, equipment: 'dumbbell' },
+  '바벨 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: true, equipment: 'barbell' },
+  '케이블 암 풀 다운': { primary: 'lats', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'cable' },
+  '풀오버': { primary: 'lats', secondary: ['chest'], compound: false, mainEligible: false, stretched: true, equipment: 'dumbbell' },
+  '케이블 슈러그': { primary: 'traps', secondary: [], compound: false, mainEligible: false, equipment: 'cable' },
+  '켈소 슈러그': { primary: 'upper_back', secondary: ['traps'], compound: false, mainEligible: false, equipment: 'dumbbell' },
+  '덤벨 슈러그': { primary: 'traps', secondary: [], compound: false, mainEligible: false, equipment: 'dumbbell' },
+  '어시스트 풀업': { primary: 'lats', secondary: ['biceps', 'upper_back'], compound: true, mainEligible: true, equipment: 'assist_machine' },
+  '플레이트 랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false, equipment: 'plate_lat_pulldown' },
+  '와이드 그립 랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false, equipment: 'wide_pulldown_rear' },
+  '원 암 케이블 랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false, stretched: true, equipment: 'cable' },
+  '해머 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: false, equipment: 'hammer_row' },
+  '스미스 머신 슈러그': { primary: 'traps', secondary: [], compound: false, mainEligible: false, equipment: 'smith' },
   
   // 이두 (biceps)
-  '바벨 컬': { primary: 'biceps', secondary: ['forearms'], compound: false, mainEligible: false },
-  '덤벨 해머 컬': { primary: 'biceps', secondary: ['forearms'], compound: false, mainEligible: false },
-  '해머 컬': { primary: 'biceps', secondary: ['forearms'], compound: false, mainEligible: false },
-  '덤벨 프리처 컬': { primary: 'biceps', secondary: [], compound: false, mainEligible: false },
-  '이지 바 프리처 컬': { primary: 'biceps', secondary: [], compound: false, mainEligible: false },
-  '인클라인 덤벨 컬': { primary: 'biceps', secondary: [], compound: false, mainEligible: false, stretched: true },
-  '덤벨 얼터네이트 컬': { primary: 'biceps', secondary: ['forearms'], compound: false, mainEligible: false },
-  '컨센트레이션 컬': { primary: 'biceps', secondary: [], compound: false, mainEligible: false },
-  '케이블 컬': { primary: 'biceps', secondary: [], compound: false, mainEligible: false },
+  '바벨 컬': { primary: 'biceps', secondary: ['forearms'], compound: false, mainEligible: false, equipment: 'barbell' },
+  '덤벨 해머 컬': { primary: 'biceps', secondary: ['forearms'], compound: false, mainEligible: false, equipment: 'dumbbell' },
+  '해머 컬': { primary: 'biceps', secondary: ['forearms'], compound: false, mainEligible: false, equipment: 'dumbbell' },
+  '덤벨 프리처 컬': { primary: 'biceps', secondary: [], compound: false, mainEligible: false, equipment: 'preacher_bench' },
+  '이지 바 프리처 컬': { primary: 'biceps', secondary: [], compound: false, mainEligible: false, equipment: 'preacher_bench' },
+  '인클라인 덤벨 컬': { primary: 'biceps', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'dumbbell' },
+  '덤벨 얼터네이트 컬': { primary: 'biceps', secondary: ['forearms'], compound: false, mainEligible: false, equipment: 'dumbbell' },
+  '컨센트레이션 컬': { primary: 'biceps', secondary: [], compound: false, mainEligible: false, equipment: 'dumbbell' },
+  '케이블 컬': { primary: 'biceps', secondary: [], compound: false, mainEligible: false, equipment: 'cable' },
+  '이지 바 리버스 컬': { primary: 'forearms', secondary: ['biceps'], compound: false, mainEligible: false, equipment: 'barbell' },
   
   // 하체 - 대퇴사두
-  '레그 프레스': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true },
-  '핵 스쿼트': { primary: 'quads', secondary: ['glutes'], compound: true, mainEligible: true },
-  '리버스 브이 스쿼트': { primary: 'quads', secondary: ['glutes'], compound: true, mainEligible: false },
-  '스미스 머신 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true },
-  '바벨 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true },
-  '프론트 스쿼트': { primary: 'quads', secondary: ['glutes'], compound: true, mainEligible: true },
-  '머신 레그 익스텐션': { primary: 'quads', secondary: [], compound: false, mainEligible: false },
-  '레그 익스텐션': { primary: 'quads', secondary: [], compound: false, mainEligible: false },
-  '시시 스쿼트': { primary: 'quads', secondary: [], compound: false, mainEligible: false, stretched: true },
+  '레그 프레스': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true, equipment: 'leg_press' },
+  '핵 스쿼트': { primary: 'quads', secondary: ['glutes'], compound: true, mainEligible: true, equipment: 'hack_squat' },
+  '리버스 브이 스쿼트': { primary: 'quads', secondary: ['glutes'], compound: true, mainEligible: false, equipment: 'v_squat' },
+  '스미스 머신 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true, equipment: 'smith' },
+  '바벨 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true, equipment: 'barbell' },
+  '프론트 스쿼트': { primary: 'quads', secondary: ['glutes'], compound: true, mainEligible: true, equipment: 'barbell' },
+  '머신 레그 익스텐션': { primary: 'quads', secondary: [], compound: false, mainEligible: false, equipment: 'leg_extension' },
+  '레그 익스텐션': { primary: 'quads', secondary: [], compound: false, mainEligible: false, equipment: 'leg_extension' },
+  '시시 스쿼트': { primary: 'quads', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'bodyweight' },
+  '브이 스쿼트': { primary: 'quads', secondary: ['glutes'], compound: true, mainEligible: false, equipment: 'v_squat' },
   
   // 하체 - 햄스트링/둔근
-  '바벨 루마니안 데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back'], compound: true, mainEligible: true, stretched: true },
-  '덤벨 루마니안 데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back'], compound: true, mainEligible: true, stretched: true },
-  '루마니안 데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back'], compound: true, mainEligible: true, stretched: true },
-  '데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back', 'upper_back'], compound: true, mainEligible: true },
-  '머신 라잉 레그 컬': { primary: 'hamstrings', secondary: [], compound: false, mainEligible: false },
-  '라잉 레그 컬': { primary: 'hamstrings', secondary: [], compound: false, mainEligible: false },
-  '시티드 레그 컬': { primary: 'hamstrings', secondary: [], compound: false, mainEligible: false, stretched: true },
-  '햄스트링 컬': { primary: 'hamstrings', secondary: [], compound: false, mainEligible: false },
-  '머신 힙 쓰러스트': { primary: 'glutes', secondary: ['hamstrings'], compound: true, mainEligible: false },
-  '바벨 힙 쓰러스트': { primary: 'glutes', secondary: ['hamstrings'], compound: true, mainEligible: true },
-  '힙 쓰러스트': { primary: 'glutes', secondary: ['hamstrings'], compound: true, mainEligible: false },
-  '머신 힙 어브덕션': { primary: 'glutes_med', secondary: [], compound: false, mainEligible: false },
-  '힙 어덕션': { primary: 'adductors', secondary: [], compound: false, mainEligible: false },
-  '힙 어브덕션': { primary: 'glutes_med', secondary: [], compound: false, mainEligible: false },
-  '덤벨 불가리안 스플릿 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true },
-  '불가리안 스플릿 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true },
-  '덤벨 싱글 레그 데드리프트': { primary: 'hamstrings', secondary: ['glutes'], compound: true, mainEligible: true, stretched: true },
-  '런지': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true },
+  '바벨 루마니안 데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back'], compound: true, mainEligible: true, stretched: true, equipment: 'barbell' },
+  '덤벨 루마니안 데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back'], compound: true, mainEligible: true, stretched: true, equipment: 'dumbbell' },
+  '루마니안 데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back'], compound: true, mainEligible: true, stretched: true, equipment: 'barbell' },
+  '데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back', 'upper_back'], compound: true, mainEligible: true, equipment: 'barbell' },
+  '머신 라잉 레그 컬': { primary: 'hamstrings', secondary: [], compound: false, mainEligible: false, equipment: 'leg_curl' },
+  '라잉 레그 컬': { primary: 'hamstrings', secondary: [], compound: false, mainEligible: false, equipment: 'leg_curl' },
+  '시티드 레그 컬': { primary: 'hamstrings', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'leg_curl' },
+  '햄스트링 컬': { primary: 'hamstrings', secondary: [], compound: false, mainEligible: false, equipment: 'leg_curl' },
+  '머신 힙 쓰러스트': { primary: 'glutes', secondary: ['hamstrings'], compound: true, mainEligible: false, equipment: 'hip_thrust_machine' },
+  '바벨 힙 쓰러스트': { primary: 'glutes', secondary: ['hamstrings'], compound: true, mainEligible: true, equipment: 'barbell' },
+  '힙 쓰러스트': { primary: 'glutes', secondary: ['hamstrings'], compound: true, mainEligible: false, equipment: 'hip_thrust_machine' },
+  '머신 힙 어브덕션': { primary: 'glutes_med', secondary: [], compound: false, mainEligible: false, equipment: 'abduction_machine' },
+  '힙 어덕션': { primary: 'adductors', secondary: [], compound: false, mainEligible: false, equipment: 'adduction_machine' },
+  '힙 어브덕션': { primary: 'glutes_med', secondary: [], compound: false, mainEligible: false, equipment: 'abduction_machine' },
+  '덤벨 불가리안 스플릿 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true, equipment: 'dumbbell' },
+  '불가리안 스플릿 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true, equipment: 'bodyweight' },
+  '덤벨 싱글 레그 데드리프트': { primary: 'hamstrings', secondary: ['glutes'], compound: true, mainEligible: true, stretched: true, equipment: 'dumbbell' },
+  '런지': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true, equipment: 'bodyweight' },
+  '와이드 스탠스 레그 프레스': { primary: 'adductors', secondary: ['glutes', 'quads'], compound: true, mainEligible: false, stretched: true, equipment: 'leg_press' },
+  '케이블 풀 스루': { primary: 'glutes', secondary: ['hamstrings'], compound: true, mainEligible: false, stretched: true, equipment: 'cable' },
   
   // 종아리
-  '카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true },
-  '시티드 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true },
-  '스탠딩 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true },
+  '카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'bodyweight' },
+  '시티드 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'seated_calf_machine' },
+  '스탠딩 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'smith' },
+  '레그 프레스 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'leg_press' },
+  '덤벨 시티드 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'dumbbell' },
   
   // 코어
-  '머신 시티드 크런치': { primary: 'abs', secondary: [], compound: false, mainEligible: false },
-  '크런치': { primary: 'abs', secondary: [], compound: false, mainEligible: false },
-  '케이블 닐링 사이드 크런치': { primary: 'obliques', secondary: ['abs'], compound: false, mainEligible: false },
-  '러시안 트위스트': { primary: 'obliques', secondary: ['abs'], compound: false, mainEligible: false },
-  '플랭크': { primary: 'abs', secondary: ['obliques'], compound: false, mainEligible: false },
-  '인클라인 덤벨 와이 레이즈': { primary: 'shoulders_rear', secondary: ['traps'], compound: false, mainEligible: false },
+  '머신 시티드 크런치': { primary: 'abs', secondary: [], compound: false, mainEligible: false, equipment: 'ab_crunch_machine' },
+  '크런치': { primary: 'abs', secondary: [], compound: false, mainEligible: false, equipment: 'bodyweight' },
+  '케이블 닐링 사이드 크런치': { primary: 'obliques', secondary: ['abs'], compound: false, mainEligible: false, equipment: 'cable' },
+  '러시안 트위스트': { primary: 'obliques', secondary: ['abs'], compound: false, mainEligible: false, equipment: 'bodyweight' },
+  '플랭크': { primary: 'abs', secondary: ['obliques'], compound: false, mainEligible: false, equipment: 'bodyweight' },
+  '케이블 크런치': { primary: 'abs', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'cable' },
+  '케이블 팔로프 프레스': { primary: 'obliques', secondary: ['abs'], compound: false, mainEligible: false, equipment: 'cable' },
+  '행잉 니 레이즈': { primary: 'abs', secondary: ['obliques'], compound: false, mainEligible: false, stretched: true, equipment: 'assist_machine' },
+  '인클라인 덤벨 와이 레이즈': { primary: 'shoulders_rear', secondary: ['traps'], compound: false, mainEligible: false, equipment: 'dumbbell' },
 
   // 재활 (부상 부위 강화 목적 — 무게 진행 없음, 진행 지표 = 통증 감소)
-  '밴드 외회전': { primary: 'shoulders_rear', secondary: [], compound: false, mainEligible: false },
-  '클램쉘': { primary: 'glutes_med', secondary: [], compound: false, mainEligible: false },
-  '터미널 니 익스텐션': { primary: 'quads', secondary: [], compound: false, mainEligible: false }
+  '밴드 외회전': { primary: 'shoulders_rear', secondary: [], compound: false, mainEligible: false, equipment: 'band' },
+  '클램쉘': { primary: 'glutes_med', secondary: [], compound: false, mainEligible: false, equipment: 'bodyweight' },
+  '터미널 니 익스텐션': { primary: 'quads', secondary: [], compound: false, mainEligible: false, equipment: 'bodyweight' }
 };
 
 // primary 부위별 종목 이름 인덱스 (종목 변경 시트 등에서 O(1) 조회)
@@ -462,6 +544,12 @@ var EXERCISE_SAFETY = {
     mod: { shoulder: '중립 그립과 팔꿈치가 몸통 아래로 내려가지 않는 부분 가동범위로 수행한다.', wrist: '중립에 가까운 그립으로 손목을 전완 위에 수직으로 쌓고 무게를 줄인다.' },
     why: { shoulder: '인클라인 각도에서 어깨 굴곡이 커져 견봉하 공간 부하가 평벤치보다 늘어난다.', wrist: '인클라인 각도에서도 손목 신전 상태로 축성 부하가 걸린다.' }
   },
+  '덤벨 인클라인 플라이': {
+    caution: ['shoulder'],
+    sub: { shoulder: '머신 펙 덱 플라이' },
+    mod: { shoulder: '팔꿈치를 약간 굽힌 채 어깨가 몸통 라인 뒤로 넘어가지 않는 깊이까지만 내리고 무게를 크게 낮춘다.' },
+    why: { shoulder: '바닥 구간에서 어깨가 수평 외전 끝범위까지 열려 전방 관절낭과 회전근개에 부하가 집중되는, 가슴 종목 중 어깨 신장 스트레스가 가장 큰 패턴이다.' }
+  },
   '덤벨 프리처 컬': {
     caution: ['elbow'],
     sub: { elbow: '해머 컬' },
@@ -495,10 +583,9 @@ var EXERCISE_SAFETY = {
     why: { knee: '햄스트링 강화는 경골 전방 전위를 억제해 무릎(특히 전방십자인대) 안정성에 기여하며 관절 압박이 적다.' }
   },
   '러시안 트위스트': {
-    caution: ['lower_back'],
-    sub: { lower_back: '플랭크' },
-    mod: { lower_back: '무게 없이 발을 바닥에 붙이고 허리를 편 채 명치 위쪽(흉추)만 좌우로 천천히 돌린다. 몸이 뒤로 눕거나 허리가 말리면 즉시 멈추고, 세트당 10회·하루 2세트를 넘기지 않는다.' },
-    why: { lower_back: '허리를 굽힌 채 비트는 조합은 섬유륜에 원주형 균열을 만들어 나중에 허리를 펴는 회복 동작조차 듣지 않게 만든다(Marshall & McGill 2010). 무게·뒤로 눕는 각도·허리 말림을 빼야 이 조합이 사라지므로, 허리 부상에서 우선순위가 가장 낮은 종목이다 — 회전 근력이 필요하면 팔로프 프레스 같은 반회전 종목이 낫다.' }
+    contra: ['lower_back'],
+    sub: { lower_back: '케이블 팔로프 프레스' },
+    why: { lower_back: '굴곡된 요추를 반복해서 비트는 조합은 섬유륜에 원주형 균열을 만들고, 그 균열은 나중에 허리를 펴는 회복 동작조차 듣지 않게 만든다(Marshall & McGill 2010). 이 손상 기전은 부하 크기가 아니라 "굴곡+회전" 동작 자체에서 나오므로 무게를 빼도 사라지지 않는다 — 그래서 수정(caution)이 아니라 금기다. 회전 근력이 필요하면 척추를 중립으로 고정한 채 회전에 버티는 항회전 종목(케이블 팔로프 프레스)으로 대체한다.' }
   },
   '런지': {
     caution: ['knee'],
@@ -600,6 +687,12 @@ var EXERCISE_SAFETY = {
     mod: { shoulder: '그립 폭을 넓게 잡아 어깨 외회전 요구를 줄이고 통증이 있으면 머신 스쿼트나 레그 프레스로 바꾼다.', knee: '통증 없는 깊이(하프~파라렐)로 제한하고 중량을 크게 낮춰 수행한다.', wrist: '그립을 넓혀 손목을 중립으로 유지하고 손은 바를 받치기만 한다(필요시 스미스 머신 활용).' },
     why: { lower_back: '등에 얹은 바벨이 요추에 축성 압박을 그대로 싣는다 — 하프 스쿼트 중강도에서도 L3-L4 압박이 체중의 6~10배로 측정됐다(Cappozzo 1985). 대체인 핵 스쿼트는 등판이 몸통 굴곡 모멘트를 없애 기립근 요구를 낮추고(Clark 2019), 머신으로 바꿔도 근비대 손실은 없다(Haugen 2023 메타분석).', shoulder: '바를 받치는 랙 자세가 어깨의 끝범위 외회전·외전을 강제해 회전근개 손상 시 통증을 유발한다.', knee: '깊은 무릎 굴곡에서 슬개대퇴 관절과 반월판 압박이 급증한다.', wrist: '바를 지지하는 손목이 부하 아래에서 신전 위치로 꺾이기 쉽다.' }
   },
+  '바벨 인클라인 벤치 프레스': {
+    caution: ['shoulder', 'wrist'],
+    sub: { shoulder: '해머 인클라인 체스트 프레스', wrist: '해머 인클라인 체스트 프레스' },
+    mod: { shoulder: '바가 가슴에 닿기 전에 멈추는 부분 가동범위와 가벼운 무게로 하고, 견갑이 자유로운 덤벨이나 좌우 독립 암 머신으로 바꾸는 것을 우선 고려한다.', wrist: '바를 손바닥 아래쪽(손꿈치)에 얹어 손목을 전완 위에 수직으로 세우고 손목 보호대와 함께 무게를 낮춘다.' },
+    why: { shoulder: '인클라인 각도에서 어깨 굴곡이 커지고 고정된 바 궤적이 견갑의 자연스러운 움직임을 제한해 견봉하 공간 부하가 커진다.', wrist: '고정 바를 쥔 채 축성 부하를 받아 손목이 신전 위치로 꺾이기 쉽다.' }
+  },
   '바벨 컬': {
     contra: ['wrist', 'elbow'],
     sub: { wrist: '해머 컬', elbow: '해머 컬' },
@@ -622,6 +715,12 @@ var EXERCISE_SAFETY = {
     mod: { knee: '보폭을 넓혀 앞정강이를 수직에 가깝게 유지하고 얕은 깊이·가벼운 중량으로, 필요 시 지지대를 잡고 수행한다.' },
     why: { knee: '한쪽 무릎에 체중과 부하가 집중되고 균형 요구가 커 슬개대퇴 압박·외반 스트레스가 크지만, 정강이 수직 유지와 얕은 깊이로 부하를 크게 낮출 수 있다.' }
   },
+  '브이 스쿼트': {
+    caution: ['lower_back', 'knee'],
+    sub: { lower_back: '레그 익스텐션', knee: '레그 프레스' },
+    mod: { lower_back: '골반이 말리지 않는 깊이까지만, 중간 무게로 수행하면 가능하다.', knee: '발을 발판 위쪽에 두고 얕은 깊이·가벼운 중량으로 수행한다.' },
+    why: { lower_back: '패드가 상체를 지지해 몸통 굴곡 모멘트는 작지만, 깊은 하강에서 골반이 말리면 요추 굴곡+압박이 생긴다.', knee: '머신 축이 무릎의 전방 이동을 키워 슬개대퇴 압박이 커진다.' }
+  },
   '사이드 레터럴 레이즈': {
     caution: ['shoulder'],
     mod: { shoulder: '엄지가 위를 향하게(약간 외회전) 견갑면(정면에서 약 30도 앞)에서 어깨 높이 이하로만 든다.' },
@@ -639,6 +738,31 @@ var EXERCISE_SAFETY = {
     mod: { lower_back: '발을 앞에 두고 얕은 깊이·가벼운 무게로 몸통을 세워 수행하면 요추 부하를 크게 줄일 수 있다.', shoulder: '그립 폭을 넓게 잡아 어깨 외회전 요구를 줄이고 통증이 있으면 레그 프레스로 바꾼다.', knee: '발을 약간 앞쪽에 두어 무릎 전방 이동을 줄이고 깊이를 파라렐 이내로 제한한다.' },
     why: { lower_back: '궤도가 고정돼 있어도 어깨에 얹은 중량이 요추 축성 압박을 만든다.', shoulder: '바벨 스쿼트와 동일하게 바를 받치는 랙 자세가 어깨 끝범위 외회전·외전을 강제해 손상된 회전근개에 통증을 유발한다.', knee: '고정 궤도에서 무릎 굴곡이 깊어지면 슬개대퇴 압박·전단 부하가 커진다.' }
   },
+  '스미스 머신 벤치 프레스': {
+    caution: ['shoulder', 'wrist'],
+    sub: { shoulder: '머신 체스트 프레스', wrist: '머신 체스트 프레스' },
+    mod: { shoulder: '바가 가슴에 닿기 전에 멈추는 부분 가동범위로 하고 팔꿈치를 몸통에서 45~75도로 유지한다.', wrist: '바를 손꿈치에 얹어 손목을 중립으로 세우고 무게를 낮춘다.' },
+    why: { shoulder: '고정된 수직 궤적이 견갑골의 자연스러운 움직임을 막아 손상된 어깨에 스트레스를 집중시킨다.', wrist: '고정 바 궤적이 손목 각도를 강제해 신전 부하를 스스로 조절하기 어렵다.' }
+  },
+  '스미스 머신 슈러그': {
+    caution: ['lower_back'],
+    sub: { lower_back: '케이블 슈러그' },
+    mod: { lower_back: '중량을 낮추고 반동 없이 수직으로만 으쓱한다. 서 있는 자세가 부담되면 케이블 슈러그로 바꾼다.' },
+    why: { lower_back: '고중량을 손에 든 채 서 있는 자세라 척추 압박이 누적되지만, 굴곡·회전 없이 수직 부하만 걸려 중량 조절로 관리할 수 있다.' }
+  },
+  '스미스 머신 오버헤드 프레스': {
+    caution: ['lower_back', 'shoulder', 'wrist'],
+    sub: { lower_back: '머신 시티드 숄더 프레스', shoulder: '사이드 레터럴 레이즈', wrist: '머신 시티드 숄더 프레스' },
+    mod: { lower_back: '등받이 있는 벤치에 앉아 허리를 등받이에 붙이고 수행하면 가능하다.', shoulder: '고정 궤적을 이용해 통증 없는 구간까지만 내리는 부분 가동범위로 제한하고 무게를 낮춘다.', wrist: '무게를 낮추고 손목을 전완 바로 위에 수직으로 세워 손목 보호대를 착용한다.' },
+    why: { lower_back: '서서 하면 갈비뼈가 들리며 요추가 과신전되기 쉽다. 다만 궤도가 고정돼 있어 등받이에 앉으면 부하를 통제하기 쉽다.', shoulder: '오버헤드 궤적이 견봉하 충돌 각도를 통과한다. 대신 궤적이 고정돼 통증 없는 구간에서 정확히 끊기는 프리웨이트보다 쉽다.', wrist: '고정 바를 쥔 채 머리 위로 미는 구조라 손목이 신전 위치에서 축성 부하를 받는다.' }
+  },
+  '스미스 머신 클로즈 그립 벤치 프레스': {
+    contra: ['wrist'],
+    caution: ['shoulder', 'elbow'],
+    sub: { shoulder: '케이블 푸시 다운', wrist: '케이블 트라이셉스 킥백', elbow: '케이블 푸시 다운' },
+    mod: { shoulder: '팔꿈치를 몸통에 붙이고 바가 가슴에 닿기 전에 멈추는 부분 가동범위로 수행한다.', elbow: '무게를 낮추고 팔꿈치를 완전히 잠그기 직전에 멈추는 범위로 수행한다.' },
+    why: { shoulder: '좁은 그립이라 어깨 외전은 적지만 바닥 구간의 어깨 신전 부하는 남는다.', wrist: '좁은 그립에서 손목이 강하게 신전된 채 고정 바의 축성 부하를 그대로 받는다 — 바벨 클로즈 그립 벤치와 같은 이유로 수근관 증상에서 회피 대상이다.', elbow: '삼두 주동 프레스라 팔꿈치 신전 부하가 크고, 궤적이 고정돼 통증을 피하는 각도를 만들기 어렵다.' }
+  },
   '스미스 인클라인 벤치 프레스': {
     caution: ['shoulder', 'wrist'],
     sub: { shoulder: '덤벨 인클라인 벤치 프레스', wrist: '머신 체스트 프레스' },
@@ -647,8 +771,8 @@ var EXERCISE_SAFETY = {
   },
   '스탠딩 카프 레이즈': {
     caution: ['lower_back'],
-    sub: { lower_back: '시티드 카프 레이즈' },
-    mod: { lower_back: '중량을 낮추거나 한 발씩 덤벨을 들고 하는 방식으로 척추 압박을 줄이면 가능하다.' },
+    sub: { lower_back: '레그 프레스 카프 레이즈' },
+    mod: { lower_back: '중량을 낮추거나 한 발씩 덤벨을 들고 하는 방식으로 척추 압박을 줄이면 가능하다. 아예 척추 부하를 없애려면 레그 프레스 카프 레이즈로 바꾼다.' },
     why: { lower_back: '어깨 패드형 머신은 중량이 척추를 따라 요추에 축성 압박으로 전달된다.' }
   },
   '시시 스쿼트': {
@@ -666,6 +790,24 @@ var EXERCISE_SAFETY = {
     sub: { shoulder: '케이블 크로스오버', wrist: '케이블 크로스오버', elbow: '케이블 크로스오버' },
     mod: { wrist: '보조 중량을 충분히 높여 손목 부하를 크게 줄이고, 손목을 중립으로 유지하며 통증 없는 범위에서만 수행한다.', elbow: '보조 무게를 충분히 늘려 부하를 크게 줄이고 통증 없는 얕은 깊이까지만 내려간다.' },
     why: { shoulder: '부하를 줄여도 어깨 깊은 신전이라는 고위험 바닥 자세 자체는 동일해 회전근개 손상 시 피해야 한다.', wrist: '지지 구조는 딥스와 같지만 보조 중량으로 손목에 실리는 부하를 크게 줄일 수 있어 절대 금기까지는 아니다.', elbow: '보조가 있어도 깊은 팔꿈치 굴곡에서 관절·삼두 힘줄 부하가 크게 남는다.' }
+  },
+  '어시스트 풀업': {
+    caution: ['shoulder', 'wrist', 'elbow'],
+    sub: { shoulder: '랫풀다운', wrist: '랫풀다운', elbow: '랫풀다운' },
+    mod: { shoulder: '보조 중량을 충분히 높여 부하를 크게 줄이고 통증 없는 가동범위에서만 당긴다.', wrist: '보조 중량을 높여 매달리는 부하를 줄이고 스트랩으로 악력 의존을 낮춘다.', elbow: '보조 중량을 높여 팔꿈치 굴곡 부하를 줄이고 통증 없는 범위에서만 수행한다.' },
+    why: { shoulder: '맨몸 풀업과 같은 오버헤드 자세지만 보조 중량으로 부하를 정량 조절할 수 있어 통증 없는 구간을 찾기 쉽다 — 풀업의 권장 수정법 그 자체다.', wrist: '매달린 손목에 걸리는 견인 부하가 남지만 보조 중량만큼 줄어든다.', elbow: '팔꿈치 굴곡 부하와 악력 요구가 남지만 보조 중량으로 상과 기시부 부담을 낮출 수 있다.' }
+  },
+  '와이드 그립 랫 풀 다운': {
+    caution: ['shoulder'],
+    sub: { shoulder: '클로즈 그립 랫 풀 다운' },
+    mod: { shoulder: '그립을 어깨너비보다 약간 넓은 정도로 좁히고 바를 쇄골 앞으로만 당긴다. 목 뒤로 당기는 변형은 하지 않는다.' },
+    why: { shoulder: '넓은 회내 그립은 시작 자세에서 어깨 외전·내회전을 키워 견봉하 충돌 각도를 통과시킨다. 그립을 좁히거나 중립으로 바꾸면 근비대 손실 없이 부담이 줄어든다.' }
+  },
+  '와이드 스탠스 레그 프레스': {
+    caution: ['lower_back', 'knee'],
+    sub: { lower_back: '힙 어덕션', knee: '힙 어덕션' },
+    mod: { lower_back: '엉덩이가 시트에서 뜨기 직전까지만 내리고 무게를 낮추면 가능하다.', knee: '무릎이 발끝 방향을 벗어나 안으로 무너지지 않는 범위로 제한하고 깊이를 줄인다.' },
+    why: { lower_back: '내전근을 늘리려 깊게 내리는 종목이라 골반이 시트에서 말려 올라가는 구간에 들어가기 쉽다.', knee: '발을 넓게 벌린 자세에서 깊게 내리면 무릎에 외반 스트레스가 걸릴 수 있다.' }
   },
   '원암 리버스 펙 덱 플라이': {
     rehab: ['shoulder'],
@@ -686,6 +828,12 @@ var EXERCISE_SAFETY = {
     sub: { shoulder: '덤벨 얼터네이트 컬', elbow: '해머 컬' },
     mod: { shoulder: '벤치 등받이를 더 세워 어깨가 뒤로 젖혀지는 각도를 줄인다.', elbow: '하단 완전 신전 구간을 제한하고 손목을 중립에 가깝게 유지하며 가볍게 수행한다.' },
     why: { shoulder: '어깨 신전 상태의 스트레치가 견관절을 지나는 이두 장두 힘줄과 전방 어깨에 부담을 준다.', elbow: '팔이 몸 뒤로 신장된 위치에서 원위 이두·팔꿈치 굴곡근에 긴 근길이 인장 스트레스가 커진다.' }
+  },
+  '인클라인 덤벨 프레스': {
+    caution: ['shoulder', 'wrist'],
+    sub: { shoulder: '머신 체스트 프레스', wrist: '체스트 프레스 머신' },
+    mod: { shoulder: '중립 그립과 팔꿈치가 몸통 아래로 내려가지 않는 부분 가동범위로 수행한다.', wrist: '중립에 가까운 그립으로 손목을 전완 위에 수직으로 쌓고 무게를 줄인다.' },
+    why: { shoulder: '인클라인 각도에서 어깨 굴곡이 커져 견봉하 공간 부하가 평벤치보다 늘어난다.', wrist: '인클라인 각도에서도 손목 신전 상태로 축성 부하가 걸린다.' }
   },
   '체스트 프레스 머신': {
     caution: ['shoulder'],
@@ -729,17 +877,33 @@ var EXERCISE_SAFETY = {
     mod: { wrist: '로프나 개별 손잡이로 바꿔 손목이 자유롭게 회전할 수 있게 한다.', elbow: '로프나 싱글 핸들로 바꿔 중립에 가까운 그립으로 가벼운 무게만 사용한다.' },
     why: { wrist: '일자 바 사용 시 바벨 컬처럼 손목이 회외 위치에 고정된다.', elbow: '스트레이트 바 어태치먼트 사용 시 바벨 컬과 같은 고정 회외 그립이 내측 상과 굴곡근 기시부를 자극하지만 어태치먼트와 부하를 바꿀 수 있어 관리 가능하다.' }
   },
+  '케이블 크런치': {
+    caution: ['lower_back', 'knee'],
+    sub: { lower_back: '플랭크', knee: '머신 시티드 크런치' },
+    mod: { lower_back: '가장 가벼운 중량으로 요추가 말리지 않고 흉추만 굽는 얕은 범위까지만, 반복도 짧게 끊어 수행한다. 허리 당김이나 다리 저림이 오면 즉시 중단한다.', knee: '무릎 아래 두꺼운 패드를 깔거나 벤치에 앉아서 하는 변형으로 수행한다.' },
+    why: { lower_back: '케이블 하중을 얹은 반복적 요추 굴곡이라 머신 크런치와 같은 디스크 후방 압출 기전을 재현한다. 손상 동인이 압박 크기보다 반복 굴곡 동작 자체라(Callaghan & McGill 2001) 무게만 줄여선 부족하고 가동범위와 총 반복 수를 함께 줄여야 한다.', knee: '무릎 꿇는 자세가 슬개골을 바닥에 직접 압박한다.' }
+  },
   '케이블 트라이셉스 킥백': {
     caution: ['elbow'],
     sub: { elbow: '케이블 푸시 다운' },
     mod: { elbow: '가벼운 무게로 팔꿈치를 완전히 잠그기 직전에 멈추고 손목을 중립으로 유지한다.' },
     why: { elbow: '팔꿈치 완전 신전 부근에서 저항이 최대가 되어 상과 부위와 삼두 힘줄에 반복적 신전 스트레스를 주지만 부하가 가벼워 조절 가능하다.' }
   },
+  '케이블 팔로프 프레스': {
+    rehab: ['lower_back'],
+    why: { lower_back: '척추를 중립으로 고정한 채 케이블이 만드는 회전 모멘트에 버티는 항회전(anti-rotation) 종목이다. 요추를 실제로 굽히거나 비틀지 않고 코어 강성만 기르므로, 굴곡+회전 조합을 피해야 하는 허리 부상에서 러시안 트위스트를 대신할 표준 대안이다(McGill 계열 요추 안정화).' }
+  },
   '케이블 푸시 다운': {
     caution: ['wrist', 'elbow'],
     sub: { wrist: '케이블 트라이셉스 킥백' },
     mod: { wrist: '로프 어태치먼트로 바꿔 중립 그립으로 손목을 곧게 유지한다.', elbow: '로프를 사용해 손목을 중립으로 두고 가벼운 무게로 통증 없는 범위에서만 수행한다.' },
     why: { wrist: '일자 바 그립은 저항이 손목 신전 방향으로 걸려 수근관 증상을 자극할 수 있다.', elbow: '저항에 맞선 반복적 팔꿈치 신전과 그립 부하가 상과 힘줄을 자극할 수 있으나 부하 조절이 쉬워 관리 가능하다.' }
+  },
+  '케이블 풀 스루': {
+    caution: ['lower_back'],
+    sub: { lower_back: '머신 힙 쓰러스트' },
+    mod: { lower_back: '중량을 낮추고 허리가 말리기 직전까지만 고관절을 접으며, 무릎을 살짝 굽힌 채 엉덩이로만 밀어낸다.' },
+    why: { lower_back: '힙 힌지 패턴이라 요추 굴곡 모멘트가 생기지만, 부하가 뒤에서 수평으로 당기는 케이블이라 RDL 계열 같은 축성 압박이 없어 힌지 종목 중에서는 요추 부담이 가장 낮은 축이다.' }
   },
   '크런치': {
     caution: ['lower_back'],
@@ -805,6 +969,18 @@ var EXERCISE_SAFETY = {
     rehab: ['wrist'],
     why: { wrist: '중립 그립으로 손목 스트레스 없이 전완 근육(상완요골근 등)을 강화해 손목 안정성 회복에 도움이 된다.' }
   },
+  '해머 체스트 프레스': {
+    caution: ['shoulder'],
+    sub: { shoulder: '머신 체스트 프레스' },
+    mod: { shoulder: '시트를 올려 손잡이가 어깨보다 낮은 궤적으로 지나가게 하고 통증 없는 범위까지만 민다.' },
+    why: { shoulder: '좌우 독립 암이라 팔 각도를 스스로 맞출 수 있어 고정 바보다 어깨 부담이 낮지만, 수평 프레스 바닥 구간에서 전방 관절낭에 걸리는 부하는 남는다.' }
+  },
+  '해머 인클라인 체스트 프레스': {
+    caution: ['shoulder'],
+    sub: { shoulder: '해머 체스트 프레스' },
+    mod: { shoulder: '손잡이를 가슴 높이까지만 내리는 부분 가동범위로 제한하고 무게를 낮춘다.' },
+    why: { shoulder: '인클라인 각도에서 어깨 굴곡이 커져 견봉하 공간 부하가 평각도보다 늘어난다.' }
+  },
   '핵 스쿼트': {
     caution: ['lower_back', 'knee'],
     sub: { lower_back: '레그 익스텐션', knee: '레그 프레스' },
@@ -814,6 +990,18 @@ var EXERCISE_SAFETY = {
   '햄스트링 컬': {
     rehab: ['knee'],
     why: { knee: '햄스트링 강화는 경골 전방 전위를 억제해 무릎(특히 전방십자인대) 안정성에 기여하며 관절 압박이 적다.' }
+  },
+  '행잉 니 레이즈': {
+    caution: ['lower_back', 'shoulder'],
+    sub: { lower_back: '플랭크', shoulder: '머신 시티드 크런치' },
+    mod: { lower_back: '다리를 곧게 펴 들지 말고 무릎을 가슴 쪽으로 말아 올려 골반을 후방 경사시킨다. 골반이 안 말리고 다리만 올라가면 장요근 운동이 되어 요추 전단 부하가 커지므로 즉시 멈춘다.', shoulder: '어시스트 기구의 발판을 이용해 매달리는 시간을 줄이거나, 팔걸이형(캡틴 체어) 자세로 바꾼다.' },
+    why: { lower_back: '골반 후방 경사 없이 다리를 들면 장요근이 요추를 앞으로 당겨 전단력이 커진다. 무릎을 말아 올리는 큐만 지키면 복직근 하부 운동으로 안전해진다.', shoulder: '체중 전체가 매달린 어깨의 오버헤드 견인 자세에 걸린다.' }
+  },
+  '이지 바 리버스 컬': {
+    caution: ['wrist', 'elbow'],
+    sub: { wrist: '해머 컬', elbow: '해머 컬' },
+    mod: { wrist: 'EZ 바의 기울어진 그립을 써서 손목 각도 부담을 줄이고 무게를 크게 낮춘다.', elbow: '가벼운 무게로 반동 없이 수행하고, 통증이 있으면 중립 그립(해머 컬)으로 바꾼다.' },
+    why: { wrist: '회내 그립으로 바를 들어 올려 손목 신전근에 지속적인 등척성 부하가 걸린다.', elbow: '전완 신전근 기시부(외측 상과)를 직접 겨냥하는 종목이라 테니스 엘보 증상에서 통증을 유발하기 쉽다. 반대로 통증이 없다면 같은 이유로 재활 강화 종목이 되기도 한다.' }
   },
   '힙 쓰러스트': {
     rehab: ['knee'],
@@ -866,13 +1054,13 @@ var WEAK_PART_EXERCISE_MAP = {
   lats:            ['풀업', '클로즈 그립 랫 풀 다운', '랫 풀 다운', '케이블 암 풀 다운'],
   upper_back:      ['머신 시티드 로우', 'T 바 로우', '케이블 슈러그'],
   biceps:          ['인클라인 덤벨 컬', '이지 바 프리처 컬', '바벨 컬'],
-  forearms:        ['덤벨 해머 컬(이두 보조 자극)', '바벨 컬(이두 보조 자극)'],
+  forearms:        ['이지 바 리버스 컬', '덤벨 해머 컬(이두 보조 자극)'],
   quads:           ['레그 프레스', '핵 스쿼트', '머신 레그 익스텐션', '덤벨 불가리안 스플릿 스쿼트'],
   hamstrings:      ['바벨 루마니안 데드리프트', '시티드 레그 컬', '머신 라잉 레그 컬'],
   glutes:          ['머신 힙 쓰러스트', '머신 힙 어브덕션'],
   adductors:       ['힙 어덕션'],
-  calves:          ['시티드 카프 레이즈', '스탠딩 카프 레이즈'],
-  abs:             ['머신 시티드 크런치', '케이블 닐링 사이드 크런치'],
+  calves:          ['레그 프레스 카프 레이즈', '스탠딩 카프 레이즈', '덤벨 시티드 카프 레이즈'],
+  abs:             ['머신 시티드 크런치', '케이블 크런치', '케이블 팔로프 프레스'],
   lower_back:      ['바벨 루마니안 데드리프트(햄스트링 보조 자극)']
 };
 

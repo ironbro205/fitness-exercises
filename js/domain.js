@@ -950,6 +950,56 @@ function generateLinePath(data, width, height, padding) {
 }
 
 // ═══════════════════════════════════════════════
+// 보유 장비 필터 (헬스장에 없는 기구를 쓰는 종목은 추천하지 않는다)
+// ═══════════════════════════════════════════════
+// 원천은 js/data.js의 GYM_EQUIPMENT 하나뿐 — 헬스장이 바뀌면 그 표만 고치면 된다.
+
+// 종목이 필요로 하는 장비 id. 미등록 종목 이름은 퍼지 매칭으로 추정한다.
+function getExerciseEquipment(exerciseName) {
+  var info = EXERCISE_BODY_PART_MAP[exerciseName] || getExercisePart(exerciseName);
+  return (info && info.equipment) || null;
+}
+
+// 이 헬스장에서 수행 가능한가.
+// 장비 태그가 없거나 GYM_EQUIPMENT에 없는 id면 true(=막지 않는다).
+// 태그를 빠뜨린 실수가 종목을 조용히 지워버리는 쪽보다, 그대로 두고 테스트가 잡는 쪽이 안전하다.
+function isExerciseAvailable(exerciseName) {
+  var eq = getExerciseEquipment(exerciseName);
+  if (!eq) return true;
+  var spec = GYM_EQUIPMENT[eq];
+  if (!spec) return true;
+  return spec.owned !== false;
+}
+
+// 보유 장비 한국어 이름 목록 (맨몸 제외 — 프롬프트에 나열용)
+function getOwnedEquipmentLabels() {
+  return Object.keys(GYM_EQUIPMENT)
+    .filter(function(id) { return id !== 'bodyweight' && GYM_EQUIPMENT[id].owned; })
+    .map(function(id) { return GYM_EQUIPMENT[id].kr; });
+}
+
+// 보유 장비로 불가능한 등록 종목 이름들 (AI에게 "쓰지 말 것"으로 넘김)
+function getUnavailableExerciseNames() {
+  return Object.keys(EXERCISE_BODY_PART_MAP).filter(function(name) {
+    return !isExerciseAvailable(name);
+  });
+}
+
+// AI 프롬프트용 '보유 장비' 블록. 루틴 생성·루틴 수정·코치 채팅이 공유한다.
+function buildEquipmentPromptBlock() {
+  var block = '## 🏋️ 보유 장비 (사용자 헬스장에 실제로 있는 기구 — 종목 추천의 절대 제약)\n' +
+    '맨몸 운동은 항상 가능하고, 그 외에는 아래 장비로 할 수 있는 종목만 추천한다.\n' +
+    getOwnedEquipmentLabels().join(' · ') + '\n' +
+    '- 위 목록에 없는 기구가 필요한 종목은 추천하지 말 것. 같은 부위를 보유 장비로 자극하는 종목으로 대체한다.\n' +
+    '- 사용자가 없는 기구의 종목을 요청하면 "그 기구는 헬스장에 없다"고 알리고 가능한 대안을 제시한다.\n';
+  var unavailable = getUnavailableExerciseNames();
+  if (unavailable.length) {
+    block += '- 장비가 없어 사용 금지인 종목: ' + unavailable.join(', ') + '\n';
+  }
+  return block;
+}
+
+// ═══════════════════════════════════════════════
 // 종목 안전 (부상 대조 + VETO 가드레일)
 // ═══════════════════════════════════════════════
 
@@ -1039,6 +1089,9 @@ function applySafetyGuardrail(exercises) {
     var chk = checkExerciseSafety(ex.name, areas);
     if (chk.level !== 'contra') return ex;
     var areaKr = INJURY_AREAS[chk.area].kr;
+    // 대체 종목이 이 헬스장에 없는 기구면 쓰지 않는다(→ 아래 제거 폴백).
+    // 안전 표는 테스트로도 강제하지만, 데이터 실수가 사용자 화면까지 새지 않게 하는 이중 방어선이다.
+    if (chk.sub && !isExerciseAvailable(chk.sub)) chk.sub = null;
     if (chk.sub && !names[chk.sub]) {
       changes.push({ from: ex.name, to: chk.sub, areaKr: areaKr });
       names[chk.sub] = true;
