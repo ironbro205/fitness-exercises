@@ -409,6 +409,9 @@ function restoreFromBackup(input) {
       var restoredOneRM = parsed.data[KEYS.ONE_RM_DATA];
       if (restoredOneRM && Object.keys(restoredOneRM).length > 0) {
         if (!storage.set(KEYS.ONE_RM_INITIALIZED, true)) failed = true;
+      } else {
+        // 1RM이 비었는데 파일에 든 '초기화됨' 플래그가 남으면 기본 1RM이 영영 안 깔린다 → 지운다.
+        try { localStorage.removeItem(KEYS.ONE_RM_INITIALIZED); } catch (e) {}
       }
     }
   } catch (e) {

@@ -452,6 +452,14 @@ test('복원 — 알맹이 없는 백업은 거절하고, 프로필 없는 백�
   fresh.initializeOneRMData();
   assert.ok(Object.keys(JSON.parse(fresh.localStorage.getItem('fitness_one_rm_data'))).length > 0, '기본 1RM 재시드됨');
 
+  // ③-1 파일이 '초기화됨' 플래그를 들고 있어도 1RM이 비면 그 플래그는 남기지 않는다
+  fresh.localStorage.clear();
+  assert.equal(fresh.restoreFromBackup({
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: { fitness_workout_log: [{ id: 'w_1', date: '2026-08-01' }], fitness_one_rm_data: {}, fitness_one_rm_initialized: true },
+  }).ok, true);
+  assert.equal(fresh.localStorage.getItem('fitness_one_rm_initialized'), null, '파일에 든 플래그도 정리됨');
+
   // ④ 확인창 개수 = 실제로 저장될 개수 (정리로 버려질 줄은 미리 빠져야 함)
   const checked = fresh.parseBackupFile({
     app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
