@@ -34,6 +34,136 @@ function extractBalancedJson(s) {
   return null;
 }
 
+// ═══════════════════════════════════════════════
+// 파싱 경계 타입 강제 — AI가 준 값을 앱이 쓰는 타입으로 접는다.
+//
+// 모델은 JSON 스키마를 지켜 달라고 해도 숫자 칸에 "3-4" · "40kg" · "90초" 같은 글자를 넣는다.
+// #57 에서 화면 출력은 escapeHtml 로 막았지만 **타입은 그대로**라, 그 글자가 계산까지 흘러간다:
+//   · sets "3-4"  → buildSchemeSets 의 Math.max(0, "3-4") = NaN → for 루프 0회 → 그 종목 세트가 0개
+//   · weight "40kg" → snapWeightToEquipment 안에서 NaN → 모든 세트 무게가 NaN, 저장하면 null 로 굳음
+//   · totalSets 생략 → reduce 가 문자열 이어붙이기로 변해 "03-43-4"
+//   · rest "빠르게" → 화면에 "NaN분"
+// 그래서 **화면이 아니라 파싱 지점에서** 한 번만 접는다. 여기를 지나면 숫자 칸은 항상 숫자다.
+// ═══════════════════════════════════════════════
+
+// 숫자 강제. 글자면 앞에 나오는 첫 숫자를 읽는다 — "3-4"→3, "8~12"→8 처럼
+// 범위를 준 경우 **아래값**을 택한다(세트·무게를 부풀리지 않는 쪽이 안전).
+// 읽을 수 없으면 fallback 을 그대로 돌려준다(호출부가 기본값을 정한다).
+// opts.min / opts.max: 범위 밖은 잘라서 병적인 값(999999kg)이 저장되지 않게 한다.
+// opts.positive: 0 이하를 "값 없음"으로 본다 — 기존 `parsed.X || 기본값` 의 falsy 동작을 그대로 유지하는 스위치.
+function aiNum(value, fallback, opts) {
+  opts = opts || {};
+  var n;
+  if (typeof value === 'number') {
+    n = value;
+  } else if (typeof value === 'string') {
+    // 맨 앞 숫자를 먼저 본다("-5" 의 부호를 살리려고). 앞이 글자면 뒤에서 부호 없는 첫 숫자("약 3세트"→3).
+    var m = value.match(/^\s*(-?\d+(?:\.\d+)?)/) || value.match(/(\d+(?:\.\d+)?)/);
+    n = m ? parseFloat(m[1]) : NaN;
+  } else {
+    n = NaN;                                   // boolean · null · 배열 · 객체
+  }
+  if (!isFinite(n)) return fallback;
+  if (opts.positive && n <= 0) return fallback;
+  if (typeof opts.min === 'number' && n < opts.min) n = opts.min;
+  if (typeof opts.max === 'number' && n > opts.max) n = opts.max;
+  return n;
+}
+
+// 정수 강제 (세트 수·RIR·휴식초처럼 소수가 의미 없는 칸).
+function aiInt(value, fallback, opts) {
+  var n = aiNum(value, null, opts);
+  return (n === null) ? fallback : Math.round(n);
+}
+
+// ★반복·RIR·휴식은 **범위 문자열이 정상값**이다 — 숫자로 접으면 안 된다.
+//   이 앱의 루틴 프롬프트가 직접 "reps":"8-10" · "rir":"2-3" · "rest":"120-180" 을 요구하고,
+//   읽는 쪽도 범위를 그대로 읽는다: parseRepRange("8-12") · restMin("120-180")→"2-3분" ·
+//   getEffectiveRestSec 의 parseInt("120-180")→120. 안전 가드레일(js/domain.js)도 교체 종목에
+//   '2-3' · '120-180' 을 다시 써 넣는다. 하나로 접으면 "2-3분 쉬세요"가 "2분"이 된다.
+// 그래서 여기서는 **형식만** 통일한다: "8~12"→"8-12", "12회"→"12", "많이"→fallback.
+function aiRange(value, fallback, opts) {
+  opts = opts || {};
+  var min = (typeof opts.min === 'number') ? opts.min : 1;
+  var max = (typeof opts.max === 'number') ? opts.max : 1000;
+  var s = (typeof value === 'number' && isFinite(value)) ? String(Math.round(value))
+        : (typeof value === 'string' ? value : '');
+  var m = s.match(/(\d+)\s*(?:[-~–—]\s*(\d+))?/);
+  if (!m) return fallback;
+  var lo = parseInt(m[1], 10);
+  var hi = m[2] ? parseInt(m[2], 10) : lo;
+  if (hi < lo) hi = lo;                        // 뒤집힌 범위("12-8")는 아래값만
+  if (lo < min) lo = min;
+  if (hi < lo) hi = lo;
+  if (lo > max) lo = max;                      // 병적인 값 방어 (반복 100회·휴식 15분 초과는 이 앱의 범위 밖)
+  if (hi > max) hi = max;
+  return (lo === hi) ? String(lo) : (lo + '-' + hi);
+}
+
+// 정해진 라벨만 통과시킨다(등급·강도·심각도). 목록 밖이면 fallback.
+function aiEnum(value, allowed, fallback) {
+  return (typeof value === 'string' && allowed.indexOf(value) !== -1) ? value : fallback;
+}
+
+// 글자 칸. 글자가 아니면 빈 문자열 — 객체가 들어와 화면에 "[object Object]" 로 찍히는 것을 막는다.
+// (숫자는 글자로 바꿔 살린다: 모델이 title 에 숫자 하나만 넣는 경우.)
+function aiText(value) {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' && isFinite(value)) return String(value);
+  return '';
+}
+
+// 글자 목록(주간 리뷰의 wins·정체기의 recommendations 등). 배열이 아니면 빈 목록,
+// 배열이면 글자로 읽히는 칸만 남긴다 — 목록 한 칸이 객체여도 그 줄만 사라지고 화면은 멀쩡하다.
+function aiTextList(value) {
+  if (!Array.isArray(value)) return [];
+  var out = [];
+  for (var i = 0; i < value.length; i++) {
+    var s = aiText(value[i]);
+    if (s) out.push(s);
+  }
+  return out;
+}
+
+var AI_INTENSITY_LEVELS = ['light', 'moderate', 'challenging'];
+var AI_GRADES = ['S', 'A', 'B', 'C', 'D'];
+var AI_SEVERITIES = ['low', 'medium', 'high'];
+
+// AI 루틴 종목 1건 → 앱이 쓰는 타입.
+// ★루틴을 새로 만드는 길(generateFullRoutine)과 대화로 고치는 길(modifyRoutineWithAI)이
+//   **같은** 정규화를 쓴다. 예전엔 대화 수정만 이 단계를 통째로 건너뛰어서, 한 번 고치는 순간
+//   무게 스냅(실제 기구 단위)도 숫자 강제도 같이 풀렸다.
+function normalizeAIExercise(ex) {
+  ex = ex || {};
+  var name = (typeof ex.name === 'string' && ex.name.trim()) ? ex.name.trim() : '종목';
+  var weight = aiNum(ex.weight, null, { min: 0, max: 500 });
+  // 어시스트 종목의 보조 0kg(맨몸)은 유효한 값이라 falsy로 버리면 안 된다.
+  var hasWeight = (weight !== null) && (weight > 0 || isReverseProgression(name));
+  return {
+    name: name,
+    type: (typeof ex.type === 'string' && ex.type.trim()) ? ex.type.trim() : '보조',
+    isMain: !!ex.isMain,
+    sets: aiInt(ex.sets, 3, { positive: true, max: 10 }),   // 세트 수만 진짜 숫자다(프롬프트도 "sets":3)
+    reps: aiRange(ex.reps, '8-12', { min: 1, max: 100 }),
+    weight: hasWeight ? snapWeightToEquipment(weight, name) : null,
+    rir: aiRange(ex.rir, 2, { min: 0, max: 10 }),           // RIR 0("실패까지")도 유효한 값이라 min 0
+    rest: aiRange(ex.rest, null, { min: 10, max: 900 }),    // 초 단위 범위 — restMin 이 "120-180"→"2-3분" 으로 읽는다
+    note: (typeof ex.note === 'string') ? ex.note : ''
+  };
+}
+
+// 루틴 껍데기(종목 배열 밖)의 숫자·라벨 칸. 대상 객체를 제자리에서 고친다.
+// fallback 을 null 로 두는 이유: 호출부가 `pr.duration || 기존값` 으로 이어받기 때문 —
+// 못 읽은 칸은 비워 둬야 이전 값이 살아남는다.
+function normalizeAIRoutineMeta(routine) {
+  if (!routine) return routine;
+  routine.headline = (typeof routine.headline === 'string') ? routine.headline : '';
+  routine.duration = aiInt(routine.duration, null, { positive: true, max: 300 });
+  routine.totalSets = aiInt(routine.totalSets, null, { positive: true, max: 100 });
+  routine.intensity = aiEnum(routine.intensity, AI_INTENSITY_LEVELS, null);
+  return routine;
+}
+
 // AI에게 루틴 수정 요청
 async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
   if (!state.apiKey) return { error: 'API 키가 필요합니다.' };
@@ -239,8 +369,15 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
       Array.isArray(parsed.updatedRoutine.exercises) &&
       parsed.updatedRoutine.exercises.length > 0) ? parsed.updatedRoutine : null;
 
+    // 타입 강제를 가드레일보다 **먼저** 건다 — 아래 가드레일이 종목을 교체할 때
+    // 이미 접힌 값 위에서 판단하도록(그리고 이 경로가 무게 스냅을 건너뛰지 않도록).
+    if (validRoutine) {
+      validRoutine.exercises = validRoutine.exercises.map(normalizeAIExercise);
+      normalizeAIRoutineMeta(validRoutine);
+    }
+
     // VETO 가드레일: 수정안에 금기 종목이 들어왔으면 교체/제거하고 답변에 알림
-    var replyText = parsed.reply || '';
+    var replyText = (typeof parsed.reply === 'string') ? parsed.reply : '';
     if (validRoutine) {
       var guarded = applySafetyGuardrail(validRoutine.exercises);
       if (guarded.changes.length) {
@@ -867,11 +1004,11 @@ async function fetchAIRecommendation() {
     
     var result = {
       session: parsed.session,
-      title: parsed.title || '',
-      reason: parsed.reason || '',
-      caution: parsed.caution || '',
-      suggestion: parsed.suggestion || '',
-      intensity: parsed.intensity || 'moderate',
+      title: aiText(parsed.title),
+      reason: aiText(parsed.reason),
+      caution: aiText(parsed.caution),
+      suggestion: aiText(parsed.suggestion),
+      intensity: aiEnum(parsed.intensity, AI_INTENSITY_LEVELS, 'moderate'),
       date: todayStr,
       aiGenerated: true
     };
@@ -1191,28 +1328,14 @@ async function generateFullRoutine(bodyPart) {
       return { error: '종목 목록이 없습니다' };
     }
 
-    var mappedExercises = parsed.exercises.map(function(ex) {
-      return {
-        name: ex.name || '종목',
-        type: ex.type || '보조',
-        isMain: !!ex.isMain,
-        sets: ex.sets || 3,
-        reps: ex.reps || '8-12',
-        // 어시스트 종목의 보조 0kg(맨몸)은 유효한 값이라 falsy로 버리면 안 된다.
-        weight: (ex.weight || (ex.weight === 0 && isReverseProgression(ex.name)))
-          ? snapWeightToEquipment(ex.weight, ex.name) : null,
-        rir: ex.rir || 2,
-        rest: ex.rest || null,
-        note: ex.note || ''
-      };
-    });
+    var mappedExercises = parsed.exercises.map(normalizeAIExercise);
 
     // VETO 가드레일: AI가 프롬프트를 어기고 금기 종목을 넣었어도 여기서 교체/제거
     var guarded = applySafetyGuardrail(mappedExercises);
     if (!guarded.exercises.length) {
       return { error: '부상 안전 필터로 모든 종목이 제외됐어요. 다시 시도해주세요.' };
     }
-    var cautionText = parsed.caution || '';
+    var cautionText = aiText(parsed.caution);   // 아래에서 가드레일 알림을 이어 붙이므로 반드시 글자여야 한다
     if (guarded.changes.length) {
       var changeMsgs = guarded.changes.map(function(c) {
         return c.to ? (c.from + ' → ' + c.to + ' (' + c.areaKr + ' 보호)') : (c.from + ' 제외 (' + c.areaKr + ' 보호)');
@@ -1231,13 +1354,16 @@ async function generateFullRoutine(bodyPart) {
       }).join(', ') + ' (헬스장에 없는 기구)';
     }
 
+    // e.sets 는 normalizeAIExercise 를 지나 항상 숫자다 — 이 합계가 문자열 이어붙이기로 변하지 않는다.
+    var setsSum = guarded.exercises.reduce(function(s, e) { return s + e.sets; }, 0);
+
     return {
       bodyPart: bodyPart,
-      headline: parsed.headline || (info.name + ' 루틴'),
-      reason: parsed.reason || '',
-      duration: parsed.duration || 60,
-      totalSets: parsed.totalSets || guarded.exercises.reduce(function(s, e) { return s + (e.sets || 3); }, 0),
-      intensity: parsed.intensity || 'moderate',
+      headline: (typeof parsed.headline === 'string' && parsed.headline.trim()) ? parsed.headline : (info.name + ' 루틴'),
+      reason: (typeof parsed.reason === 'string') ? parsed.reason : '',
+      duration: aiInt(parsed.duration, 60, { positive: true, max: 300 }),
+      totalSets: aiInt(parsed.totalSets, setsSum, { positive: true, max: 100 }),
+      intensity: aiEnum(parsed.intensity, AI_INTENSITY_LEVELS, 'moderate'),
       caution: cautionText,
       exercises: guarded.exercises,
       generatedAt: new Date().toISOString()
@@ -1524,12 +1650,12 @@ async function generateWeeklyReview(forceRefresh) {
       weekId: weekId,
       monday: weekData.monday,
       sunday: weekData.sunday,
-      headline: parsed.headline || '',
-      grade: parsed.grade || 'B',
-      wins: Array.isArray(parsed.wins) ? parsed.wins : [],
-      improvements: Array.isArray(parsed.improvements) ? parsed.improvements : [],
-      nextWeek: Array.isArray(parsed.nextWeek) ? parsed.nextWeek : [],
-      coachNote: parsed.coachNote || '',
+      headline: aiText(parsed.headline),
+      grade: aiEnum(parsed.grade, AI_GRADES, 'B'),
+      wins: aiTextList(parsed.wins),
+      improvements: aiTextList(parsed.improvements),
+      nextWeek: aiTextList(parsed.nextWeek),
+      coachNote: aiText(parsed.coachNote),
       stats: {
         workoutCount: weekData.workoutCount,
         weightChange: weekData.weightChange,
@@ -1827,11 +1953,11 @@ async function analyzePlateauWithAI(signals) {
     var result = {
       detectedAt: getTodayStr(),
       signals: signals,
-      severity: parsed.severity || 'medium',
-      diagnosis: parsed.diagnosis || '',
-      primary_cause: parsed.primary_cause || '',
-      recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : [],
-      encouragement: parsed.encouragement || ''
+      severity: aiEnum(parsed.severity, AI_SEVERITIES, 'medium'),
+      diagnosis: aiText(parsed.diagnosis),
+      primary_cause: aiText(parsed.primary_cause),
+      recommendations: aiTextList(parsed.recommendations),
+      encouragement: aiText(parsed.encouragement)
     };
     
     storage.set(KEYS.PLATEAU_CHECK, result);
@@ -1904,17 +2030,17 @@ function cardioFitToTotal(raw, totalSec, opts) {
   var list = Array.isArray(raw) ? raw : [];
 
   // 속력 숫자 정리: km/h, 모드별 범위로 클램프, 소수 1자리. 이상값이면 종류별 기본값.
+  // aiNum 을 쓰는 이유: Number("8.0km/h") 는 NaN 이라 모델이 단위를 붙이면 처방이 통째로 기본값으로 주저앉는다.
   function cleanSpeed(v, type) {
-    var n = Number(v);
-    if (!isFinite(n) || n <= 0) n = defSpeed[type] || 4;
+    var n = aiNum(v, null, { positive: true });
+    if (n === null) n = defSpeed[type] || 4;
     if (n < spdMin) n = spdMin;
     if (n > spdMax) n = spdMax;
     return Math.round(n * 10) / 10;
   }
   // 경사 정리: 0~상한 클램프, 0.5% 격자. 상한 초과는 코드가 잘라낸다(§1-3 12% 초과 금지).
   function cleanIncline(v) {
-    var n = Number(v);
-    if (!isFinite(n) || n < 0) n = 0;
+    var n = aiNum(v, 0, { min: 0 });
     if (n > inclineMax) n = inclineMax;
     return Math.round(n * 2) / 2;
   }
@@ -1924,8 +2050,10 @@ function cardioFitToTotal(raw, totalSec, opts) {
   for (var i = 0; i < list.length; i++) {
     var seg = list[i] || {};
     var type = allowed[seg.type] ? seg.type : 'walk';       // 허용 밖 종류(걷기 모드의 run 등)는 walk 로 접는다
-    var sec = Number(seg.sec);
-    if (!isFinite(sec) || sec <= 0) continue;
+    // "300초" 처럼 단위가 붙어도 구간을 통째로 버리지 않는다. 길이는 어차피 아래에서
+    // 총시간에 맞춰 비율로 다시 늘려 쓰므로, 단위를 잘못 읽어도 구간 비율은 살아남는다.
+    var sec = aiNum(seg.sec, null, { positive: true });
+    if (sec === null) continue;
     var item = {
       type: type,
       sec: sec,
@@ -2595,11 +2723,14 @@ async function extractWorkoutSignals(userText, exerciseName) {
       if (m) { try { parsed = JSON.parse(m[0]); } catch (e2) { parsed = null; } }
     }
     if (!parsed) return null;
+    // haiku 가 rpe 를 "8" 로 주는 일이 잦다 — 숫자만 받던 예전 판정은 그 신호를 통째로 버렸다.
+    // 범위 밖(0, 15)은 클램프하지 않고 버린다: 애매한 강도 신호를 지어내느니 없는 편이 낫다.
+    var rpeNum = aiInt(parsed.rpe, null);
     var sig = {
       pain: !!parsed.pain,
       painNote: (parsed.pain && typeof parsed.painNote === 'string') ? parsed.painNote.slice(0, 30) : null,
       feel: (parsed.feel === 'good' || parsed.feel === 'bad') ? parsed.feel : null,
-      rpe: (typeof parsed.rpe === 'number' && parsed.rpe >= 1 && parsed.rpe <= 10) ? Math.round(parsed.rpe) : null
+      rpe: (rpeNum !== null && rpeNum >= 1 && rpeNum <= 10) ? rpeNum : null
     };
     if (!sig.pain && !sig.feel && !sig.rpe) return null;
     return sig;
