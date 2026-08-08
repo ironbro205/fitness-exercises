@@ -2283,21 +2283,42 @@ test('디자인 규칙 — 접이식 안내 noteBlock 은 네이티브 details �
 });
 
 // ── 결함 수정 회귀 (design-audit 부록) ──
-test('기록 정렬 — 최신이 위. 기록이 N개를 넘어도 오래된 것만 남지 않는다', () => {
+test('기록 정렬 — 최신이 위. 기록이 표시 개수(10)를 넘어도 오래된 것만 남지 않는다', () => {
   const fresh = loadApp();
   const mk = (d, name) => ({ id: name, startTime: new Date(d + 'T10:00:00').getTime(), date: d,
     sessionType: 'push', sessionName: name, sessionKr: name, duration: 40, sets: 12, exercises: [], completed: true });
-  // 저장 순서(최신 먼저)와 데모 데이터(오래된 먼저)가 섞여 있어도 결과는 날짜 내림차순이어야 한다
-  const log = [mk('2026-08-08', 'A'), mk('2026-08-03', 'B'), mk('2026-08-04', 'C')];
-  const sorted = fresh.sortByDateDesc(log);
-  assert.deepEqual(sorted.map((w) => w.date), ['2026-08-08', '2026-08-04', '2026-08-03']);
-  assert.deepEqual(log.map((w) => w.date), ['2026-08-08', '2026-08-03', '2026-08-04'], '원본 배열은 그대로');
 
-  // 화면에서도 최신이 먼저 나온다 (홈 = 이번 주, 기록 = 기간 전체)
-  fresh.state.data.workoutLog = log;
+  // 저장 순서(최신 먼저)와 데모 데이터(오래된 먼저)가 섞여 있어도 결과는 날짜 내림차순이어야 한다
+  const mixed = [mk('2026-08-08', 'A'), mk('2026-08-03', 'B'), mk('2026-08-04', 'C')];
+  assert.deepEqual(fresh.sortByDateDesc(mixed).map((w) => w.date), ['2026-08-08', '2026-08-04', '2026-08-03']);
+  assert.deepEqual(mixed.map((w) => w.date), ['2026-08-08', '2026-08-03', '2026-08-04'], '원본 배열은 그대로');
+
+  // ★버그가 실제로 났던 조건: 기록이 표시 개수(10)를 넘을 때. slice(-10).reverse() 는
+  //   "가장 오래된 10개"를 골라 최신 기록이 목록에서 통째로 사라졌다 → 12개로 재현한다.
+  const N = 12;
+  const dates = [];
+  for (let i = 0; i < N; i++) dates.push('2026-08-' + String(i + 1).padStart(2, '0'));   // 08-01 … 08-12
+  const newest = dates[N - 1];
+  const oldest = dates[0];
+  fresh.state.data.workoutLog = dates.slice().reverse().map((d, i) => mk(d, 'S' + i));   // 저장 순서 = 최신 먼저
+  fresh.state.data.bodyLog = [];        // 체중 기록도 날짜를 찍는다 → 운동 기록만 보도록 비운다
+  fresh.state.data.personalRecords = [];
   fresh.state.statsPeriod = 'all';
-  const stats = fresh.renderStats();
-  assert.ok(stats.indexOf('2026-08-08') < stats.indexOf('2026-08-03'), '기록 탭: 최신이 위');
+
+  // '운동 기록' 카드부터 끝까지만 본다 (위쪽 카드의 날짜가 섞이면 검사가 헛돈다)
+  const full = fresh.renderStats();
+  const cardStart = full.indexOf('운동 기록');
+  assert.ok(cardStart > 0, '운동 기록 카드가 안 그려졌다 — 이 검사가 헛돌고 있다');
+  const stats = full.slice(cardStart);
+
+  assert.ok(stats.includes(newest), '최신 기록(' + newest + ')이 목록에 있어야 한다');
+  assert.ok(!stats.includes(oldest), '10개를 넘으면 가장 오래된 기록(' + oldest + ')은 잘려야 한다');
+  // 실제로 그려진 날짜만 뽑아 내림차순인지 본다 (indexOf 비교는 한쪽이 없어도 통과해 버린다)
+  const shown = (stats.match(/2026-08-\d\d/g) || []).filter((d) => dates.includes(d));
+  const uniq = shown.filter((d, i) => shown.indexOf(d) === i);
+  assert.equal(uniq.length, 10, '기록 탭은 최근 10개만 보여준다: ' + uniq.join(','));
+  assert.deepEqual(uniq, uniq.slice().sort().reverse(), '그려진 순서가 날짜 내림차순이 아니다: ' + uniq.join(','));
+  assert.equal(uniq[0], newest, '맨 위가 최신이어야 한다');
 });
 
 test('AI 배지 — 폴백(기본 루틴)에는 "AI 분석 완료"를 붙이지 않는다', () => {
