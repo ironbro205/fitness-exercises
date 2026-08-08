@@ -509,6 +509,12 @@ test('[신규] 백다운은 볼륨에는 들어가고, 증량 판정·지난기�
   assert.equal(prog.weight, 65);
   assert.equal(prog.previousReps.join(','), '8', '백다운 반복이 "지난 기록"에 섞이면 다음 세션 목표가 튄다');
 
+  // 두 제외 목록이 서로 다르다는 게 이 설계의 핵심 — 합치면 볼륨이 부풀거나 깎인다
+  assert.equal(app.SET_ROLES_OFF_PROGRESS.slice().sort().join(','), 'backdown,drop,myo');
+  assert.equal(app.SET_ROLES_EXTENSION.slice().sort().join(','), 'drop,myo');
+  assert.equal(app.isSetExtension({ role: 'backdown' }), false, '백다운은 연장이 아니라 독립 워킹세트');
+  assert.equal(app.isOffProgressSet({ role: 'backdown' }), true, '다만 진행 판정에서는 빠진다');
+
   // 볼륨(주간 세트 카운트)에는 백다운이 **들어간다** — 독립 워킹세트다 (v2 §3-C C-4)
   assert.equal(app.countWorkingSets([
     { completed: true, isWarmup: false, role: 'top' },

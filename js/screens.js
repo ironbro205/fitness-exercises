@@ -1575,7 +1575,7 @@ function finalizeSession() {
     // 볼륨 카운트용 세트 수에서는 드롭·마이오렙을 뺀다. 이들은 마지막 워킹세트의 **연장**이지
     // 독립 세트가 아니다 — 그대로 세면 3세트 종목이 5세트로 잡혀 주간 볼륨 폐루프가 부풀려진다.
     // (근비대 이득도 동등할 뿐 더 크지 않다 — Sødal 2023 SMD 0.155 p=0.392)
-    var countedSets = doneSets.filter(function(s) { return s.role !== 'drop' && s.role !== 'myo'; });
+    var countedSets = doneSets.filter(function(s) { return !isSetExtension(s); });
     if (!countedSets.length) countedSets = doneSets; // 본 세트를 지우고 드롭만 남은 예외 — 0세트로 기록하지 않는다
     // (같은 규칙의 단일 원천은 domain.js countWorkingSets — setsCount 없는 옛 로그도 그쪽에서 같게 센다)
     if (doneSets.length > 0) {
@@ -1957,7 +1957,7 @@ window.addSetToExercise = function(exerciseIdx) {
   if (!exercise) return;
   // 드롭·마이오렙은 마지막 워킹세트의 연장이라 이어받을 기준이 아니다 — 본 워킹세트에서 이어받는다.
   var working = exercise.sets.filter(function(s) {
-    return !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+    return !s.isWarmup && !isSetExtension(s);
   });
   var lastSet = working.length ? working[working.length - 1] : exercise.sets[exercise.sets.length - 1];
   // 탑세트 뒤에 세트를 더하면 그건 그 스킴이 탑 다음에 두는 세트다 — 탑+백오프면 백오프(90%),
@@ -2221,7 +2221,7 @@ function rebuildPendingSets(ex) {
   restoreSkippedSets(ex);   // 건너뛴 종목의 세트를 다시 짜면 건너뛰기는 자동으로 풀린다
   var doneSets = (ex.sets || []).filter(function(s) { return s.completed; });
   var pendingWorking = (ex.sets || []).filter(function(s) {
-    return !s.completed && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+    return !s.completed && !s.isWarmup && !isSetExtension(s);
   }).length;
   // pendingWorking이 0이면 본 세트를 이미 다 끝냈다는 뜻이다. 여기서 3으로 되돌리면
   // "드롭만 남은 상태에서 스트레이트로 바꾸기"가 완료 3세트 뒤에 새 3세트를 덧붙인다.
@@ -2478,7 +2478,7 @@ function applyExerciseSwap(ex, newName) {
   // **완료된 세트는 그대로 두고 미완료 세트만** 새 종목 기준으로 다시 만든다.
   var doneSets = (ex.sets || []).filter(function(s) { return s.completed; });
   var pendingWorking = (ex.sets || []).filter(function(s) {
-    return !s.completed && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+    return !s.completed && !s.isWarmup && !isSetExtension(s);
   }).length;
   var plan = getSessionSetPlan(newName, null, ex.targetReps, {
     sets: pendingWorking,           // 0이면 새 워킹세트를 만들지 않는다 (완료 기록만 새 종목으로 이월)
@@ -3102,7 +3102,7 @@ function renderWorkoutSession() {
           // getSessionSetPlan은 rm_estimate일 때 템플릿/AI가 준 무게(fallbackWeight)를 우선하는데,
           // 여기서 prog.weight(1RM 추정값)를 그대로 찍으면 "75kg 추천" 옆 세트가 60kg으로 뜬다.
           var firstWorking = (exercise.sets || []).filter(function(s) {
-            return !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+            return !s.isWarmup && !isSetExtension(s);
           })[0];
           var shownWeight = (firstWorking && firstWorking.weight) ? firstWorking.weight : prog.weight;
           html +=

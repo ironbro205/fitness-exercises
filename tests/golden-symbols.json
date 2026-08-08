@@ -1,5 +1,5 @@
 {
-  "functionCount": 444,
+  "functionCount": 445,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -262,6 +262,7 @@
     "isReverseProgression",
     "isRoutineExerciseMapOpen",
     "isSessionTimePressured",
+    "isSetExtension",
     "loadAIRecommendationIfNeeded",
     "loadPlateauCheckIfNeeded",
     "loadWeeklyReviewIfNeeded",
@@ -494,6 +495,7 @@
     "RPT_PCTS",
     "SESSIONS",
     "SESSION_WARMUP_MAP",
+    "SET_ROLES_EXTENSION",
     "SET_ROLES_OFF_PROGRESS",
     "SET_ROLE_KR",
     "SET_SCHEMES",

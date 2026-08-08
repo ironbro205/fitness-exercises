@@ -810,6 +810,12 @@ function isOffProgressSet(s) {
   return !!(s && s.role && SET_ROLES_OFF_PROGRESS.indexOf(s.role) !== -1);
 }
 
+// 독립 세트가 아니라 **직전 워킹세트의 연장**인가 (드롭·마이오렙 미니세트).
+// 볼륨 카운트·'남은 워킹세트' 계산이 전부 이 판정 하나를 쓴다.
+function isSetExtension(s) {
+  return !!(s && s.role && SET_ROLES_EXTENSION.indexOf(s.role) !== -1);
+}
+
 // 볼륨 카운트용 워킹세트 수.
 // 드롭·마이오렙 세트는 **마지막 워킹세트의 연장**이지 독립 세트가 아니다. 그대로 세면
 // 3세트 종목이 5세트로 잡혀 주간 볼륨 폐루프(AI 프롬프트·부족 부위 판정)가 부풀려진다.
@@ -817,7 +823,7 @@ function isOffProgressSet(s) {
 function countWorkingSets(sets) {
   if (!Array.isArray(sets)) return 0;
   return sets.filter(function(s) {
-    return s && s.completed && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+    return s && s.completed && !s.isWarmup && !isSetExtension(s);
   }).length;
 }
 
@@ -1028,7 +1034,7 @@ function buildPrescriptionValues(ex, plan) {
     reps: repRangeToStr(plan.repRange),
     // 드롭·마이오렙 세트는 마지막 워킹세트의 연장이지 독립 세트가 아니다(countWorkingSets 와 같은 규칙).
     sets: plan.sets.filter(function(s) {
-      return s && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+      return s && !s.isWarmup && !isSetExtension(s);
     }).length,
     rir: first.rir,
     rest: restSecToMin(first.rest)

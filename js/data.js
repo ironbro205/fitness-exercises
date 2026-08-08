@@ -593,7 +593,7 @@ var SET_SCHEMES = {
     kr: '드롭세트', short: '드롭',
     desc: '마지막 세트에서 무게를 25%씩 낮춰 이어서',
     build: {
-      pattern: 'extend', countsAsSet: false,
+      pattern: 'extend',
       // chainFrom: 'prev' = 배율을 직전 연장 세트에 다시 곱한다 (드롭1 = W×0.75, 드롭2 = 드롭1×0.75)
       steps: [
         { pct: DROP_PCT, role: 'drop', repsMode: 'high', rir: '0', rest: REST_DROP_SEC, chainFrom: 'prev' },
@@ -606,7 +606,7 @@ var SET_SCHEMES = {
     kr: '마이오렙', short: '마이오렙',
     desc: '마지막 세트 후 20초 쉬고 미니세트 반복',
     build: {
-      pattern: 'extend', countsAsSet: false,
+      pattern: 'extend',
       steps: [{ pct: 1.00, role: 'myo', repsAbs: [5, 5], rir: '0', rest: REST_MYO_SEC, repeat: 3 }]
     }
   }
@@ -632,6 +632,11 @@ var SET_ROLE_KR = {
 //                  "지난 세션 최고 반복"이 백다운 15회로 잡혀 다음 세션 탑세트 목표가 튀어 오른다
 // **볼륨 카운트는 이 목록을 쓰지 않는다** — 백다운은 볼륨에 포함된다(v2 §3-C C-4).
 var SET_ROLES_OFF_PROGRESS = ['drop', 'myo', 'backdown'];
+
+// **마지막 워킹세트의 연장**이라 독립 세트로 세면 안 되는 역할 (= 볼륨 카운트에서 빼는 목록).
+// 위 목록과 일부러 다르다: 백다운은 무게·휴식·목표가 따로 있는 독립 워킹세트라 볼륨에 들어간다.
+// 두 목록을 하나로 합치면 3세트 종목이 5세트로 부풀거나(연장을 세면), 주간 볼륨이 깎인다(백다운을 빼면).
+var SET_ROLES_EXTENSION = ['drop', 'myo'];
 
 // ─── 길항근 슈퍼세트 ──────────────────────────────────────────
 // 근거: Zhang 2025(Sports Med 55(4):953-975, 19연구 313명) — 세션 시간 약 −37%인데
