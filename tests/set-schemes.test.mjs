@@ -192,6 +192,46 @@ test('세트 배열은 하위호환 필드(weight·reps·repRange·prog)를 그�
   assert.ok(plan.prog);
 });
 
+test('sets:0 은 "남은 워킹세트 없음" — 새 워킹세트를 만들지 않는다 (코드리뷰 회귀)', () => {
+  resetOverrides();
+  seedLog([{ date: daysAgo(3), exercises: [{ name: '머신 레그 익스텐션', setsDetail: [set(40, 13), set(40, 13)] }] }]);
+
+  // 스트레이트: 만들 게 없다
+  const straight = app.getSessionSetPlan('머신 레그 익스텐션', null, '12-15', { sets: 0, warmup: false }).sets;
+  assert.equal(straight.length, 0);
+
+  // 드롭: 이미 끝낸 마지막 세트에 확장만 이어 붙인다 ("마지막 세트를 드롭으로"의 정확한 의미)
+  app.setSetSchemeOverride('머신 레그 익스텐션', 'drop');
+  const drop = app.getSessionSetPlan('머신 레그 익스텐션', null, '12-15', { sets: 0, warmup: false }).sets;
+  assert.equal(drop.map((s) => s.role).join(','), 'drop,drop');
+  resetOverrides();
+
+  // opts.sets를 아예 안 주면 기본 3세트 (기존 동작)
+  assert.equal(app.getSessionSetPlan('머신 레그 익스텐션', null, '12-15').sets.length, 3);
+});
+
+test('countWorkingSets: setsCount 없는 옛 로그도 드롭·마이오렙을 볼륨에서 뺀다 (코드리뷰 회귀)', () => {
+  const rows = [
+    { completed: true, isWarmup: false, role: 'work' },
+    { completed: true, isWarmup: false, role: 'work' },
+    { completed: true, isWarmup: false, role: 'work' },
+    { completed: true, isWarmup: false, role: 'drop' },
+    { completed: true, isWarmup: false, role: 'myo' },
+    { completed: true, isWarmup: true, role: 'warmup' },
+    { completed: false, isWarmup: false, role: 'work' }
+  ];
+  assert.equal(app.countWorkingSets(rows), 3);
+  assert.equal(app.countWorkingSets(null), 0);
+  // role이 없는 옛 데이터는 그대로 다 센다 (하위호환)
+  assert.equal(app.countWorkingSets([{ completed: true, isWarmup: false }, { completed: true, isWarmup: false }]), 2);
+
+  // 주간 볼륨 집계도 같은 규칙 — setsCount 없이 setsDetail만 있는 로그
+  seedLog([{ date: daysAgo(1), exercises: [{ name: '머신 레그 익스텐션', setsDetail: [
+    set(40, 13), set(40, 13), set(40, 13), set(30, 13, { role: 'drop' }), set(20, 13, { role: 'drop' })
+  ] }] }]);
+  assert.equal(app.getRecentVolumeSplitByPart(2).direct.quads, 3);
+});
+
 // ═══ 4. 휴식시간 (§3-B 권장표 · §3-C 자가조절) ═══
 
 test('휴식 기본값: 180 / 150 / 120 / 90 / 60초 (클래스별 새 권장치)', () => {
@@ -267,6 +307,29 @@ test('드롭세트가 증량 판정을 오염시키지 않는다', () => {
   const prog = app.getProgressiveRecommendation('머신 레그 익스텐션', '12-15');
   assert.equal(prog.source, 'progress');
   assert.equal(prog.previousReps.join(','), '15,15,15', '드롭 세트는 지난 기록 표시에서도 빠진다');
+});
+
+test('드롭·마이오렙 세트는 rolling 1RM 근거에서도 빠진다 (세 경로가 같은 규칙)', () => {
+  resetOverrides();
+  // 경량 고립: 워킹세트 20회는 e1RM 반복 상한(12)에 걸려 빠진다.
+  // 미니세트(5회)를 막지 않으면 지친 미니세트가 그 종목의 **유일한** e1RM 근거가 되는 역전이 생긴다.
+  seedLog([
+    { date: daysAgo(2), exercises: [{ name: '덤벨 사이드 레터럴 레이즈', setsDetail: [
+      set(8, 20), set(8, 20),
+      set(8, 5, { role: 'myo' })
+    ] }] }
+  ]);
+  assert.equal(app.calculateRollingMax1RM('덤벨 사이드 레터럴 레이즈'), null);
+
+  // 드롭 세트도 마찬가지 — 감량된 무게의 e1RM이 기록으로 남으면 안 된다
+  seedLog([
+    { date: daysAgo(2), exercises: [{ name: '머신 레그 익스텐션', setsDetail: [
+      set(40, 12), set(30, 12, { role: 'drop' })
+    ] }] }
+  ]);
+  const roll = app.calculateRollingMax1RM('머신 레그 익스텐션');
+  assert.equal(roll.value, app.calculate1RM(40, 12), '본 세트만 반영');
+  seedLog([]);
 });
 
 // ═══ 6. 길항근 슈퍼세트 (Zhang 2025) ═══

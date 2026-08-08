@@ -1322,7 +1322,10 @@ function renderItemDetailSheet() {
         var exName = ex.name || ex.exerciseName || '종목 ' + (idx + 1);
         var setSummary = '';
         if (ex.sets && ex.sets.length > 0) {
-          var completedSets = ex.sets.filter(function(s) { return s.completed && !s.isWarmup; });
+          // 드롭·마이오렙 제외 — 안 빼면 요약이 가장 가벼운 드롭 무게로 뜨고 세트 수도 부풀려진다
+          var completedSets = ex.sets.filter(function(s) {
+            return s.completed && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+          });
           if (completedSets.length > 0) {
             var lastSet = completedSets[completedSets.length - 1];
             setSummary = (lastSet.weight ? escapeHtml(lastSet.weight) + 'kg × ' : '') + escapeHtml(lastSet.reps) + ' · ' + completedSets.length + '세트';
@@ -1463,6 +1466,8 @@ window.endSession = function(fromBack) {
     state.activeSession = null;
     state.restTimer = null;
     state.editingSet = null;
+    state.setSchemeOpen = false;        // 세션 위 시트는 세션과 함께 닫는다 (남으면 다른 화면의 뒤로가기·스와이프를 먹는다)
+    state.exerciseSwapOpen = false;
     state.sessionChatOpen = false;      // 세트 사이 채팅은 세션과 함께 소멸
     state.sessionChatPending = null;
     state._sessionChatStreaming = false;
@@ -1538,6 +1543,7 @@ function finalizeSession() {
     // (근비대 이득도 동등할 뿐 더 크지 않다 — Sødal 2023 SMD 0.155 p=0.392)
     var countedSets = doneSets.filter(function(s) { return s.role !== 'drop' && s.role !== 'myo'; });
     if (!countedSets.length) countedSets = doneSets; // 본 세트를 지우고 드롭만 남은 예외 — 0세트로 기록하지 않는다
+    // (같은 규칙의 단일 원천은 domain.js countWorkingSets — setsCount 없는 옛 로그도 그쪽에서 같게 센다)
     if (doneSets.length > 0) {
       completedSets += countedSets.length;
 
@@ -1653,6 +1659,8 @@ function finalizeSession() {
   state.activeSession = null;
   state.restTimer = null;
   state.editingSet = null;
+  state.setSchemeOpen = false;          // 세션 위 시트는 세션과 함께 닫는다
+  state.exerciseSwapOpen = false;
   state.sessionChatOpen = false;        // 세트 사이 채팅은 세션과 함께 소멸
   state.sessionChatPending = null;
   state._sessionChatStreaming = false;
@@ -2092,8 +2100,10 @@ function rebuildPendingSets(ex) {
   var pendingWorking = (ex.sets || []).filter(function(s) {
     return !s.completed && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
   }).length;
+  // pendingWorking이 0이면 본 세트를 이미 다 끝냈다는 뜻이다. 여기서 3으로 되돌리면
+  // "드롭만 남은 상태에서 스트레이트로 바꾸기"가 완료 3세트 뒤에 새 3세트를 덧붙인다.
   var plan = getSessionSetPlan(ex.name, ex.lastWeight, ex.targetReps, {
-    sets: pendingWorking || 3,
+    sets: pendingWorking,
     warmup: doneSets.length === 0   // 이미 시작한 종목에 워밍업을 새로 끼워 넣지 않는다
   });
   ex.targetReps = repRangeToStr(plan.repRange);
@@ -2321,7 +2331,7 @@ function applyExerciseSwap(ex, newName) {
     return !s.completed && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
   }).length;
   var plan = getSessionSetPlan(newName, null, ex.targetReps, {
-    sets: pendingWorking || 3,
+    sets: pendingWorking,           // 0이면 새 워킹세트를 만들지 않는다 (완료 기록만 새 종목으로 이월)
     warmup: doneSets.length === 0   // 이미 시작한 종목에 워밍업을 새로 끼워 넣지 않는다
   });
   ex.targetReps = repRangeToStr(plan.repRange);

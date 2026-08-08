@@ -381,6 +381,10 @@ function calculateRollingMax1RM(exerciseName, windowSessions) {
       for (var k = 0; k < ex.setsDetail.length; k++) {
         var s = ex.setsDetail[k];
         if (s.isWarmup) continue;
+        // 드롭·마이오렙 세트 제외 (완료 시점의 update1RM과 같은 규칙 — 세 경로가 어긋나면 안 된다).
+        // 특히 경량 고립은 워킹세트(20회)가 반복 상한에 걸려 빠지는데 미니세트(5회)만 남아,
+        // 지친 상태의 미니세트가 그 종목의 유일한 e1RM 근거가 되는 역전이 생긴다.
+        if (s.role === 'drop' || s.role === 'myo') continue;
         if (!s.weight || !s.reps) continue;
         if (s.reps > maxReps) continue; // 고횟수 제외 (클래스별 상한)
         var e = calculate1RM(s.weight, s.reps);
@@ -512,10 +516,23 @@ function getExerciseRestSec(exerciseName) {
   return EXERCISE_CLASS_RULES[getExerciseClass(exerciseName)].restSec;
 }
 
+// 볼륨 카운트용 워킹세트 수.
+// 드롭·마이오렙 세트는 **마지막 워킹세트의 연장**이지 독립 세트가 아니다. 그대로 세면
+// 3세트 종목이 5세트로 잡혀 주간 볼륨 폐루프(AI 프롬프트·부족 부위 판정)가 부풀려진다.
+// setsCount가 없는 옛/복원 데이터도 같은 규칙으로 세도록 이 헬퍼를 단일 원천으로 쓴다.
+function countWorkingSets(sets) {
+  if (!Array.isArray(sets)) return 0;
+  return sets.filter(function(s) {
+    return s && s.completed && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+  }).length;
+}
+
 // 세트 배열 생성. opts = { sets: 워킹세트 수, warmup: 워밍업 포함 여부 }
 // 무게를 모르는 종목(맨몸·미측정)은 감량 자체가 불가능하므로 탑+백오프·드롭을 스트레이트로 접는다.
+// sets: 0 은 유효한 값이다 — "남은 워킹세트가 없다"는 뜻이고, 이때 새 워킹세트를 만들면 안 된다.
 function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
-  var workingCount = Math.max(1, (opts && opts.sets) || 3);
+  var requested = (opts && opts.sets !== undefined && opts.sets !== null) ? opts.sets : 3;
+  var workingCount = Math.max(0, requested);
   var wantWarmup = !opts || opts.warmup !== false;
   var classRest = getExerciseRestSec(exerciseName);
   var cls = getExerciseClass(exerciseName);
@@ -528,7 +545,7 @@ function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
   // ── 워밍업 (§2-B 규칙①) — 자극이 아니라 준비이므로 저부하 고반복은 피로만 준다.
   //    고립 이하는 첫 워킹세트가 자체 워밍업 역할을 하므로 넣지 않는다.
   //    맨몸 복합(풀업 등)은 무게를 낮출 수 없으니 램프 대신 1세트만 (기존 동작 유지).
-  if (wantWarmup) {
+  if (wantWarmup && workingCount > 0) {
     if (weight > 0 && cls === 'compound_heavy') {
       rows.push(warmupRow(snapWeightToEquipment(weight * 0.50, exerciseName), 8));
       rows.push(warmupRow(snapWeightToEquipment(weight * 0.75, exerciseName), 4));
@@ -540,7 +557,10 @@ function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
   }
 
   // ── 워킹세트
-  if (scheme === 'top_backoff') {
+  if (workingCount === 0) {
+    // 남은 워킹세트가 없다 = 본 세트를 다 끝냈다. 새로 만들지 않고, 드롭·마이오렙만
+    // 이미 끝낸 마지막 세트에 이어 붙인다("마지막 세트를 드롭으로" 요청의 정확한 의미).
+  } else if (scheme === 'top_backoff') {
     // 탑세트 1 + 백오프 (탑의 90%). 백오프도 **같은 반복 목표**를 쓰는 것이 이 방식의 핵심 —
     // 탑에서 못 채운 반복을 백오프에서 채우는 것이 곧 볼륨 로드 보존 메커니즘이다.
     var backoffW = reduceWeight(weight, BACKOFF_PCT, exerciseName);
@@ -551,16 +571,18 @@ function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
     for (var i = 0; i < workingCount; i++) rows.push(workRow('work', weight, reps, classRest, rir));
   }
 
-  // ── 마지막 워킹세트에만 붙는 확장 (§2-B 규칙④⑤)
+  // ── 마지막 워킹세트에만 붙는 확장 (§2-B 규칙④⑤).
+  //    워킹세트가 0개여도(=본 세트를 이미 다 끝냈어도) 붙는다 — 그 경우 호출부가 들고 있는
+  //    "완료된 마지막 세트"에 이어지므로, rows가 비어 있을 때는 rest 덮어쓰기만 건너뛴다.
   var lastIdx = rows.length - 1;
-  if (scheme === 'drop' && lastIdx >= 0) {
-    rows[lastIdx].rest = REST_DROP_SEC;                     // 드롭 사이는 무게 바꾸는 시간뿐
+  if (scheme === 'drop' && weight > 0) {
+    if (lastIdx >= 0) rows[lastIdx].rest = REST_DROP_SEC;   // 드롭 사이는 무게 바꾸는 시간뿐
     var d1 = reduceWeight(weight, DROP_PCT, exerciseName);
     var d2 = reduceWeight(d1, DROP_PCT, exerciseName);
     rows.push(workRow('drop', d1, range.high, REST_DROP_SEC, '0'));
     rows.push(workRow('drop', d2, range.high, classRest, '0'));
-  } else if (scheme === 'myo_reps' && lastIdx >= 0) {
-    rows[lastIdx].rest = REST_MYO_SEC;                      // 활성화 세트 후 20초
+  } else if (scheme === 'myo_reps') {
+    if (lastIdx >= 0) rows[lastIdx].rest = REST_MYO_SEC;    // 활성화 세트 후 20초
     for (var m = 0; m < 3; m++) {
       rows.push(workRow('myo', weight, 5, m === 2 ? classRest : REST_MYO_SEC, '0'));
     }
@@ -782,6 +804,7 @@ function recalc1RMAfterEdit(exerciseName, prevRM) {
       if (canonicalExerciseName(ex.name) !== key) return;
       (ex.sets || []).forEach(function(s) {
         if (!s.completed || s.isWarmup || !s.weight || !s.reps) return;
+        if (s.role === 'drop' || s.role === 'myo') return; // 위 두 경로와 같은 규칙 (§5-D 1RM 오염 방지)
         if (s.reps > maxReps) return;
         candidates.push(calculate1RM(s.weight, s.reps));
       });
@@ -1261,9 +1284,9 @@ function getRecentVolumeSplitByPart(weeks) {
       } else if (typeof ex.sets === 'number') {
         setCount = ex.sets;
       } else if (Array.isArray(ex.setsDetail)) {
-        setCount = ex.setsDetail.filter(function(s) { return s.completed && !s.isWarmup; }).length;
+        setCount = countWorkingSets(ex.setsDetail);   // 드롭·마이오렙 제외 (setsCount 있는 경로와 같은 규칙)
       } else if (Array.isArray(ex.sets)) {
-        setCount = ex.sets.filter(function(s) { return s.completed && !s.isWarmup; }).length;
+        setCount = countWorkingSets(ex.sets);
       }
       
       if (setCount === 0) return;

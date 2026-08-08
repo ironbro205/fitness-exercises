@@ -1370,8 +1370,8 @@ async function generateWeeklyReview(forceRefresh) {
         var setCount = 0;
         if (typeof ex.setsCount === 'number') setCount = ex.setsCount;
         else if (typeof ex.sets === 'number') setCount = ex.sets;
-        else if (Array.isArray(ex.setsDetail)) setCount = ex.setsDetail.filter(function(s) { return s.completed && !s.isWarmup; }).length;
-        else if (Array.isArray(ex.sets)) setCount = ex.sets.filter(function(s) { return s.completed && !s.isWarmup; }).length;
+        else if (Array.isArray(ex.setsDetail)) setCount = countWorkingSets(ex.setsDetail); // 드롭·마이오렙 제외
+        else if (Array.isArray(ex.sets)) setCount = countWorkingSets(ex.sets);
         if (setCount === 0) return;
         weeklyVolByPart[info.primary] = (weeklyVolByPart[info.primary] || 0) + setCount;
         if (info.secondary) info.secondary.forEach(function(s) {
