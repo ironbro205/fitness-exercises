@@ -128,7 +128,7 @@ var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v47';
+var APP_VERSION = 'v48';
 // 백업에 담지 않는 키. 두 부류:
 // (1) 로컬 전용·민감 → 복원해도 그대로 보존 (API 키·코치 대화)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
@@ -552,7 +552,9 @@ var state = {
   // 운동 세션 진행 중 상태
   activeSession: null,
   editingSet: null,
-  exerciseSwapOpen: false,
+  exerciseMenuOpen: false,      // 종목 메뉴 시트 (교체·추가·건너뛰기)
+  exerciseSwapOpen: false,      // 종목 고르기 시트 (교체·추가 공용)
+  exercisePickerMode: 'swap',   // 그 시트가 지금 무슨 일을 하는지 — 'swap'=교체 / 'add'=다음에 추가
   setSchemeOpen: false,
   restTimer: null,
   completedSession: null,

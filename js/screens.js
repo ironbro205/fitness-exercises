@@ -1468,6 +1468,8 @@ window.endSession = function(fromBack) {
     state.editingSet = null;
     state.setSchemeOpen = false;        // 세션 위 시트는 세션과 함께 닫는다 (남으면 다른 화면의 뒤로가기·스와이프를 먹는다)
     state.exerciseSwapOpen = false;
+    state.exerciseMenuOpen = false;
+    state.exercisePickerMode = 'swap';
     state.sessionChatOpen = false;      // 세트 사이 채팅은 세션과 함께 소멸
     state.sessionChatPending = null;
     state._sessionChatStreaming = false;
@@ -1661,6 +1663,8 @@ function finalizeSession() {
   state.editingSet = null;
   state.setSchemeOpen = false;          // 세션 위 시트는 세션과 함께 닫는다
   state.exerciseSwapOpen = false;
+  state.exerciseMenuOpen = false;
+  state.exercisePickerMode = 'swap';
   state.sessionChatOpen = false;        // 세트 사이 채팅은 세션과 함께 소멸
   state.sessionChatPending = null;
   state._sessionChatStreaming = false;
@@ -2034,7 +2038,7 @@ function startRestTimerTick() {
       restTickerInterval = null;
       // 시트(편집/종목변경/채팅)가 열려 있으면 전체 렌더 대신 타이머 UI만 제거
       // (채팅 입력·스트리밍 중 전체 렌더는 키보드/포커스/말풍선을 끊는다)
-      if (state.editingSet || state.exerciseSwapOpen || state.setSchemeOpen || state.sessionChatOpen || state.muscleMapZoom) {
+      if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.sessionChatOpen || state.muscleMapZoom) {
         var wrapEl = document.querySelector('.rest-timer-wrap');
         if (wrapEl && wrapEl.parentNode) wrapEl.parentNode.removeChild(wrapEl);
       } else {
@@ -2044,7 +2048,7 @@ function startRestTimerTick() {
     }
     // 시트(편집/종목변경/세트사이채팅)가 열려 있으면 시트가 깜빡이지 않도록 타이머만 부분 갱신
     // (채팅은 입력·스트리밍 중이라 전체 렌더가 매초 돌면 입력이 초기화된다)
-    if (state.editingSet || state.exerciseSwapOpen || state.setSchemeOpen || state.sessionChatOpen || state.muscleMapZoom) {
+    if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.sessionChatOpen || state.muscleMapZoom) {
       var remaining = state.restTimer.duration - elapsed;
       var el = document.getElementById('rest-time-text');
       if (el) {
@@ -2077,8 +2081,35 @@ window.goToExercise = function(idx) {
   }
 };
 
+// ═══════════════════════════════════════════════
+// 종목 메뉴 (교체 · 다음에 추가 · 건너뛰기)
+// ═══════════════════════════════════════════════
+// 운동 중 "종목 단위"로 할 수 있는 일이 셋이 되어 헤더 ··· 버튼을 메뉴로 만들었다.
+// 종목 고르기 화면(시트)은 교체·추가가 **같은 것을 공유**한다 — state.exercisePickerMode 만 다르다.
+
+window.openExerciseMenu = function() {
+  state.exerciseMenuOpen = true;
+  render();
+};
+
+window.closeExerciseMenu = function() {
+  state.exerciseMenuOpen = false;
+  render();
+};
+
 // 운동 중 현재 종목을 다른 종목으로 교체
 window.openExerciseSwap = function() {
+  state.exerciseMenuOpen = false;
+  state.exercisePickerMode = 'swap';
+  state.exerciseSwapOpen = true;
+  state._swapQuery = '';
+  render();
+};
+
+// 현재 종목 **바로 다음 순서**에 새 종목 넣기 (같은 시트를 추가 모드로 연다)
+window.openExerciseAdd = function() {
+  state.exerciseMenuOpen = false;
+  state.exercisePickerMode = 'add';
   state.exerciseSwapOpen = true;
   state._swapQuery = '';
   render();
@@ -2086,16 +2117,35 @@ window.openExerciseSwap = function() {
 
 window.closeExerciseSwap = function() {
   state.exerciseSwapOpen = false;
+  state.exercisePickerMode = 'swap';
   state._swapQuery = '';
   render();
 };
+
+function isExerciseAddMode() {
+  return state.exercisePickerMode === 'add';
+}
 
 // ═══════════════════════════════════════════════
 // 세트법(세트 스킴) 변경 · 슈퍼세트 해제 · 강도기법 제안
 // ═══════════════════════════════════════════════
 
+// 건너뛴 종목을 되살린다 — 떼어 뒀던 세트를 도로 붙이고 표시를 지운다.
+// 되돌리기·종목 교체·세트법 변경이 이걸 공유한다: 세트를 다시 짜는 순간 그 종목은 더 이상 "건너뜀"이 아니다.
+// 반환값은 "건너뛴 상태였는가" — 호출부가 뒤처리(세트가 0개면 새로 만들기)를 판단하는 데 쓴다.
+function restoreSkippedSets(ex) {
+  if (!ex || !ex.skipped) return false;
+  if (Array.isArray(ex.skippedSets) && ex.skippedSets.length) {
+    ex.sets = (ex.sets || []).concat(ex.skippedSets);
+  }
+  delete ex.skippedSets;
+  delete ex.skipped;
+  return true;
+}
+
 // 진행 중인 종목의 **미완료 세트만** 현재 세트법 기준으로 다시 만든다 (완료한 기록은 그대로 보존).
 function rebuildPendingSets(ex) {
+  restoreSkippedSets(ex);   // 건너뛴 종목의 세트를 다시 짜면 건너뛰기는 자동으로 풀린다
   var doneSets = (ex.sets || []).filter(function(s) { return s.completed; });
   var pendingWorking = (ex.sets || []).filter(function(s) {
     return !s.completed && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
@@ -2127,6 +2177,7 @@ function unlinkSuperset(exercises, idx) {
 window.openSetSchemeSheet = function() {
   state.setSchemeOpen = true;
   state.exerciseSwapOpen = false;
+  state.exerciseMenuOpen = false;
   render();
 };
 
@@ -2177,13 +2228,17 @@ window.dismissTechniqueSuggestion = function() {
   render();
 };
 
-// 교체 후보 목록 HTML. 검색어 없음 = 같은 부위(기존 동작), 검색어 있음 = 전체 종목 검색.
-// 등록 안 된 이름은 "그대로 추가" 카드로 자유 교체 허용.
+// 종목 후보 목록 HTML. 검색어 없음 = 같은 부위(기존 동작), 검색어 있음 = 전체 종목 검색.
+// 등록 안 된 이름은 "그대로" 카드로 자유 입력 허용.
+// 교체(swap)와 추가(add)가 이 목록을 공유한다 — 다른 건 버튼 문구와 눌렀을 때 부르는 함수뿐이다.
 function buildSwapListHtml(query) {
   var session = state.activeSession;
   if (!session) return '';
   var exercise = session.exercises[session.currentExerciseIdx];
   if (!exercise) return '';
+  var addMode = isExerciseAddMode();
+  var actionFn = addMode ? 'addExerciseAfterCurrent' : 'swapCurrentExercise';
+  var actionKr = addMode ? '추가 →' : '교체 →';
   var curInfo = EXERCISE_BODY_PART_MAP[exercise.name] || getExercisePart(exercise.name);
   var primary = curInfo ? curInfo.primary : null;
   var compound = curInfo ? curInfo.compound : null;
@@ -2234,6 +2289,14 @@ function buildSwapListHtml(query) {
     return (info && BODY_PART_KR[info.primary]) || '';
   };
 
+  // 추가 모드에서는 "이미 오늘 루틴에 있는 종목"을 알려준다 (막지는 않는다 — 일부러 두 번 넣는 사람도 있다)
+  var inSession = {};
+  if (addMode) {
+    session.exercises.forEach(function(e) {
+      if (e && e.name) inSession[canonicalExerciseName(e.name)] = true;
+    });
+  }
+
   var listHtml = candidates.map(function(name) {
     var info = EXERCISE_BODY_PART_MAP[name];
     var tag = info && info.compound ? '복합' : '고립';
@@ -2242,34 +2305,37 @@ function buildSwapListHtml(query) {
     var hint = prog && prog.previousWeight !== undefined
       ? '지난 ' + prog.previousWeight + 'kg → ' + prog.weight + 'kg'
       : (prog ? prog.weight + 'kg (1RM 추정)' : '무게 미정');
-    return '<button class="option-card" style="width: 100%; margin-bottom: 6px; text-align: left;" onclick="swapCurrentExercise(\'' + name.replace(/'/g, "\\'") + '\')">' +
+    if (addMode && inSession[canonicalExerciseName(name)]) hint = '오늘 이미 있음 · ' + hint;
+    return '<button class="option-card" style="width: 100%; margin-bottom: 6px; text-align: left;" onclick="' + actionFn + '(\'' + name.replace(/'/g, "\\'") + '\')">' +
       '<div class="flex items-center justify-between gap-2">' +
         '<div>' +
           '<p class="font-display text-sm">' + name + '</p>' +
           '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + (nq && part ? part + ' · ' : '') + tag + ' · ' + hint + '</p>' +
         '</div>' +
-        '<span class="text-xs accent">교체 →</span>' +
+        '<span class="text-xs accent">' + actionKr + '</span>' +
       '</div>' +
     '</button>';
   }).join('');
 
-  // 등록 안 된 이름 → 입력한 그대로 추가 허용
+  // 등록 안 된 이름 → 입력한 그대로 쓰기 허용
   // XSS 방지: 사용자 입력을 onclick 문자열에 넣지 않고 전역 state에서 직접 읽는다
   if (q && !EXERCISE_BODY_PART_MAP[q]) {
     listHtml +=
-      '<button class="option-card" style="width: 100%; margin-bottom: 6px; text-align: left; border-style: dashed;" onclick="swapCurrentExercise(String(state._swapQuery || \'\').trim())">' +
+      '<button class="option-card" style="width: 100%; margin-bottom: 6px; text-align: left; border-style: dashed;" onclick="' + actionFn + '(String(state._swapQuery || \'\').trim())">' +
         '<div class="flex items-center justify-between gap-2">' +
           '<div>' +
             '<p class="font-display text-sm">“' + escapeHtml(q) + '”</p>' +
-            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">목록에 없는 종목 — 이 이름 그대로 교체</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">목록에 없는 종목 — 이 이름 그대로 ' + (addMode ? '추가' : '교체') + '</p>' +
           '</div>' +
-          '<span class="text-xs accent">추가 →</span>' +
+          '<span class="text-xs accent">' + actionKr + '</span>' +
         '</div>' +
       '</button>';
   }
 
   if (!listHtml) {
-    listHtml = '<p class="text-xs text-stone-500 text-center py-4">교체 가능한 종목이 없어요. 검색해서 전체 종목에서 찾아보세요.</p>';
+    listHtml = '<p class="text-xs text-stone-500 text-center py-4">' +
+      (addMode ? '넣을 만한 종목이 없어요.' : '교체 가능한 종목이 없어요.') +
+      ' 검색해서 전체 종목에서 찾아보세요.</p>';
   }
   return listHtml;
 }
@@ -2306,6 +2372,10 @@ window.swapCurrentExercise = function(newName) {
 
 // 종목 교체 실제 적용 (확인 팝업 통과 후)
 function applyExerciseSwap(ex, newName) {
+  // 건너뛴 종목을 교체하면 = 되살려서 다른 종목으로 바꾸는 것. 먼저 세트를 도로 붙여야
+  // 아래 "남은 워킹세트 수" 계산이 0이 되어 세트 없는 빈 종목이 되는 걸 막는다.
+  restoreSkippedSets(ex);
+
   // 채팅 신호는 옛 종목의 것 — 새 종목에 귀속되지 않게 객체에서 제거
   // (신호 자체는 확인 시점에 recordChatSignal이 옛 이름으로 이미 저장했다)
   if (ex.painFlag || ex.feel || ex.chatRpe) {
@@ -2346,14 +2416,185 @@ function applyExerciseSwap(ex, newName) {
   saveActiveSession();
   render();
 
-  // 부상 대조 경고 (막지는 않음 — 사용자 선택 존중)
-  var safety = checkExerciseSafety(newName);
+  warnExerciseSafety(newName);
+}
+
+// 부상 대조 경고 토스트 (교체·추가가 같은 규칙을 쓰도록 한 곳에 모음). 막지는 않는다 — 사용자 선택 존중.
+function warnExerciseSafety(name) {
+  var safety = checkExerciseSafety(name);
   if (safety.level === 'contra') {
     showToast('⚠️ ' + INJURY_AREAS[safety.area].kr + ' 부상 등록됨 — 이 종목은 금기예요' + (safety.sub ? ' (대체: ' + safety.sub + ')' : ''));
   } else if (safety.level === 'caution') {
     showToast('⚠️ ' + INJURY_AREAS[safety.area].kr + ' 주의: ' + (safety.mod || '가볍게, 통증 없는 범위로'));
   }
 }
+
+// ═══════════════════════════════════════════════
+// 종목 추가 (현재 종목 바로 다음 순서에 끼워 넣기)
+// ═══════════════════════════════════════════════
+
+// 세션에 넣을 종목 객체 한 개. 무게·반복·세트 구성은 **기존 엔진 그대로** —
+// startSession과 같은 getSessionSetPlan을 쓰므로 기록이 있으면 추천 무게, 없으면 1RM 추정 폴백이 붙는다.
+function buildSessionExercise(name) {
+  var info = EXERCISE_BODY_PART_MAP[name] || getExercisePart(name);
+  // 목표 반복은 그 종목 **클래스의 권장 범위 전체**로 시작한다. 루틴 템플릿처럼 정해진 값이 없기 때문이다.
+  // (빈 값을 넘기면 parseRepRange가 '8-10'으로 기본값을 잡아, 고중량 복합이 5-8이 아니라 8로 좁혀진다)
+  var rules = EXERCISE_CLASS_RULES[getExerciseClass(name)];
+  var plan = getSessionSetPlan(name, null, rules.repMin + '-' + rules.repMax, {});
+  return {
+    name: name,
+    type: info ? (info.compound ? '복합' : '고립') : '고립',
+    targetReps: repRangeToStr(plan.repRange),
+    lastWeight: (plan.prog && plan.prog.previousWeight !== undefined) ? plan.prog.previousWeight : null,
+    lastReps: null,
+    sets: plan.sets,
+    scheme: plan.scheme,
+    addedInSession: true    // 운동 중에 끼워 넣은 종목 표시 (화면 뱃지용)
+  };
+}
+
+// 종목 배열 중간에 하나를 끼워 넣으면 **저장돼 있던 종목 index가 전부 한 칸씩 밀린다.**
+// 슈퍼세트 짝·제안 무시 기록·휴식 타이머·편집 중 세트·채팅 신호가 전부 index로 종목을 가리키므로
+// splice 전에 여기서 같이 밀어 준다. 안 밀면 엉뚱한 종목에 기록이 붙는다.
+function shiftSessionExerciseIndexes(session, insertAt) {
+  var bump = function(v) { return (typeof v === 'number' && v >= insertAt) ? v + 1 : v; };
+
+  session.exercises.forEach(function(ex) {
+    if (typeof ex.supersetWith === 'number') ex.supersetWith = bump(ex.supersetWith);
+  });
+
+  if (session.techDismissed) {
+    var moved = {};
+    Object.keys(session.techDismissed).forEach(function(k) {
+      moved[String(bump(parseInt(k, 10)))] = session.techDismissed[k];
+    });
+    session.techDismissed = moved;
+  }
+
+  if (state.restTimer) {
+    state.restTimer.exerciseIdx = bump(state.restTimer.exerciseIdx);
+    if (typeof state.restTimer.nextExerciseIdx === 'number') {
+      state.restTimer.nextExerciseIdx = bump(state.restTimer.nextExerciseIdx);
+    }
+    saveRestTimer();
+  }
+  if (state.editingSet) state.editingSet.exerciseIdx = bump(state.editingSet.exerciseIdx);
+  if (state.sessionChatPending) state.sessionChatPending.exIdx = bump(state.sessionChatPending.exIdx);
+}
+
+window.addExerciseAfterCurrent = function(newName) {
+  var session = state.activeSession;
+  if (!session) { closeExerciseSwap(); return; }
+  var name = String(newName || '').trim();
+  if (!name) return;
+
+  var insertAt = session.currentExerciseIdx + 1;
+  var newEx = buildSessionExercise(name);
+  shiftSessionExerciseIndexes(session, insertAt);
+  session.exercises.splice(insertAt, 0, newEx);
+
+  // 새 종목은 슈퍼세트로 자동 묶지 않는다 — 세션 중에 짝을 다시 짜면 이미 진행한 종목의 짝까지 흔들린다.
+  state.exerciseSwapOpen = false;
+  state.exercisePickerMode = 'swap';
+  state._swapQuery = '';
+  saveActiveSession();
+  render();
+
+  showToast('“' + name + '” 추가 — 지금 종목 다음 차례예요');
+  warnExerciseSafety(name);
+};
+
+// ═══════════════════════════════════════════════
+// 종목 건너뛰기 (남은 세트만 빼고 다음 종목으로)
+// ═══════════════════════════════════════════════
+
+// 현재 위치 다음에서 아직 할 세트가 남은 종목을 찾는다. 없으면 바로 다음 종목(끝이면 그대로).
+function findNextPendingExerciseIdx(session, fromIdx) {
+  for (var i = fromIdx + 1; i < session.exercises.length; i++) {
+    var ex = session.exercises[i];
+    if (ex && !ex.skipped && (ex.sets || []).some(function(s) { return !s.completed; })) return i;
+  }
+  return Math.min(fromIdx + 1, session.exercises.length - 1);
+}
+
+window.skipCurrentExercise = function() {
+  var session = state.activeSession;
+  if (!session) return;
+  var idx = session.currentExerciseIdx;
+  var ex = session.exercises[idx];
+  if (!ex) return;
+
+  var pending = (ex.sets || []).filter(function(s) { return !s.completed; }).length;
+  if (!pending) {
+    state.exerciseMenuOpen = false;
+    render();
+    showToast('남은 세트가 없어요 — 이미 끝낸 종목이에요');
+    return;
+  }
+
+  var doneWorking = countWorkingSets(ex.sets);
+  var msg = doneWorking > 0
+    ? '남은 ' + pending + '세트를 건너뛰고 다음 종목으로 갈까요?\n이미 완료한 ' + doneWorking + '세트는 그대로 기록돼요.'
+    : '“' + ex.name + '”을(를) 건너뛸까요?\n한 세트도 안 했으니 기록에는 남지 않아요.';
+
+  showConfirm(msg, function() { applySkipExercise(idx); }, { confirmLabel: '건너뛰기' });
+};
+
+// 건너뛰기 실제 적용 (확인 팝업 통과 후).
+// 남은(미완료) 세트만 떼어 skippedSets에 보관한다 — 완료한 세트는 그대로 남아 기록·볼륨에 들어가고,
+// 보관해 둔 세트 덕분에 "되돌리기"가 새로고침 뒤에도 된다(세션과 함께 저장되므로).
+function applySkipExercise(idx) {
+  var session = state.activeSession;
+  if (!session) return;
+  var ex = session.exercises[idx];
+  if (!ex || ex.skipped) return;   // 두 번 건너뛰면 되돌리기용 보관본을 빈 배열로 덮어쓴다
+
+  ex.skippedSets = (ex.sets || []).filter(function(s) { return !s.completed; });
+  ex.sets = (ex.sets || []).filter(function(s) { return s.completed; });
+  ex.skipped = true;
+
+  // 슈퍼세트는 두 종목을 번갈아 한다는 전제라 한쪽을 건너뛰면 성립하지 않는다 → 양쪽 연결 해제
+  unlinkSuperset(session.exercises, idx);
+
+  // 건너뛴 종목으로 넘어가라고 안내하던 휴식 타이머는 그 안내만 지운다 (휴식 자체는 유지)
+  if (state.restTimer && state.restTimer.nextExerciseIdx === idx) state.restTimer.nextExerciseIdx = null;
+  if (state.editingSet && state.editingSet.exerciseIdx === idx) state.editingSet = null;
+
+  state.exerciseMenuOpen = false;
+  state.muscleMapZoom = null;
+  session.currentExerciseIdx = findNextPendingExerciseIdx(session, idx);
+  saveActiveSession();
+  saveRestTimer();
+  render();
+  showToast('건너뛰었어요 — 그 종목으로 돌아가면 되돌릴 수 있어요');
+}
+
+// 건너뛰기 되돌리기 — 떼어 뒀던 세트를 그대로 다시 붙인다.
+window.unskipExercise = function(idx) {
+  var session = state.activeSession;
+  if (!session) return;
+  var ex = session.exercises[idx];
+  if (!ex || !ex.skipped) return;
+
+  restoreSkippedSets(ex);
+
+  // 보관본이 없는 예외(옛 세션 등) — 남은 세트를 현재 세트법 기준으로 새로 만든다(완료분 제외한 만큼)
+  if (!(ex.sets || []).some(function(s) { return !s.completed; })) {
+    var done = countWorkingSets(ex.sets);
+    var plan = getSessionSetPlan(ex.name, ex.lastWeight, ex.targetReps, {
+      sets: Math.max(1, 3 - done),
+      warmup: done === 0
+    });
+    ex.targetReps = repRangeToStr(plan.repRange);
+    ex.scheme = plan.scheme;
+    ex.sets = (ex.sets || []).filter(function(s) { return s.completed; }).concat(plan.sets);
+  }
+
+  session.currentExerciseIdx = idx;
+  saveActiveSession();
+  render();
+  showToast('되돌렸어요 — 남은 세트가 다시 생겼어요');
+};
 
 // ═══════════════════════════════════════════════
 // 운동 세션 화면 (운동 중)
@@ -2368,7 +2609,8 @@ function renderWorkoutSession() {
   var doneSets = session.exercises.reduce(function(s, ex) {
     return s + ex.sets.filter(function(set) { return set.completed; }).length;
   }, 0);
-  var progressPct = Math.round((doneSets / totalSets) * 100);
+  // 모든 종목을 건너뛰면 남은 세트가 0이 될 수 있다 — 0으로 나눠 NaN%가 되지 않게 막는다
+  var progressPct = totalSets > 0 ? Math.round((doneSets / totalSets) * 100) : 0;
   
   // 경과 시간
   var elapsed = Math.floor((Date.now() - session.startTime) / 1000);
@@ -2497,16 +2739,18 @@ function renderWorkoutSession() {
   }
   
   // 세트 편집 시트
-  // 종목 변경 시트
+  // 종목 고르기 시트 — 교체 모드와 추가 모드가 이 시트를 공유한다 (문구만 다름)
   var swapSheetHtml = '';
   if (state.exerciseSwapOpen) {
+    var addMode = isExerciseAddMode();
     swapSheetHtml =
       '<div class="sheet-overlay" onclick="closeExerciseSwap()">' +
         '<div class="sheet" onclick="event.stopPropagation()">' +
           '<div class="sheet-handle"></div>' +
           '<div class="flex items-center justify-between mb-3">' +
             '<div>' +
-              '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">종목 변경</p>' +
+              '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">' +
+                (addMode ? '종목 추가 — 지금 종목 다음에' : '종목 변경') + '</p>' +
               '<p class="font-bebas text-2xl mt-1">' + escapeHtml(exercise.name) + '</p>' +
             '</div>' +
             '<button class="session-header-btn" onclick="closeExerciseSwap()">' + icon('close', 18) + '</button>' +
@@ -2515,10 +2759,51 @@ function renderWorkoutSession() {
             'value="' + escapeHtml(state._swapQuery || '') + '" ' +
             'oninput="updateSwapSearch(this.value)" onclick="event.stopPropagation()" ' +
             'style="width:100%; padding:10px 12px; margin-bottom:10px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:10px; color:inherit; font-size:14px; outline:none;" />' +
-          '<p class="text-xs font-mono text-stone-400 mb-3">검색 없이는 같은 부위 종목을 보여줘요. 검색하면 전체 종목에서 찾고, 없는 종목은 이름 그대로 추가할 수 있어요.</p>' +
+          '<p class="text-xs font-mono text-stone-400 mb-3">' +
+            (addMode
+              ? '고른 종목이 지금 종목 <b>바로 다음 차례</b>로 들어가요. 무게·세트는 기록을 보고 자동으로 정해줘요.'
+              : '검색 없이는 같은 부위 종목을 보여줘요. 검색하면 전체 종목에서 찾고, 없는 종목은 이름 그대로 추가할 수 있어요.') +
+          '</p>' +
           '<div id="swap-list" style="max-height: 48vh; overflow-y: auto; padding-right: 4px;">' +
             buildSwapListHtml(state._swapQuery || '') +
           '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  // 종목 메뉴 시트 (··· 버튼) — 종목 단위로 할 수 있는 일 모음
+  var exerciseMenuHtml = '';
+  if (state.exerciseMenuOpen) {
+    var menuPending = (exercise.sets || []).filter(function(s) { return !s.completed; }).length;
+    exerciseMenuHtml =
+      '<div class="sheet-overlay" onclick="closeExerciseMenu()">' +
+        '<div class="sheet" onclick="event.stopPropagation()">' +
+          '<div class="sheet-handle"></div>' +
+          '<div class="flex items-center justify-between mb-4">' +
+            '<div>' +
+              '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">종목 메뉴</p>' +
+              '<p class="font-bebas text-2xl mt-1">' + escapeHtml(exercise.name) + '</p>' +
+            '</div>' +
+            '<button class="session-header-btn" onclick="closeExerciseMenu()">' + icon('close', 18) + '</button>' +
+          '</div>' +
+          '<button class="option-card" style="width:100%; margin-bottom:6px; text-align:left;" onclick="openExerciseSwap()">' +
+            '<p class="font-display text-sm">종목 교체</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">지금 종목을 다른 종목으로 바꿔요</p>' +
+          '</button>' +
+          '<button class="option-card" style="width:100%; margin-bottom:6px; text-align:left;" onclick="openExerciseAdd()">' +
+            '<p class="font-display text-sm">종목 추가</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">새 종목을 지금 종목 <b>다음 차례</b>에 넣어요</p>' +
+          '</button>' +
+          (exercise.skipped
+            ? '<button class="option-card" style="width:100%; text-align:left;" onclick="unskipExercise(' + session.currentExerciseIdx + ')">' +
+                '<p class="font-display text-sm">건너뛰기 되돌리기</p>' +
+                '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">건너뛴 세트를 다시 살려요</p>' +
+              '</button>'
+            : '<button class="option-card" style="width:100%; text-align:left;" onclick="skipCurrentExercise()">' +
+                '<p class="font-display text-sm" style="color:#f87171;">이 종목 건너뛰기</p>' +
+                '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">남은 ' + menuPending + '세트를 빼고 다음 종목으로 가요' +
+                  (countWorkingSets(exercise.sets) > 0 ? ' (완료한 세트는 그대로 기록)' : '') + '</p>' +
+              '</button>') +
         '</div>' +
       '</div>';
   }
@@ -2618,7 +2903,10 @@ function renderWorkoutSession() {
     var dotActive = i === session.currentExerciseIdx;
     
     var dotStyle = '';
-    if (dotDone) {
+    if (dotEx.skipped) {
+      // 건너뛴 종목은 "완료"와 구분되어야 한다 — 속이 빈 점으로 표시
+      dotStyle = 'background: transparent; box-shadow: inset 0 0 0 2px var(--bg-3);' + (dotActive ? ' outline: 1px solid var(--text-muted);' : '');
+    } else if (dotDone) {
       dotStyle = 'background: var(--accent); box-shadow: 0 0 6px var(--accent);';
     } else if (dotActive) {
       dotStyle = 'background: var(--accent); box-shadow: 0 0 8px var(--accent), inset 0 0 0 2px white;';
@@ -2644,7 +2932,7 @@ function renderWorkoutSession() {
         '<div class="flex gap-2">' +
           '<button class="session-header-btn" onclick="openSessionChat()" title="세트 사이 코치">' + icon('msg', 18) + '</button>' +
           '<button class="session-header-btn" onclick="openSetSchemeSheet()" title="세트법 바꾸기" style="font-size:11px; font-weight:600;">세트법</button>' +
-          '<button class="session-header-btn" onclick="openExerciseSwap()" title="종목 변경">' + icon('dots', 18) + '</button>' +
+          '<button class="session-header-btn" onclick="openExerciseMenu()" title="종목 메뉴 (교체·추가·건너뛰기)">' + icon('dots', 18) + '</button>' +
         '</div>' +
       '</div>' +
       
@@ -2659,7 +2947,8 @@ function renderWorkoutSession() {
 
       // 현재 종목 정보
       '<div class="exercise-info-card">' +
-        '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">현재 종목</p>' +
+        '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">현재 종목' +
+          (exercise.addedInSession ? ' · 운동 중 추가' : '') + (exercise.skipped ? ' · 건너뜀' : '') + '</p>' +
         '<h2 class="font-bebas text-2xl mb-1">' + escapeHtml(exercise.name) + '</h2>' +
         '<p class="text-xs font-mono text-stone-400">' + exercise.type +
           ' · ' + (SET_SCHEMES[getSetScheme(exercise.name)] || SET_SCHEMES.straight).short +
@@ -2744,12 +3033,24 @@ function renderWorkoutSession() {
         return fallbackPrevHtml + html;
       })() +
 
-      // 세트 목록
+      // 세트 목록 (건너뛴 종목이면 안내 + 되돌리기)
       '<div class="mb-3">' +
         '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-3 px-1">세트</p>' +
-        '<div style="display: flex; flex-direction: column; gap: 8px;">' + setRows + '</div>' +
-        '<button class="option-card" style="width: 100%; margin-top: 8px; text-align: center;" onclick="addSetToExercise(' + session.currentExerciseIdx + ')">' +
-          '<p class="text-xs font-mono text-stone-400">＋ 세트 추가</p>' +
+        (exercise.skipped
+          ? '<div class="rm-card">' +
+              '<p class="text-[10px] font-mono uppercase tracking-widest text-stone-400">⏭ 건너뛴 종목</p>' +
+              '<p class="text-xs text-stone-300 mt-1">남은 세트를 뺐어요. 완료한 세트가 있으면 그건 그대로 기록돼요.</p>' +
+              '<button class="adj-btn accent-btn" style="width:100%; margin-top:10px;" onclick="unskipExercise(' + session.currentExerciseIdx + ')">되돌리기</button>' +
+            '</div>'
+          : '') +
+        (setRows ? '<div style="display: flex; flex-direction: column; gap: 8px;">' + setRows + '</div>' : '') +
+        (exercise.skipped
+          ? ''
+          : '<button class="option-card" style="width: 100%; margin-top: 8px; text-align: center;" onclick="addSetToExercise(' + session.currentExerciseIdx + ')">' +
+              '<p class="text-xs font-mono text-stone-400">＋ 세트 추가</p>' +
+            '</button>') +
+        '<button class="option-card" style="width: 100%; margin-top: 8px; text-align: center;" onclick="openExerciseAdd()">' +
+          '<p class="text-xs font-mono text-stone-400">＋ 종목 추가 (다음 차례에)</p>' +
         '</button>' +
       '</div>' +
       
@@ -2767,6 +3068,7 @@ function renderWorkoutSession() {
     
     restTimerHtml +
     sheetHtml +
+    exerciseMenuHtml +
     swapSheetHtml +
     buildSetSchemeSheetHtml(session, exercise) +
     buildSessionChatSheetHtml(session, exercise) +
@@ -6382,7 +6684,8 @@ function getTopLayer() {
   if (state.muscleMapZoom) return 'muscleMapZoom';    // 자극 근육 확대 (세션/미리보기 위)
   if (state.itemDetailSheet) return 'itemDetail';     // 기록 상세 (탭 위)
   if (state.editingSet) return 'setEditor';           // 세트 편집 (세션 위)
-  if (state.exerciseSwapOpen) return 'exerciseSwap';  // 종목 교체 (세션 위)
+  if (state.exerciseSwapOpen) return 'exerciseSwap';  // 종목 고르기 — 교체·추가 공용 (종목 메뉴 위)
+  if (state.exerciseMenuOpen) return 'exerciseMenu';  // 종목 메뉴 (세션 위)
   if (state.setSchemeOpen) return 'setScheme';        // 세트법 변경 (세션 위)
   if (state.sessionChatOpen) return 'sessionChat';    // 세트 사이 채팅 (세션 위)
   if (state.apiKeyModalOpen) return 'apiKey';         // (더보기 위)
@@ -6423,6 +6726,7 @@ function navBack() {
     case 'itemDetail': closeItemDetail(); break;
     case 'setEditor': closeSetEditor(); break;
     case 'exerciseSwap': closeExerciseSwap(); break;
+    case 'exerciseMenu': closeExerciseMenu(); break;
     case 'setScheme': closeSetSchemeSheet(); break;
     case 'sessionChat': closeSessionChat(); break;
     case 'apiKey': closeApiKeyModal(); break;
@@ -6562,6 +6866,7 @@ function ensureBackTrap() {
     if (!state.activeSession) return;
     if (state.editingSet) return;
     if (state.exerciseSwapOpen) return;
+    if (state.exerciseMenuOpen) return;
     if (state.setSchemeOpen) return;
     if (state.completedSession) return;
     if (state.itemDetailSheet) return;
