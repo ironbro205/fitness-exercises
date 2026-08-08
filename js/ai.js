@@ -46,11 +46,24 @@ function extractBalancedJson(s) {
 // 그래서 **화면이 아니라 파싱 지점에서** 한 번만 접는다. 여기를 지나면 숫자 칸은 항상 숫자다.
 // ═══════════════════════════════════════════════
 
+// 시간 칸의 단위 배수. ★단위를 무시하고 숫자만 읽으면 "2분 쉬세요"가 2초가 되고,
+// 유산소 구간이 "5분"·"120초" 로 섞여 오면 5:120 비율로 짜인다(옳게는 300:120).
+// 단위 표기가 없으면 그 칸의 기본 단위로 준 것으로 보고 1배.
+function aiTimeFactor(text, baseUnit) {
+  var perSec;
+  if (/시간|hours?\b|hrs?\b|\d\s*h\b/i.test(text)) perSec = 3600;
+  else if (/분|minutes?\b|mins?\b|\d\s*m\b/i.test(text)) perSec = 60;
+  else if (/초|seconds?\b|secs?\b|\d\s*s\b/i.test(text)) perSec = 1;
+  else return 1;
+  return (baseUnit === 'min') ? (perSec / 60) : perSec;
+}
+
 // 숫자 강제. 글자면 앞에 나오는 첫 숫자를 읽는다 — "3-4"→3, "8~12"→8 처럼
 // 범위를 준 경우 **아래값**을 택한다(세트·무게를 부풀리지 않는 쪽이 안전).
 // 읽을 수 없으면 fallback 을 그대로 돌려준다(호출부가 기본값을 정한다).
 // opts.min / opts.max: 범위 밖은 잘라서 병적인 값(999999kg)이 저장되지 않게 한다.
 // opts.positive: 0 이하를 "값 없음"으로 본다 — 기존 `parsed.X || 기본값` 의 falsy 동작을 그대로 유지하는 스위치.
+// opts.unit: 'sec' | 'min' — 시간 칸이면 단위를 읽어 그 기준으로 환산한다("1시간"→3600초).
 function aiNum(value, fallback, opts) {
   opts = opts || {};
   var n;
@@ -60,6 +73,7 @@ function aiNum(value, fallback, opts) {
     // 맨 앞 숫자를 먼저 본다("-5" 의 부호를 살리려고). 앞이 글자면 뒤에서 부호 없는 첫 숫자("약 3세트"→3).
     var m = value.match(/^\s*(-?\d+(?:\.\d+)?)/) || value.match(/(\d+(?:\.\d+)?)/);
     n = m ? parseFloat(m[1]) : NaN;
+    if (isFinite(n) && opts.unit) n = n * aiTimeFactor(value, opts.unit);
   } else {
     n = NaN;                                   // boolean · null · 배열 · 객체
   }
@@ -88,10 +102,12 @@ function aiRange(value, fallback, opts) {
   var max = (typeof opts.max === 'number') ? opts.max : 1000;
   var s = (typeof value === 'number' && isFinite(value)) ? String(Math.round(value))
         : (typeof value === 'string' ? value : '');
-  var m = s.match(/(\d+)\s*(?:[-~–—]\s*(\d+))?/);
+  var m = s.match(/(\d+(?:\.\d+)?)\s*(?:[-~–—]\s*(\d+(?:\.\d+)?))?/);
   if (!m) return fallback;
-  var lo = parseInt(m[1], 10);
-  var hi = m[2] ? parseInt(m[2], 10) : lo;
+  // 범위의 양끝에 같은 단위를 적용한다 — "2-3분" 은 120-180초 (한쪽만 환산하면 범위가 뒤집힌다).
+  var factor = opts.unit ? aiTimeFactor(s, opts.unit) : 1;
+  var lo = Math.round(parseFloat(m[1]) * factor);
+  var hi = m[2] ? Math.round(parseFloat(m[2]) * factor) : lo;
   if (hi < lo) hi = lo;                        // 뒤집힌 범위("12-8")는 아래값만
   if (lo < min) lo = min;
   if (hi < lo) hi = lo;
@@ -147,7 +163,7 @@ function normalizeAIExercise(ex) {
     reps: aiRange(ex.reps, '8-12', { min: 1, max: 100 }),
     weight: hasWeight ? snapWeightToEquipment(weight, name) : null,
     rir: aiRange(ex.rir, 2, { min: 0, max: 10 }),           // RIR 0("실패까지")도 유효한 값이라 min 0
-    rest: aiRange(ex.rest, null, { min: 10, max: 900 }),    // 초 단위 범위 — restMin 이 "120-180"→"2-3분" 으로 읽는다
+    rest: aiRange(ex.rest, null, { min: 10, max: 900, unit: 'sec' }),   // 초 단위 범위 — restMin 이 "120-180"→"2-3분" 으로 읽는다
     note: (typeof ex.note === 'string') ? ex.note : ''
   };
 }
@@ -158,7 +174,7 @@ function normalizeAIExercise(ex) {
 function normalizeAIRoutineMeta(routine) {
   if (!routine) return routine;
   routine.headline = (typeof routine.headline === 'string') ? routine.headline : '';
-  routine.duration = aiInt(routine.duration, null, { positive: true, max: 300 });
+  routine.duration = aiInt(routine.duration, null, { positive: true, max: 300, unit: 'min' });
   routine.totalSets = aiInt(routine.totalSets, null, { positive: true, max: 100 });
   routine.intensity = aiEnum(routine.intensity, AI_INTENSITY_LEVELS, null);
   return routine;
@@ -1361,7 +1377,7 @@ async function generateFullRoutine(bodyPart) {
       bodyPart: bodyPart,
       headline: (typeof parsed.headline === 'string' && parsed.headline.trim()) ? parsed.headline : (info.name + ' 루틴'),
       reason: (typeof parsed.reason === 'string') ? parsed.reason : '',
-      duration: aiInt(parsed.duration, 60, { positive: true, max: 300 }),
+      duration: aiInt(parsed.duration, 60, { positive: true, max: 300, unit: 'min' }),
       totalSets: aiInt(parsed.totalSets, setsSum, { positive: true, max: 100 }),
       intensity: aiEnum(parsed.intensity, AI_INTENSITY_LEVELS, 'moderate'),
       caution: cautionText,
@@ -2052,7 +2068,7 @@ function cardioFitToTotal(raw, totalSec, opts) {
     var type = allowed[seg.type] ? seg.type : 'walk';       // 허용 밖 종류(걷기 모드의 run 등)는 walk 로 접는다
     // "300초" 처럼 단위가 붙어도 구간을 통째로 버리지 않는다. 길이는 어차피 아래에서
     // 총시간에 맞춰 비율로 다시 늘려 쓰므로, 단위를 잘못 읽어도 구간 비율은 살아남는다.
-    var sec = aiNum(seg.sec, null, { positive: true });
+    var sec = aiNum(seg.sec, null, { positive: true, unit: 'sec' });
     if (sec === null) continue;
     var item = {
       type: type,

@@ -1,5 +1,5 @@
 {
-  "functionCount": 430,
+  "functionCount": 431,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -19,6 +19,7 @@
     "aiRange",
     "aiText",
     "aiTextList",
+    "aiTimeFactor",
     "analyzePlateauWithAI",
     "analyzeRoutineBalance",
     "animateSheetCloseThen",

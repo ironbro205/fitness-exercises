@@ -86,6 +86,47 @@ test('aiRange — 반복·RIR·휴식은 숫자가 아니라 "범위 문자열"�
   assert.deepEqual(plain(app.parseRepRange(app.aiRange('8~12', 'X'))), { low: 8, high: 12 });
 });
 
+test('시간 칸 — 단위를 읽어 환산한다 (숫자만 읽으면 "2분 쉬세요"가 2초가 된다)', () => {
+  const REST = { min: 10, max: 900, unit: 'sec' };
+  assert.equal(app.aiRange('2분', null, REST), '120');
+  assert.equal(app.aiRange('2-3분', null, REST), '120-180', '범위는 양끝에 같은 단위를 적용한다');
+  assert.equal(app.aiRange('1.5분', null, REST), '90', '소수 분도 초로');
+  assert.equal(app.aiRange('90초', null, REST), '90');
+  assert.equal(app.aiRange('120-180', null, REST), '120-180', '단위가 없으면 그 칸의 기본 단위(초)로 본다');
+
+  const DUR = { positive: true, max: 300, unit: 'min' };
+  assert.equal(app.aiInt('1시간', 60, DUR), 60);
+  assert.equal(app.aiInt('60분', 60, DUR), 60);
+  assert.equal(app.aiInt('90 min', 60, DUR), 90);
+  assert.equal(app.aiInt(60, 60, DUR), 60, '숫자로 오면 그대로');
+
+  // 단위를 안 보는 칸(무게·반복)은 영향받지 않는다
+  assert.equal(app.aiNum('40kg', null, { min: 0, max: 500 }), 40);
+  assert.equal(app.aiRange('8-12', 'X', { min: 1, max: 100 }), '8-12');
+});
+
+test('유산소 — 구간 시간 단위가 섞여도 비율이 맞는다', () => {
+  // "5분"(=300초)과 "120초"가 섞여 오는 경우. 숫자만 읽으면 5:120 비율로 짜여
+  // 몸풀기가 30초, 본 구간이 29분30초가 된다.
+  const segs = app.cardioFitToTotal(
+    [
+      { type: 'warmup', sec: '5분', speed: 5, label: 'w' },
+      { type: 'walk', sec: '600초', speed: 5.5, label: 'm' },
+    ],
+    1800,
+    { defaultSpeed: { warmup: 5, walk: 5.5 }, defaultLabel: { warmup: '몸풀기', walk: '본 구간' } }
+  );
+  assert.ok(segs);
+  assert.equal(segs[0].endSec, 600, '300:600 비율 → 30분의 1/3 = 10분');
+  assert.equal(segs[1].endSec, 1800);
+});
+
+test('루틴 종목 — 휴식을 "2-3분"으로 줘도 화면 표기가 "2-3분" 그대로다', () => {
+  const ex = app.normalizeAIExercise({ name: '벤치프레스', rest: '2-3분' });
+  assert.equal(ex.rest, '120-180');
+  assert.equal(parseInt(String(ex.rest), 10), 120, 'getEffectiveRestSec 이 읽는 아래값');
+});
+
 test('aiEnum — 목록 밖 라벨은 기본값으로 접는다', () => {
   assert.equal(app.aiEnum('moderate', app.AI_INTENSITY_LEVELS, 'moderate'), 'moderate');
   assert.equal(app.aiEnum('빡세게', app.AI_INTENSITY_LEVELS, 'moderate'), 'moderate');
@@ -159,7 +200,7 @@ test('normalizeAIExercise — 병적인 값은 잘라낸다', () => {
 
 test('루틴 생성 — 문자열 세트가 그대로 흘러들어오지 않는다', async () => {
   const a = appWithAIResponse({
-    headline: 'h', reason: 'r', duration: '60분', intensity: '빡세게',
+    headline: 'h', reason: 'r', duration: '1시간', intensity: '빡세게',
     exercises: [
       { name: '벤치프레스', type: '복합', isMain: true, sets: '3-4', reps: '6-8', weight: '60kg', rir: 2, rest: '90초' },
       { name: '인클라인 덤벨 프레스', type: '복합', sets: '3', reps: '8-12', weight: 20, rir: 2 },
@@ -171,7 +212,7 @@ test('루틴 생성 — 문자열 세트가 그대로 흘러들어오지 않는�
   assert.equal(r.exercises[0].sets, 3);
   assert.equal(r.exercises[0].weight, 60);
   assert.equal(r.exercises[0].rest, '90');
-  assert.equal(r.duration, 60, '"60분" 도 60 으로 읽는다');
+  assert.equal(r.duration, 60, '"1시간" 은 60분 — 단위를 안 보면 1분짜리 루틴이 된다');
   assert.equal(r.intensity, 'moderate', '목록 밖 강도는 기본값');
 });
 
