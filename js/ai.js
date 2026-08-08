@@ -71,7 +71,8 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
     '═════════════════════════════════════\n' +
     context + '\n' +
     (safetyBlock ? safetyBlock + '\n' : '') +
-    
+    buildEquipmentPromptBlock() + '\n' +
+
     '═════════════════════════════════════\n' +
     '⚙️ [규칙] 의도 판단 + 응답 형식\n' +
     '═════════════════════════════════════\n' +
@@ -248,6 +249,14 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
         });
         replyText += '\n\n🛡️ 안전 교체: ' + changeMsgs.join(', ');
       }
+      // 장비 가드레일 (안전 다음) — 프롬프트를 어기고 없는 기구 종목이 들어왔으면 여기서 교체/제거
+      var eqGuarded = applyEquipmentGuardrail(validRoutine.exercises);
+      if (eqGuarded.changes.length) {
+        validRoutine.exercises = eqGuarded.exercises;
+        replyText += '\n\n🏋️ 장비 교체: ' + eqGuarded.changes.map(function(c) {
+          return c.to ? (c.from + ' → ' + c.to) : (c.from + ' 제외');
+        }).join(', ') + ' (헬스장에 없는 기구)';
+      }
       if (!validRoutine.exercises.length) validRoutine = null;
     }
 
@@ -352,6 +361,8 @@ function buildUserContext(options) {
   ctx += '- 목표: 린매스 (체지방↓ + 근육↑)\n';
   ctx += '- 경력: 명목상 중급, 실질 초~중급\n';
   ctx += '- 환경: 헬스장 머신/덤벨 위주, 풀업 ' + pullupRangeStr + '개 가능\n';
+  // 보유 장비 — 이 한 줄이 buildUserContext를 쓰는 모든 프롬프트(루틴 생성·수정·코치 채팅·오늘의 추천·정체기)에 전파된다.
+  ctx += '- 보유 장비 (이 기구로 가능한 종목만 추천할 것): ' + getOwnedEquipmentLabels().join(' · ') + '\n';
   ctx += '- 사이클: ' + profile.currentCycle + '차 / ' + profile.currentWeek + '주차 (' + profile.cyclePhase + ')\n';
   ctx += '- 목표: 주 ' + profile.workoutFreq + '회 운동\n\n';
   
@@ -425,7 +436,10 @@ function buildUserContext(options) {
     if (diagnosis.lacking.length > 0) {
       ctx += '⚠️ **부족 부위 (최우선 보충)**:\n';
       diagnosis.lacking.forEach(function(item) {
-        var recs = WEAK_PART_EXERCISE_MAP[item.group] || [];
+        // 보유 장비로 못 하는 종목은 권장에서 뺀다 (장비 표만 고쳐도 추천이 따라오도록 런타임 필터)
+        var recs = (WEAK_PART_EXERCISE_MAP[item.group] || []).filter(function(n) {
+          return isExerciseAvailable(n.replace(/\(.*\)$/, ''));
+        });
         ctx += '- ' + item.label + volNeedNote(item.vol, item.target);
         if (recs.length > 0) {
           ctx += ' → 권장 종목: ' + recs.slice(0, 3).join(', ');
@@ -651,6 +665,7 @@ function buildCoachSystemParts() {
 
   var safetyBlock = buildSafetyPromptBlock();
   var dynamic = (safetyBlock ? safetyBlock + '\n' : '') +
+    buildEquipmentPromptBlock() + '\n' +
     '## 📌 기억 노트 (이 사용자에 대해 장기 기억 — 부상·선호·목표·일정)\n' +
     formatCoachMemoryForPrompt(state.coachMemory) + '\n\n' +
     '## 사용자 현재 데이터\n' +
@@ -892,6 +907,8 @@ async function generateFullRoutine(bodyPart) {
     Object.keys(EXERCISE_BODY_PART_MAP).forEach(function(name) {
       var info = EXERCISE_BODY_PART_MAP[name];
       if (targetParts.indexOf(info.primary) === -1) return;
+      if (!isExerciseAvailable(name)) return;  // 헬스장에 없는 기구 종목은 풀에서 제외
+
       var partKr = BODY_PART_KR[info.primary] || info.primary;
       if (!byPart[partKr]) byPart[partKr] = [];
       var tags = [];
@@ -918,6 +935,7 @@ async function generateFullRoutine(bodyPart) {
     });
     
     // 2. 사용자가 1RM 등록한 종목 중 매핑 외 (퍼지 매칭)
+    // 여기는 장비 필터를 걸지 않는다 — 사용자가 실제로 수행해 1RM을 남긴 종목이라 수행 가능이 이미 증명됐다.
     Object.keys(oneRMData).forEach(function(name) {
       if (addedNames[name]) return;
       var info = getExercisePart(name);
@@ -953,9 +971,10 @@ async function generateFullRoutine(bodyPart) {
     context + '\n' +
     (injuryMemory.length ? ('## 🩹 부상·제약 (안전 최우선 — 종목 선택 시 반드시 반영)\n' + formatCoachMemoryForPrompt(injuryMemory) + '\n\n') : '') +
     (safetyBlock ? safetyBlock + '\n' : '') +
+    buildEquipmentPromptBlock() + '\n' +
 
     '═════════════════════════════════════\n' +
-    '🏋️ [데이터] ' + info.name + ' 사용 가능 종목 풀\n' +
+    '🏋️ [데이터] ' + info.name + ' 사용 가능 종목 풀 (보유 장비로 가능한 것만 추림)\n' +
     '═════════════════════════════════════\n' +
     getExercisePoolFor(bodyPart) + '\n\n' +
     
@@ -1152,6 +1171,17 @@ async function generateFullRoutine(bodyPart) {
         return c.to ? (c.from + ' → ' + c.to + ' (' + c.areaKr + ' 보호)') : (c.from + ' 제외 (' + c.areaKr + ' 보호)');
       });
       cautionText = (cautionText ? cautionText + ' · ' : '') + '🛡️ 안전 교체: ' + changeMsgs.join(', ');
+    }
+    // 장비 가드레일 (안전 다음) — 풀에 없는 미보유 기구 종목이 응답에 섞여 들어왔으면 여기서 교체/제거
+    var eqGuarded = applyEquipmentGuardrail(guarded.exercises);
+    if (!eqGuarded.exercises.length) {
+      return { error: '보유 장비 필터로 모든 종목이 제외됐어요. 다시 시도해주세요.' };
+    }
+    guarded.exercises = eqGuarded.exercises;
+    if (eqGuarded.changes.length) {
+      cautionText = (cautionText ? cautionText + ' · ' : '') + '🏋️ 장비 교체: ' + eqGuarded.changes.map(function(c) {
+        return c.to ? (c.from + ' → ' + c.to) : (c.from + ' 제외');
+      }).join(', ') + ' (헬스장에 없는 기구)';
     }
 
     return {
@@ -1372,7 +1402,9 @@ async function generateWeeklyReview(forceRefresh) {
     '## 사용자 프로필\n' +
     '- ' + profile.age + '세, ' + profile.height + 'cm, 목표: 린매스\n' +
     '- 목표: 주 ' + profile.workoutFreq + '회 운동\n' +
-    '- 사이클: ' + profile.currentCycle + '차 / ' + profile.currentWeek + '주차 (' + profile.cyclePhase + ')\n\n' +
+    '- 사이클: ' + profile.currentCycle + '차 / ' + profile.currentWeek + '주차 (' + profile.cyclePhase + ')\n' +
+    // 이 함수만 buildUserContext를 쓰지 않아 장비 정보가 없다 → 여기서 직접 넣는다.
+    '- 보유 장비: ' + getOwnedEquipmentLabels().join(' · ') + ' (nextWeek 조정에 없는 기구 종목을 제안하지 말 것)\n\n' +
     (function() { var sb = buildSafetyPromptBlock(); return sb ? sb + '(nextWeek 조정에 금기 종목을 제안하지 말 것)\n\n' : ''; })() +
     weekSummary;
   

@@ -1988,11 +1988,12 @@ function buildSwapListHtml(query) {
   var q = String(query || '').trim();
   var nq = norm(q);
 
+  // 헬스장에 없는 기구 종목은 후보에서 뺀다 (아래 "그대로 추가"로는 여전히 자유 입력 가능)
   var candidates;
   if (!nq) {
     // 같은 primary 부위의 다른 종목 — compound 일치 우선 정렬 (기존 동작)
     candidates = (primary ? (EXERCISES_BY_PRIMARY[primary] || []) : [])
-      .filter(function(name) { return name !== exercise.name; })
+      .filter(function(name) { return name !== exercise.name && isExerciseAvailable(name); })
       .sort(function(a, b) {
         var ai = EXERCISE_BODY_PART_MAP[a].compound === compound ? 0 : 1;
         var bi = EXERCISE_BODY_PART_MAP[b].compound === compound ? 0 : 1;
@@ -2001,7 +2002,7 @@ function buildSwapListHtml(query) {
   } else {
     // 전체 종목에서 검색 (공백 무시 부분일치), 같은 부위 우선
     candidates = Object.keys(EXERCISE_BODY_PART_MAP)
-      .filter(function(name) { return name !== exercise.name && norm(name).indexOf(nq) !== -1; })
+      .filter(function(name) { return name !== exercise.name && norm(name).indexOf(nq) !== -1 && isExerciseAvailable(name); })
       .sort(function(a, b) {
         var ap = EXERCISE_BODY_PART_MAP[a].primary === primary ? 0 : 1;
         var bp = EXERCISE_BODY_PART_MAP[b].primary === primary ? 0 : 1;
@@ -3046,14 +3047,15 @@ window.resetOneRM = function() {
 function renderOneRMList() {
   var data = storage.get(KEYS.ONE_RM_DATA, {});
   
+  // 종목을 추가할 때 EXERCISE_BODY_PART_MAP에만 넣으면 이 화면에는 안 보인다 — 여기에도 함께 넣을 것.
   var categories = {
-    '🦵 하체': ['레그 프레스', '핵 스쿼트', '리버스 브이 스쿼트', '머신 레그 익스텐션', '바벨 루마니안 데드리프트', '머신 라잉 레그 컬', '머신 힙 쓰러스트', '머신 힙 어브덕션', '덤벨 불가리안 스플릿 스쿼트', '덤벨 싱글 레그 데드리프트'],
-    '💪 가슴': ['머신 체스트 프레스', '스미스 인클라인 벤치 프레스', '머신 펙 덱 플라이', '덤벨 인클라인 벤치 프레스', '케이블 플라이'],
-    '🏋️ 어깨': ['머신 시티드 숄더 프레스', '덤벨 숄더 프레스', '덤벨 아놀드 프레스', '덤벨 사이드 레터럴 레이즈', '케이블 원 암 레터럴 레이즈'],
-    '💥 삼두': ['케이블 푸시 다운', '케이블 오버헤드 트라이셉스 익스텐션', '케이블 트라이셉스 킥백', '어시스트 딥스'],
-    '🔙 등': ['머신 시티드 로우', '케이블 시티드 로우', '클로즈 그립 랫 풀 다운', 'T 바 로우', '리버스 그립 랫 풀 다운', '랫 풀 다운', '케이블 암 풀 다운', '덤벨 인클라인 로우', '리버스 펙 덱 플라이', '원암 리버스 펙 덱 플라이', '페이스 풀', '케이블 슈러그', '켈소 슈러그'],
-    '💪 이두': ['바벨 컬', '덤벨 해머 컬', '덤벨 프리처 컬', '이지 바 프리처 컬', '인클라인 덤벨 컬', '덤벨 얼터네이트 컬'],
-    '🎯 코어': ['머신 시티드 크런치', '케이블 닐링 사이드 크런치', '인클라인 덤벨 와이 레이즈']
+    '🦵 하체': ['레그 프레스', '핵 스쿼트', '리버스 브이 스쿼트', '브이 스쿼트', '머신 레그 익스텐션', '바벨 루마니안 데드리프트', '머신 라잉 레그 컬', '머신 힙 쓰러스트', '머신 힙 어브덕션', '덤벨 불가리안 스플릿 스쿼트', '덤벨 싱글 레그 데드리프트', '와이드 스탠스 레그 프레스', '케이블 풀 스루', '레그 프레스 카프 레이즈', '덤벨 시티드 카프 레이즈'],
+    '💪 가슴': ['머신 체스트 프레스', '스미스 인클라인 벤치 프레스', '머신 펙 덱 플라이', '덤벨 인클라인 벤치 프레스', '케이블 플라이', '해머 체스트 프레스', '해머 인클라인 체스트 프레스', '바벨 인클라인 벤치 프레스', '스미스 머신 벤치 프레스', '덤벨 인클라인 플라이'],
+    '🏋️ 어깨': ['머신 시티드 숄더 프레스', '덤벨 숄더 프레스', '덤벨 아놀드 프레스', '덤벨 사이드 레터럴 레이즈', '케이블 원 암 레터럴 레이즈', '스미스 머신 오버헤드 프레스'],
+    '💥 삼두': ['케이블 푸시 다운', '케이블 오버헤드 트라이셉스 익스텐션', '케이블 트라이셉스 킥백', '어시스트 딥스', '스미스 머신 클로즈 그립 벤치 프레스'],
+    '🔙 등': ['머신 시티드 로우', '케이블 시티드 로우', '클로즈 그립 랫 풀 다운', 'T 바 로우', '리버스 그립 랫 풀 다운', '랫 풀 다운', '케이블 암 풀 다운', '덤벨 인클라인 로우', '리버스 펙 덱 플라이', '원암 리버스 펙 덱 플라이', '페이스 풀', '케이블 슈러그', '켈소 슈러그', '어시스트 풀업', '해머 로우', '플레이트 랫 풀 다운', '와이드 그립 랫 풀 다운', '원 암 케이블 랫 풀 다운', '스미스 머신 슈러그'],
+    '💪 이두': ['바벨 컬', '덤벨 해머 컬', '덤벨 프리처 컬', '이지 바 프리처 컬', '인클라인 덤벨 컬', '덤벨 얼터네이트 컬', '이지 바 리버스 컬'],
+    '🎯 코어': ['머신 시티드 크런치', '케이블 닐링 사이드 크런치', '인클라인 덤벨 와이 레이즈', '케이블 크런치', '케이블 팔로프 프레스', '행잉 니 레이즈']
   };
   
   var totalCount = Object.keys(data).length;
