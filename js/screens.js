@@ -1353,7 +1353,7 @@ function renderItemDetailSheet() {
         if (ex.sets && ex.sets.length > 0) {
           // 드롭·마이오렙 제외 — 안 빼면 요약이 가장 가벼운 드롭 무게로 뜨고 세트 수도 부풀려진다
           var completedSets = ex.sets.filter(function(s) {
-            return s.completed && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+            return s.completed && !s.isWarmup && !isOffProgressSet(s);
           });
           if (completedSets.length > 0) {
             var lastSet = completedSets[completedSets.length - 1];
@@ -1575,7 +1575,7 @@ function finalizeSession() {
     // 볼륨 카운트용 세트 수에서는 드롭·마이오렙을 뺀다. 이들은 마지막 워킹세트의 **연장**이지
     // 독립 세트가 아니다 — 그대로 세면 3세트 종목이 5세트로 잡혀 주간 볼륨 폐루프가 부풀려진다.
     // (근비대 이득도 동등할 뿐 더 크지 않다 — Sødal 2023 SMD 0.155 p=0.392)
-    var countedSets = doneSets.filter(function(s) { return s.role !== 'drop' && s.role !== 'myo'; });
+    var countedSets = doneSets.filter(function(s) { return !isSetExtension(s); });
     if (!countedSets.length) countedSets = doneSets; // 본 세트를 지우고 드롭만 남은 예외 — 0세트로 기록하지 않는다
     // (같은 규칙의 단일 원천은 domain.js countWorkingSets — setsCount 없는 옛 로그도 그쪽에서 같게 센다)
     if (doneSets.length > 0) {
@@ -1957,23 +1957,52 @@ window.addSetToExercise = function(exerciseIdx) {
   if (!exercise) return;
   // 드롭·마이오렙은 마지막 워킹세트의 연장이라 이어받을 기준이 아니다 — 본 워킹세트에서 이어받는다.
   var working = exercise.sets.filter(function(s) {
-    return !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+    return !s.isWarmup && !isSetExtension(s);
   });
   var lastSet = working.length ? working[working.length - 1] : exercise.sets[exercise.sets.length - 1];
-  // 탑세트 뒤에 세트를 더하면 그건 백오프다 — 역할과 함께 무게도 탑의 90%로 내려간다.
-  var addedRole = (lastSet && lastSet.role === 'top') ? 'backoff' : ((lastSet && lastSet.role) || 'work');
+  // 탑세트 뒤에 세트를 더하면 그건 그 스킴이 탑 다음에 두는 세트다 — 탑+백오프면 백오프(90%),
+  // 탑+백다운이면 백다운(82.5% · 12~15회). 역할·무게·반복·휴식을 스킴 표에서 그대로 가져온다.
+  var addedRole = (lastSet && lastSet.role) || 'work';
   var addedWeight = lastSet ? lastSet.weight : null;
-  if (addedRole === 'backoff' && lastSet && lastSet.role === 'top') {
-    addedWeight = reduceWeight(lastSet.weight, BACKOFF_PCT, exercise.name);
+  // 목표 반복은 **처방값**(repsTarget)에서 이어받는다. lastSet.reps 는 완료되면 실제 수행 횟수로
+  // 덮어써지므로, 그걸 쓰면 "8회 하려다 5회 한 날"의 다음 세트 목표가 5회로 주저앉는다.
+  var addedReps = lastSet ? (lastSet.repsTarget || lastSet.reps)
+                          : clampRepsToClass(exercise.name, exercise.targetReps).low;
+  // 휴식은 **스킴이 정한 값**을 다시 읽는다. buildSchemeSets 는 드롭·마이오렙을 붙일 때
+  // 마지막 워킹세트의 휴식을 10~20초 연장 간격으로 덮어쓰므로, 그 값을 물려받으면
+  // 새로 추가한 본 세트의 휴식 타이머가 10초로 시작한다.
+  var addedRest = schemeRestForRole(sessionSchemeOf(exercise), addedRole, exercise.name);
+  var addedPct = lastSet ? lastSet.pct : undefined;
+  var addedSet = (lastSet && lastSet.amrap && lastSet.repsMax)
+    ? { amrap: true, repsMax: lastSet.repsMax, repsMin: lastSet.repsMin } : null;
+  if (lastSet && lastSet.role === 'top') {
+    // 스킴이 탑 다음에 두는 단. 없으면(스트레이트·피라미드 등) 기존 동작대로 백오프로 이어 붙인다.
+    var afterTop = nextStepAfterTop(sessionSchemeOf(exercise))
+      || { role: 'backoff', pct: BACKOFF_PCT, rir: '2-3' };
+    addedRole = afterTop.role;
+    addedPct = afterTop.pct;
+    addedWeight = reduceWeight(lastSet.weight, afterTop.pct, exercise.name);
+    addedRest = afterTop.rest || getExerciseRestSec(exercise.name);
+    if (Array.isArray(afterTop.repsAbs)) {
+      addedReps = afterTop.repsAbs[0];
+      addedSet = { amrap: !!afterTop.amrap, repsMin: afterTop.repsAbs[0], repsMax: afterTop.repsAbs[1] };
+    } else {
+      // 역피라미드처럼 단마다 반복이 늘어나는 스킴은 repsDelta 를 반영해야 그 스킴이 성립한다.
+      addedReps = Math.max(1, addedReps + (afterTop.repsDelta || 0));
+      addedSet = null;
+    }
   }
-  exercise.sets.push({
-    weight: addedWeight,
-    reps: lastSet ? lastSet.reps : (clampRepsToClass(exercise.name, exercise.targetReps).low),
-    isWarmup: false,
-    completed: false,
-    role: addedRole,
-    rest: getExerciseRestSec(exercise.name)
-  });
+  var row = {
+    weight: addedWeight, reps: addedReps, repsTarget: addedReps,
+    isWarmup: false, completed: false, role: addedRole, rest: addedRest
+  };
+  if (typeof addedPct === 'number') row.pct = addedPct;
+  if (addedSet) {
+    row.amrap = addedSet.amrap;
+    if (addedSet.repsMin) row.repsMin = addedSet.repsMin;
+    row.repsMax = addedSet.repsMax;
+  }
+  exercise.sets.push(row);
   saveActiveSession();
   render();
 };
@@ -1991,7 +2020,7 @@ window.completeSet = function() {
   // 재저장으로 또 갱신돼도 최초 기준값을 보존해야 완전한 롤백이 됨 (자기 자신이 올린 값으로 덮어쓰기 방지)
   // 드롭·마이오렙 세트는 제외 — 마지막 워킹세트의 연장이라 1RM 근거로 삼으면 로그 해석이 꼬인다
   // (docs/research/set-schemes.md §5-D)
-  if (!set.isWarmup && set.role !== 'drop' && set.role !== 'myo' && set.weight && set.reps) {
+  if (!set.isWarmup && !isOffProgressSet(set) && set.weight && set.reps) {
     var prevRM = get1RM(exercise.name);
     var updated = update1RM(exercise.name, set.weight, set.reps);
     if (updated) {
@@ -2000,6 +2029,14 @@ window.completeSet = function() {
     }
   }
   
+  // [v2 §2-E③] 탑세트가 목표 반복에 못 미치면 남은 백오프를 한 스텝 더 내린다 (Khairallah 2009).
+  // 90% 감량은 탑세트를 채웠을 때를 전제로 계산된 값이라(v2 §1-B), 탑에서 이미 무너진 날엔
+  // 백오프에서 반복이 또 무너진다 — 그날 컨디션에 맞춰 감량폭을 키우는 자가조절이다.
+  if (set.role === 'top') {
+    // 재저장(반복 수를 고쳐 저장)에도 적용된다 — 이미 낮춰 뒀으면 0을 돌려주므로 토스트가 반복되지 않는다.
+    if (applyTopSetAutoDeload(exercise) > 0) showToast('탑세트가 목표에 못 미쳐 백오프를 한 칸 낮췄어요');
+  }
+
   // 이미 완료된 세트의 재저장이면 휴식 타이머·pop 없이 값만 저장하고 닫기
   if (wasCompleted) {
     state.editingSet = null;
@@ -2196,7 +2233,7 @@ function rebuildPendingSets(ex) {
   restoreSkippedSets(ex);   // 건너뛴 종목의 세트를 다시 짜면 건너뛰기는 자동으로 풀린다
   var doneSets = (ex.sets || []).filter(function(s) { return s.completed; });
   var pendingWorking = (ex.sets || []).filter(function(s) {
-    return !s.completed && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+    return !s.completed && !s.isWarmup && !isSetExtension(s);
   }).length;
   // pendingWorking이 0이면 본 세트를 이미 다 끝냈다는 뜻이다. 여기서 3으로 되돌리면
   // "드롭만 남은 상태에서 스트레이트로 바꾸기"가 완료 3세트 뒤에 새 3세트를 덧붙인다.
@@ -2244,11 +2281,16 @@ window.applySetScheme = function(schemeId) {
     showToast('재활 종목은 세트법을 바꿀 수 없어요');
     return;
   }
-  rebuildPendingSets(ex);
+  var plan = rebuildPendingSets(ex);
   state.setSchemeOpen = false;
   saveActiveSession();
   render();
-  showToast(SET_SCHEMES[schemeId].kr + '로 바꿨어요');
+  // 무게를 모르는 종목에서는 감량 기반 스킴이 스트레이트로 접힌다 — 그때 "피라미드로 바꿨어요"라고
+  // 알리면 화면(스트레이트)과 말이 어긋난다. **실제로 적용된 스킴**을 알린다.
+  var applied = (plan && plan.scheme) || schemeId;
+  showToast(applied === schemeId
+    ? SET_SCHEMES[applied].kr + '로 바꿨어요'
+    : SET_SCHEMES[applied].kr + '로 했어요 — 무게를 모르는 종목이라 감량을 못 해요');
 };
 
 // 슈퍼세트 제안 해제 (기구가 붐비거나 힘들 때 — 사용자 판단 존중)
@@ -2448,7 +2490,7 @@ function applyExerciseSwap(ex, newName) {
   // **완료된 세트는 그대로 두고 미완료 세트만** 새 종목 기준으로 다시 만든다.
   var doneSets = (ex.sets || []).filter(function(s) { return s.completed; });
   var pendingWorking = (ex.sets || []).filter(function(s) {
-    return !s.completed && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+    return !s.completed && !s.isWarmup && !isSetExtension(s);
   }).length;
   var plan = getSessionSetPlan(newName, null, ex.targetReps, {
     sets: pendingWorking,           // 0이면 새 워킹세트를 만들지 않는다 (완료 기록만 새 종목으로 이월)
@@ -2713,7 +2755,12 @@ function renderWorkoutSession() {
     }
     labelText = set.isWarmup ? 'W' : String(setNum);
 
-    // 세트 역할 뱃지 (탑세트 / 백오프 / 드롭 / 미니). 옛 세션 복원처럼 role이 없으면 아무것도 안 그린다.
+    // 한계반복(AMRAP) 세트는 목표가 한 숫자가 아니라 범위다 — "12~15회 · 한계까지"가 이 세트의 정의다.
+    // 완료된 뒤에는 같은 자리에 **실제로 한 횟수**가 들어오므로 범위 표기를 걷는다.
+    var repsText = (!set.completed && set.amrap && set.repsMax > set.reps)
+      ? set.reps + '~' + set.repsMax : set.reps;
+
+    // 세트 역할 뱃지 (탑세트 / 백오프 / 백다운 / 드롭 / 미니). 옛 세션 복원처럼 role이 없으면 아무것도 안 그린다.
     var roleKr = set.role ? SET_ROLE_KR[set.role] : '';
     var roleBadge = roleKr && !set.isWarmup
       ? '<span class="set-role-badge set-role-' + set.role + '">' + roleKr + '</span>'
@@ -2730,7 +2777,7 @@ function renderWorkoutSession() {
           '</div>' +
           '<div>' +
             '<p class="set-info-label">횟수</p>' +
-            '<p class="' + valueClass + '">' + set.reps + '<span class="text-xs text-stone-500">회</span></p>' +
+            '<p class="' + valueClass + '">' + repsText + '<span class="text-xs text-stone-500">회</span></p>' +
           '</div>' +
         '</div>' +
         status +
@@ -3003,7 +3050,9 @@ function renderWorkoutSession() {
           (exercise.addedInSession ? ' · 운동 중 추가' : '') + (exercise.skipped ? ' · 건너뜀' : '') + '</p>' +
         '<h2 class="font-bebas text-2xl mb-1">' + escapeHtml(exercise.name) + '</h2>' +
         '<p class="text-xs font-mono text-stone-400">' + escapeHtml(exercise.type) +
-          ' · ' + (SET_SCHEMES[getSetScheme(exercise.name)] || SET_SCHEMES.straight).short +
+          // **실제로 적용된** 세트법(exercise.scheme)을 적는다. 저장된 선택(getSetScheme)을 적으면
+          // 무게를 모르는 종목에서 스킴이 스트레이트로 접혔는데도 "탑+백오프"라 써 놓게 된다.
+          ' · ' + (SET_SCHEMES[sessionSchemeOf(exercise)] || SET_SCHEMES.straight).short +
           ' · 휴식 ' + getExerciseRestSec(exercise.name) + '초</p>' +
         (typeof exercise.supersetWith === 'number' && session.exercises[exercise.supersetWith]
           ? '<p class="text-[11px] font-mono mt-1" style="color: var(--accent);">슈퍼세트 ' +
@@ -3065,7 +3114,7 @@ function renderWorkoutSession() {
           // getSessionSetPlan은 rm_estimate일 때 템플릿/AI가 준 무게(fallbackWeight)를 우선하는데,
           // 여기서 prog.weight(1RM 추정값)를 그대로 찍으면 "75kg 추천" 옆 세트가 60kg으로 뜬다.
           var firstWorking = (exercise.sets || []).filter(function(s) {
-            return !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+            return !s.isWarmup && !isSetExtension(s);
           })[0];
           var shownWeight = (firstWorking && firstWorking.weight) ? firstWorking.weight : prog.weight;
           html +=
@@ -3153,21 +3202,43 @@ function renderWorkoutSession() {
 // 시간 압박이 실제로 있을 때만 값어치가 있다(§4-C). 사용자가 눌러야 반영된다.
 function buildSetSchemeNoticeHtml(session, exercise) {
   var html = '';
-  var scheme = getSetScheme(exercise.name);
+  var scheme = sessionSchemeOf(exercise);
 
   // 어시스트 종목은 "가볍게 = 보조를 더" 라서 안내 문구를 그대로 두면 정반대로 읽힌다.
   var rev = isReverseProgression(exercise.name);
 
+  // 스킴별 한 줄 안내 (v2 §4-C③). 해요체 · 한 문장. 어시스트 종목은 방향이 뒤집혀 따로 적는다.
+  var notice = '';
   if (scheme === 'straight') {
-    html += '<p class="text-[11px] font-mono text-stone-500 px-1 mb-2">' +
-      (rev
-        ? '뒤 세트에서 반복이 1~2회 줄어드는 건 정상이에요. 보조를 늘리지 말고 그대로 하세요.'
-        : '뒤 세트에서 반복이 1~2회 줄어드는 건 정상이에요. 무게를 낮추지 말고 그대로 하세요.') + '</p>';
+    notice = rev
+      ? '뒤 세트에서 반복이 1~2회 줄어드는 건 정상이에요. 보조를 늘리지 말고 그대로 하세요.'
+      : '뒤 세트에서 반복이 1~2회 줄어드는 건 정상이에요. 무게를 낮추지 말고 그대로 하세요.';
   } else if (scheme === 'top_backoff') {
-    html += '<p class="text-[11px] font-mono text-stone-500 px-1 mb-2">' +
-      (rev
-        ? '탑세트 1개를 <b>가장 낮은 보조</b>로, 백오프 2세트는 보조를 한 칸 올려 <b>같은 횟수</b>를 노려요 (볼륨 보존).'
-        : '탑세트 1개를 가장 무겁게, 백오프 2세트는 90% 무게로 <b>같은 횟수</b>를 노려요 (볼륨 보존).') + '</p>';
+    // 마지막 백오프만 RIR 0~1 이라는 처방(v2 §2-E②)은 세트 목록에 안 나오므로 여기서 말해 준다.
+    notice = (rev
+      ? '탑세트 1개를 <b>가장 낮은 보조</b>로, 백오프는 보조를 한 칸 올려 <b>같은 횟수</b>를 노려요.'
+      : '탑세트 1개를 가장 무겁게, 백오프는 90% 무게로 <b>같은 횟수</b>를 노려요.') +
+      ' <b>마지막 백오프</b>만 더 못 할 때까지 밀어요.';
+  } else if (scheme === 'top_backdown') {
+    notice = rev
+      ? '탑세트 뒤 백다운은 보조를 크게 올려요. 대신 <b>더 못 할 때까지</b> 밀어요.'
+      : '백다운은 가볍게, 대신 <b>더 못 할 때까지</b> 밀어요.';
+  } else if (scheme === 'pyramid') {
+    notice = '첫 세트는 여유 있게. <b>마지막 세트</b>가 진짜예요.';
+  } else if (scheme === 'rpt') {
+    notice = rev
+      ? '첫 세트가 보조가 가장 적어요. 뒤로 갈수록 횟수를 늘려요.'
+      : '첫 세트가 가장 무거워요. 뒤로 갈수록 횟수를 늘려요.';
+  }
+  if (notice) html += '<p class="text-[11px] font-mono text-stone-500 px-1 mb-2">' + notice + '</p>';
+
+  // 왜 이 숫자인지 — 접어 둔다(디자인 규칙: 카드당 1줄, 더 필요하면 noteBlock).
+  if (scheme === 'top_backdown') {
+    html += noteBlock('왜 82.5%인가요?',
+      '70%로 낮추면 15회가 한계가 아니라 여유가 돼요(RIR 5~6). 82.5%여야 12~15회에서 한계가 와요 — Nuzzo 2023 부하-반복 자료 기준.');
+  } else if (scheme === 'pyramid' || scheme === 'rpt') {
+    html += noteBlock('근육이 더 크나요?',
+      '아니에요. 12주 실험에서 스트레이트와 같았어요(근단면적 +7.5% vs +7.6%, Angleri 2017). 취향으로 고르는 거예요.');
   }
 
   var dismissed = session.techDismissed && session.techDismissed[session.currentExerciseIdx];

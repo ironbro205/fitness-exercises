@@ -491,31 +491,152 @@ var EXERCISE_CLASS_RULES = {
 // 그래서 "더 좋은 세트법"이 아니라 "문제에 맞는 세트법"을 배정한다:
 //  · top_backoff = 고중량에서 뒤 세트 반복 붕괴로 잃는 볼륨 로드를 감량으로 보존 (근거 낮음 — 실무 합의)
 //  · drop / myo  = 근비대는 동등하고 이득은 오직 시간(1/2~1/3). 그래서 조건부 "제안"으로만 쓴다.
-var SET_SCHEMES = {
-  straight:    { kr: '스트레이트',    short: '스트레이트', desc: '모든 세트를 같은 무게·횟수로' },
-  top_backoff: { kr: '탑세트 + 백오프', short: '탑+백오프',  desc: '가장 무거운 1세트 → 90% 무게로 2세트' },
-  drop:        { kr: '드롭세트',      short: '드롭',      desc: '마지막 세트에서 무게를 25%씩 낮춰 이어서' },
-  myo_reps:    { kr: '마이오렙',      short: '마이오렙',   desc: '마지막 세트 후 20초 쉬고 미니세트 반복' }
-};
+// v2 재조사(set-schemes-v2.md §0-B)도 같은 결론이다 — 메타 3편이 전부 "차이 0"이라, 늘어난 스킴 3종
+// (탑+백다운·피라미드·역피라미드)도 **기본 배정은 하지 않고 선택지로만** 연다.
 
-// 세트 역할 → 화면 뱃지. 값이 없으면(옛 세션 복원 등) 뱃지를 그리지 않는다.
-var SET_ROLE_KR = {
-  warmup:  '워밍업',
-  top:     '탑세트',
-  backoff: '백오프',
-  work:    '',
-  drop:    '드롭',
-  myo:     '미니'
-};
-
-// 백오프·드롭 감량 비율, 자가조절 규칙 상수 (§2-B 규칙②④ / §3-B / §3-C)
+// 백오프·백다운·드롭 감량 비율, 자가조절 규칙 상수 (§2-B 규칙②④ / §3-B / §3-C)
+// v2 재조사(docs/research/set-schemes-v2.md)에서 추가·검증된 값은 주석에 근거를 남긴다.
 var BACKOFF_PCT = 0.90;         // 탑세트의 90% — 실무 권장 −5~15%의 중앙값이자 5kg 격자에 깔끔히 떨어짐
+                                //   v2 §1-B 계산으로 재검증: 8RM 기준 백오프가 RIR 2~3에 착지하는 유일한 구간
+var BACKOFF_DELOAD_PCT = 0.85;  // v2 §2-E③ — 탑세트가 목표 반복 미달이면 백오프를 한 스텝 더 (Khairallah 2009)
+var BACKDOWN_PCT = 0.825;       // v2 §1-C — 탑의 82.5%. 70%로 낮추면 15회가 RIR 5~6(자극 미달)이 된다(Nuzzo 2023 부하-반복표)
+var BACKDOWN_REPS = [12, 15];   // 백다운 목표 반복 — 클래스 범위가 아니라 이 값을 그대로 쓴다(v2 §4-E clampRepsToClass 충돌)
+var FEEDER_PCT = 0.90;          // v2 §2-F — 워밍업 램프의 마지막 단(피더). 워킹무게 기준 90%로 보수적으로 번역
+var FEEDER_REPS = 2;            // 피더는 준비지 피로가 아니다 — 2회 (사용자 원안 4~6회는 피로가 남는다)
+var PYRAMID_PCTS = [0.85, 0.925, 1.00];  // v2 §1-D 어센딩 (Angleri 2017 CP 프로토콜의 3세트 축약)
+var RPT_PCTS = [1.00, 0.90, 0.80];       // v2 §1-E 역피라미드 (IJSC 2024 디센딩)
 var DROP_PCT = 0.75;            // 드롭마다 −25% — Angleri 2017 DS 프로토콜(~50~75% 1RM 구간)을 2회 드롭으로 재현
 var REST_WARMUP_SEC = 45;       // 워밍업은 피로를 유발하지 않는 세트
 var REST_DROP_SEC = 10;         // 드롭 사이 = 무게 바꾸는 시간뿐(정의상 무휴식)
 var REST_MYO_SEC = 20;          // 마이오렙 미니세트 사이(원 프로토콜 = 깊은 호흡 3~5회)
+var REST_BACKDOWN_SEC = 120;    // v2 §1-C — 백다운 사이(고반복은 회복이 상대적으로 빠르다)
 var REST_AUTOREG_BONUS_SEC = 30;// §3-C 자가조절: 직전 세트가 목표 하단 미달이면 +30초
 var REST_MAX_SEC = 240;         // 자가조절 상한
+
+// 세트 생성 규칙을 **데이터로** 내린다 (v2 §4-A).
+// 스킴이 4 → 7개가 되면서 buildSchemeSets 의 if/else 분기가 관리 불가능해지기 때문이다.
+// 코드(buildSchemeSets)가 아는 패턴은 셋뿐이고, 스킴 추가 = 아래 표에 한 덩어리 추가다.
+//   uniform : 전 워킹세트가 같은 무게·반복
+//   ramp    : steps 배열대로 세트마다 무게 배율(pct)·반복 가감(repsDelta/repsAbs)을 적용
+//   extend  : uniform 워킹세트 뒤에 연장 세트를 붙인다 (볼륨 카운트에서 제외되는 '마지막 세트의 연장')
+// steps 필드
+//   pct       : 워킹 무게 대비 배율. 1 미만이면 reduceWeight 를 거친다(= 가까운 배수 + 최소 한 단위 하강 보장)
+//   repsDelta : 목표 반복 가감. **클래스 범위로 클램프하지 않는다** — 피라미드의 +4가 잘려 나가면 스킴이 무너진다
+//   repsAbs   : [하한, 상한] 절대 반복 목표(클래스 범위 무시). amrap 과 함께 쓴다
+//   repeat    : 'fill' 이면 남는 워킹세트를 이 단으로 채운다 / 숫자면 그 횟수만큼
+//   last      : true 면 항상 마지막 워킹세트 자리를 차지한다
+// progressFrom: 증량 판정의 기준 세트가 첫 세트인지('first') 마지막 세트인지('last').
+//   실제 판정은 getProgressiveRecommendation 의 "가장 무거운 세트" 필터가 알아서 하고, 이 값은 문서·테스트용이다.
+var SET_SCHEMES = {
+  straight: {
+    kr: '스트레이트', short: '스트레이트',
+    desc: '모든 세트를 같은 무게·횟수로',
+    build: { pattern: 'uniform' }
+  },
+
+  top_backoff: {
+    kr: '탑세트 + 백오프', short: '탑+백오프',
+    desc: '가장 무거운 1세트 → 90% 무게로 같은 횟수',
+    build: {
+      pattern: 'ramp', feeder: true, progressFrom: 'first',
+      steps: [
+        { pct: 1.00,        role: 'top',     repsDelta: 0, rir: '1-2' },
+        { pct: BACKOFF_PCT, role: 'backoff', repsDelta: 0, rir: '2-3', repeat: 'fill' },
+        { pct: BACKOFF_PCT, role: 'backoff', repsDelta: 0, rir: '0-1', last: true }
+      ],
+      // v2 §2-E③ — 탑세트가 목표 반복에 못 미치면 남은 백오프를 한 스텝 더 내린다
+      autoDeload: { when: 'topMissedTarget', pct: BACKOFF_DELOAD_PCT }
+    }
+  },
+
+  top_backdown: {
+    kr: '탑세트 + 백다운', short: '탑+백다운',
+    desc: '무거운 1세트 → 82.5% 무게로 12~15회 한계까지',
+    build: {
+      pattern: 'ramp', feeder: true, progressFrom: 'first',
+      steps: [
+        { pct: 1.00,         role: 'top',      repsDelta: 0,             rir: '1-2' },
+        { pct: BACKDOWN_PCT, role: 'backdown', repsAbs: BACKDOWN_REPS,   rir: '0-1',
+          amrap: true, rest: REST_BACKDOWN_SEC, repeat: 'fill' }
+      ]
+    }
+  },
+
+  pyramid: {
+    kr: '피라미드', short: '피라미드',
+    desc: '가볍게 시작해 세트마다 무게를 올려요',
+    build: {
+      pattern: 'ramp', progressFrom: 'last',
+      steps: [
+        { pct: PYRAMID_PCTS[0], role: 'work', repsDelta: 4, rir: '3-4', repeat: 'fill' },
+        { pct: PYRAMID_PCTS[1], role: 'work', repsDelta: 2, rir: '2-3' },
+        { pct: PYRAMID_PCTS[2], role: 'top',  repsDelta: 0, rir: '0-1', last: true }
+      ]
+    }
+  },
+
+  rpt: {
+    kr: '역피라미드', short: '역피라미드',
+    desc: '가장 무거운 1세트부터, 세트마다 가볍고 길게',
+    build: {
+      // 첫 세트가 곧 가장 무거운 세트라 램프 끝의 피더가 특히 필요하다
+      pattern: 'ramp', feeder: true, progressFrom: 'first',
+      steps: [
+        { pct: RPT_PCTS[0], role: 'top',  repsDelta: 0, rir: '0-2' },
+        { pct: RPT_PCTS[1], role: 'work', repsDelta: 2, rir: '0-2' },
+        { pct: RPT_PCTS[2], role: 'work', repsDelta: 4, rir: '0-2', repeat: 'fill' }
+      ]
+    }
+  },
+
+  drop: {
+    kr: '드롭세트', short: '드롭',
+    desc: '마지막 세트에서 무게를 25%씩 낮춰 이어서',
+    build: {
+      pattern: 'extend',
+      // chainFrom: 'prev' = 배율을 직전 연장 세트에 다시 곱한다 (드롭1 = W×0.75, 드롭2 = 드롭1×0.75)
+      steps: [
+        { pct: DROP_PCT, role: 'drop', repsMode: 'high', rir: '0', rest: REST_DROP_SEC, chainFrom: 'prev' },
+        { pct: DROP_PCT, role: 'drop', repsMode: 'high', rir: '0', chainFrom: 'prev' }
+      ]
+    }
+  },
+
+  myo_reps: {
+    kr: '마이오렙', short: '마이오렙',
+    desc: '마지막 세트 후 20초 쉬고 미니세트 반복',
+    build: {
+      pattern: 'extend',
+      steps: [{ pct: 1.00, role: 'myo', repsAbs: [5, 5], rir: '0', rest: REST_MYO_SEC, repeat: 3 }]
+    }
+  }
+};
+
+// 세트법 시트에 뜨는 순서 (v2 §3-B — 스트레이트 → 탑세트 계열 → 피라미드 계열 → 연장 계열)
+var SET_SCHEME_ORDER = ['straight', 'top_backoff', 'top_backdown', 'pyramid', 'rpt', 'drop', 'myo_reps'];
+
+// 세트 역할 → 화면 뱃지. 값이 없으면(옛 세션 복원 등) 뱃지를 그리지 않는다.
+var SET_ROLE_KR = {
+  warmup:   '워밍업',
+  top:      '탑세트',
+  backoff:  '백오프',
+  backdown: '백다운',
+  work:     '',
+  drop:     '드롭',
+  myo:      '미니'
+};
+
+// 진행 판정·1RM·'지난 기록'에서 빼야 하는 세트 역할.
+//  · drop / myo  = 마지막 워킹세트의 **연장**이지 독립 세트가 아니다
+//  · backdown    = 독립 워킹세트지만 목표 반복(12~15)이 클래스 범위 밖이라, 그대로 두면
+//                  "지난 세션 최고 반복"이 백다운 15회로 잡혀 다음 세션 탑세트 목표가 튀어 오른다
+// **볼륨 카운트는 이 목록을 쓰지 않는다** — 백다운은 볼륨에 포함된다(v2 §3-C C-4).
+var SET_ROLES_OFF_PROGRESS = ['drop', 'myo', 'backdown'];
+
+// **마지막 워킹세트의 연장**이라 독립 세트로 세면 안 되는 역할 (= 볼륨 카운트에서 빼는 목록).
+// 위 목록과 일부러 다르다: 백다운은 무게·휴식·목표가 따로 있는 독립 워킹세트라 볼륨에 들어간다.
+// 두 목록을 하나로 합치면 3세트 종목이 5세트로 부풀거나(연장을 세면), 주간 볼륨이 깎인다(백다운을 빼면).
+var SET_ROLES_EXTENSION = ['drop', 'myo'];
 
 // ─── 길항근 슈퍼세트 ──────────────────────────────────────────
 // 근거: Zhang 2025(Sports Med 55(4):953-975, 19연구 313명) — 세션 시간 약 −37%인데

@@ -475,7 +475,7 @@ function buildUserContext(options) {
       // 어시스트 종목의 대표값은 '최대'가 아니라 **최소 보조**(가장 어려웠던 세트)다.
       if (isReverseProgression(ex.name) && ex.setsDetail && Array.isArray(ex.setsDetail)) {
         var av = ex.setsDetail.filter(function(s) {
-          return s && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo' && s.reps > 0 && s.weight >= 0;
+          return s && !s.isWarmup && !isOffProgressSet(s) && s.reps > 0 && s.weight >= 0;
         }).map(function(s) { return s.weight; });
         if (av.length) weight = Math.min.apply(null, av);
       }
@@ -1183,9 +1183,11 @@ async function generateFullRoutine(bodyPart) {
   7종목 21세트는 약 66분으로 예산을 넘긴다. 넘칠 것 같으면 부족 부위 우선순위가 낮은 종목부터 뺀다.
 
 **4-1. 세트법·휴식·세트별 무게는 앱이 계산한다 (AI는 정하지 않는다)**
-- 너는 **종목·세트 수·반복 범위**만 정하면 된다. 세트법(스트레이트/탑세트+백오프)·세트별 무게·휴식 초는 앱이 종목 클래스로 결정론적으로 배정한다.
-- 참고로 앱의 배정은 이렇다(설명용 — JSON에 넣지 말 것): 고중량 복합 = 탑세트 1 + 백오프 2세트(탑의 90%), 나머지 = 스트레이트 3세트.
+- 너는 **종목·세트 수·반복 범위**만 정하면 된다. 세트법·세트별 무게·휴식 초는 앱이 종목 클래스로 결정론적으로 배정한다.
+- 참고로 앱의 기본 배정은 이렇다(설명용 — JSON에 넣지 말 것): 고중량 복합 = 탑세트 1 + 백오프 2세트(탑의 90%), 나머지 = 스트레이트 3세트.
   즉 고중량 복합에 sets:3을 주면 화면에는 탑 1 + 백오프 2로 펼쳐진다. **sets는 워킹세트 총 개수**를 뜻한다.
+  사용자가 종목별로 다른 세트법(탑+백다운·피라미드·역피라미드·드롭·마이오렙)을 골라 뒀을 수도 있지만,
+  그때도 sets 의 뜻은 같다 — 앱이 그 수만큼 펼친다.
 - 응답에 scheme·세트별 무게 배열 같은 필드를 만들지 말 것. 세트법은 코드가 일관되게 정하는 편이 낫다.
 
 **5. 모든 세트 RIR 밴드 명시 (평상시·도전 모드 전부 포함)**
@@ -1786,7 +1788,7 @@ function getStalledLifts() {
         if (ex.setsDetail && Array.isArray(ex.setsDetail)) {
           for (var a = 0; a < ex.setsDetail.length; a++) {
             var sd = ex.setsDetail[a];
-            if (sd && !sd.isWarmup && sd.role !== 'drop' && sd.role !== 'myo' && sd.reps > 0 && sd.weight >= 0) assistVals.push(sd.weight);
+            if (sd && !sd.isWarmup && !isOffProgressSet(sd) && sd.reps > 0 && sd.weight >= 0) assistVals.push(sd.weight);
           }
         } else if (Array.isArray(ex.weights)) {
           assistVals = ex.weights.filter(function(v) { return typeof v === 'number' && v >= 0; });

@@ -2467,11 +2467,14 @@ test('처방 표 — 고중량 복합에 탑세트+백오프 구조를 적는다
   assert.equal(working.filter((s) => s.role === 'backoff').length, 2, '백오프 2개');
 
   // 비율·RIR은 상수와 세트 배열에서 와야 한다 — 화면에 손으로 적으면 상수를 바꿔도 안 따라온다.
-  const backoff = working.find((s) => s.role === 'backoff');
-  const expected = '탑세트 1 + 백오프 2 (' + Math.round(app.BACKOFF_PCT * 100) + '% · RIR ' + backoff.rir + ')';
+  const backoffs = working.filter((s) => s.role === 'backoff');
+  // 마지막 백오프만 RIR 0~1 이다(v2 §2-E②) — 같은 역할 안에서 바뀌는 값도 구조 줄이 다 밝혀야 한다.
+  const backoffRirs = backoffs.map((s) => s.rir).filter((r, i, a) => a.indexOf(r) === i);
+  const expected = '탑세트 1 + 백오프 2 (' + Math.round(app.BACKOFF_PCT * 100) + '% · RIR ' + backoffRirs.join('→') + ')';
   assert.ok(html.includes(expected), '미리보기에 세트 구조가 없다: ' + expected);
-  // 'RIR' 열은 첫 세트(탑) 값만 담는다 → 뒤 세트 RIR이 다르면 구조 줄이 그걸 밝혀야 한다
-  assert.notEqual(backoff.rir, working[0].rir, '탑·백오프 RIR이 같으면 이 검사가 헛돈다');
+  assert.equal(backoffRirs.length, 2, '마지막 백오프의 RIR 0~1 처방이 사라졌다');
+  // 'RIR' 열은 기준 세트(탑) 값만 담는다 → 뒤 세트 RIR이 다르면 구조 줄이 그걸 밝혀야 한다
+  assert.notEqual(backoffs[0].rir, working[0].rir, '탑·백오프 RIR이 같으면 이 검사가 헛돈다');
 
   // 스트레이트 종목(머신 체스트 프레스·사이드 레터럴)에는 붙이지 않는다 — 세트 열이 이미 한 말이다
   assert.equal((html.match(/routine-ex-scheme/g) || []).length, 1,
@@ -2492,7 +2495,7 @@ test('세트 구조 문구 — 표기와 실제 세트가 어긋날 수 없다 (
     '세션은 스트레이트인데 미리보기만 탑+백오프라고 적으면 화면이 거짓말을 한다');
 
   // 역방향(어시스트)은 "가볍게 = 보조를 더" 라서 90%가 정반대로 읽힌다
-  assert.equal(structure('어시스트 풀업', 30, '5-8'), '탑세트 1 + 백오프 2 (보조 한 칸 · RIR 2-3)');
+  assert.equal(structure('어시스트 풀업', 30, '5-8'), '탑세트 1 + 백오프 2 (보조 한 칸 · RIR 2-3→0-1)');
 
   // 사용자가 세트법을 바꾸면 문구도 따라온다 (하드코딩이면 안 따라온다)
   fresh.setSetSchemeOverride('머신 레그 익스텐션', 'drop');
