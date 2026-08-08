@@ -69,6 +69,7 @@ function saveActiveCardio() {
   if (c.phase !== 'running' && c.phase !== 'rpe') return;
   var snap = {
     phase: c.phase,
+    mode: (c.mode === 'walk') ? 'walk' : 'interval',   // 복원 시 모드가 유지돼야 경사·예고·라벨이 맞는다
     startedAtWall: run.startedAtWall,
     totalSec: run.totalSec,
     curIdx: run.curIdx,
@@ -77,8 +78,9 @@ function saveActiveCardio() {
     soundOn: run.soundOn,
     completed: !!run.completed,
     elapsedAtEnd: (run.elapsedAtEnd == null ? null : run.elapsedAtEnd),
+    handrail: (run.handrail || null),                  // 걷기 모드 종료 후 문항 답(§5-2)
     segs: run.segs.map(function(s) {
-      return { type: s.type, targetSpeed: s.targetSpeed, actualSpeed: s.actualSpeed, startSec: s.startSec, endSec: s.endSec, sec: s.sec, label: s.label };
+      return { type: s.type, targetSpeed: s.targetSpeed, actualSpeed: s.actualSpeed, incline: (Number(s.incline) || 0), startSec: s.startSec, endSec: s.endSec, sec: s.sec, label: s.label };
     })
   };
   storage.set(KEYS.ACTIVE_CARDIO_RUN, snap);
@@ -100,8 +102,11 @@ function clearWizard() {
   storage.set(KEYS.WORKOUT_WIZARD, null);
 }
 
-// 유산소(러닝머신 인터벌) 세션 저장 — 2단계 RUNNING 탭.
-// session = { id, date, totalSec, totalDistKm, segments:[{type,targetSpeed,actualSpeed,sec}], completed(bool), rpe(1~10|null) }
+// 유산소(러닝머신 인터벌 / 경사 걷기) 세션 저장 — 2단계 RUNNING 탭.
+// session = { id, date, mode:'interval'|'walk', totalSec, totalDistKm,
+//             segments:[{type,targetSpeed,actualSpeed,incline,sec}], completed(bool), rpe(1~10|null),
+//             handrail:'none'|'light'|'hold'|null (걷기 모드 전용) }
+// ★옛 기록에는 mode·incline·handrail 이 없다 → 읽는 쪽에서 mode||'interval', incline||0 으로 폴백한다.
 // cardioLog 에 push → localStorage 저장 → 화면 재렌더.
 // CARDIO_LOG 는 BACKUP_EXCLUDE_KEYS 에 없으므로 KEYS 순회 백업/복원에 자동 포함된다(운동 데이터).
 window.saveCardioSession = function(session) {
@@ -121,7 +126,7 @@ var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v45';
+var APP_VERSION = 'v46';
 // 백업에 담지 않는 키. 두 부류:
 // (1) 로컬 전용·민감 → 복원해도 그대로 보존 (API 키·코치 대화)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
@@ -907,6 +912,7 @@ function init() {
       try { localStorage.removeItem(KEYS.ACTIVE_CARDIO_RUN); } catch (e) {}
     } else {
       var cst = ensureCardioState();
+      cst.mode = (savedCardio.mode === 'walk') ? 'walk' : 'interval';   // 모드 먼저 복원(경사·예고·라벨이 여기 달림)
       var nowPerf = cardioNow();
       var lastIntEl = (typeof savedCardio.lastIntegrateElapsed === 'number') ? savedCardio.lastIntegrateElapsed : elapsedC;
       if (lastIntEl < 0) lastIntEl = 0;
@@ -922,7 +928,8 @@ function init() {
         distanceKm: (typeof savedCardio.distanceKm === 'number') ? savedCardio.distanceKm : 0,
         soundOn: savedCardio.soundOn !== false,
         completed: !!savedCardio.completed,
-        elapsedAtEnd: (typeof savedCardio.elapsedAtEnd === 'number') ? savedCardio.elapsedAtEnd : null
+        elapsedAtEnd: (typeof savedCardio.elapsedAtEnd === 'number') ? savedCardio.elapsedAtEnd : null,
+        handrail: (savedCardio.handrail || null)
       };
       state.currentTab = 'running';
       if (savedCardio.phase === 'rpe') {

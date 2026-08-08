@@ -4937,9 +4937,16 @@ function cardioNow() {
 }
 
 // state.cardio 지연 초기화(core.js state 에 없으므로 여기서 안전하게 확보).
+// mode: 'interval'(걷기·뛰기 인터벌 · 기본값) | 'walk'(경사 걷기). 기존 사용자 흐름이 바뀌지 않도록 기본은 interval.
 function ensureCardioState() {
-  if (!state.cardio) state.cardio = { phase: 'idle', inputMin: '', loading: false, error: null, plan: null, run: null };
+  if (!state.cardio) state.cardio = { mode: 'interval', phase: 'idle', inputMin: '', loading: false, error: null, plan: null, run: null, reqId: 0 };
+  if (!state.cardio.mode) state.cardio.mode = 'interval';        // 옛 저장분 복원 시 하위 호환
   return state.cardio;
+}
+
+// 현재 유산소 모드 — state 가 없거나 옛 데이터면 'interval'.
+function cardioMode() {
+  return (state.cardio && state.cardio.mode === 'walk') ? 'walk' : 'interval';
 }
 
 // 초 → "MM:SS"(1시간+면 "H:MM:SS")
@@ -4951,11 +4958,54 @@ function cardioFmtClock(totalSec) {
   if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
   return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
 }
-function cardioTypeLabel(type) {
+// mode 를 넘기면 걷기(경사) 모드용 이름으로 바꿔 준다. 안 넘기면 기존(인터벌) 이름 그대로 — 하위 호환.
+function cardioTypeLabel(type, mode) {
+  if (mode === 'walk') {
+    return type === 'warmup' ? '몸풀기' : type === 'cooldown' ? '정리' : '본 구간';
+  }
   return type === 'run' ? '뛰기' : type === 'walk' ? '걷기' : type === 'warmup' ? '워밍업' : type === 'cooldown' ? '쿨다운' : '구간';
 }
-function cardioTypeIcon(type) {
+function cardioTypeIcon(type, mode) {
+  if (mode === 'walk') {
+    return type === 'warmup' ? '🔥' : type === 'cooldown' ? '🧊' : '⛰️';
+  }
   return type === 'run' ? '🏃' : type === 'warmup' ? '🔥' : type === 'cooldown' ? '🧊' : '🚶';
+}
+// 구간 이름: 걷기 모드는 계획이 준 label(몸풀기/준비 구간/본 구간/정리)을 우선 — 램프 구간을 구분해 보여주기 위함.
+function cardioSegDisplayLabel(seg, mode) {
+  if (!seg) return '';
+  if (mode === 'walk') return seg.label || cardioTypeLabel(seg.type, 'walk');
+  return cardioTypeLabel(seg.type);
+}
+// 경사 표시: 정수는 "8", 반 칸은 "8.5"
+function cardioFmtIncline(v) {
+  var n = Number(v);
+  if (!isFinite(n) || n < 0) n = 0;
+  return (n % 1 === 0) ? String(n) : n.toFixed(1);
+}
+// "경사 8% · 5.0km/h" — 경사와 속도는 항상 함께 말한다(§3-4: 하나만 말하면 나머지를 건드린다).
+function cardioInclineLabel(seg) {
+  if (!seg) return '';
+  var spd = Number((seg.targetSpeed != null) ? seg.targetSpeed : seg.speed) || 0;
+  return '경사 ' + cardioFmtIncline(seg.incline) + '% · ' + spd.toFixed(1) + 'km/h';
+}
+// 다음 구간 안내 문구 — "올리세요/내리세요"로 방향을 명시한다(§3-4).
+function cardioInclineCue(cur, next) {
+  if (!next) return '곧 완주!';
+  var ci = Number(cur && cur.incline) || 0;
+  var ni = Number(next.incline) || 0;
+  var spd = Number((next.targetSpeed != null) ? next.targetSpeed : next.speed) || 0;
+  var dir = (ni > ci) ? '올리세요' : (ni < ci) ? '내리세요' : '유지';
+  return '곧 경사 ' + cardioFmtIncline(ni) + '% · 속도 ' + spd.toFixed(1) + ' ' + dir;
+}
+// 본 구간에서 소리 없이 화면에만 띄우는 코칭 문구(§3-3). 진입 2분 뒤부터 5분마다 회전.
+function cardioWalkTip(seg, elapsed) {
+  if (!seg || seg.type !== 'walk') return '';
+  if (typeof WALK_COACH_TIPS === 'undefined' || !WALK_COACH_TIPS.length) return '';
+  var into = elapsed - seg.startSec;
+  if (!(into >= 120)) return '';
+  var i = Math.floor((into - 120) / 300) % WALK_COACH_TIPS.length;
+  return WALK_COACH_TIPS[i];
 }
 
 // RUNNING 탭 아이콘 이름 — data.js 에 러닝 아이콘이 추가되면 자동 사용, 없으면 clock 로 안전 폴백
@@ -4970,7 +5020,8 @@ function cardioTabIconName() {
 
 // ── AI 응답 정규화 & 로컬 폴백 구성 ─────────────────────────────
 // generateCardioInterval 결과를 안전한 구간 배열로 정규화(연속·정렬 보장, 속력 숫자화).
-function cardioNormalizePlan(res, min) {
+function cardioNormalizePlan(res, min, mode) {
+  var isWalk = (mode === 'walk');
   var segsIn = (res && res.segments) ? res.segments : [];
   var segs = [];
   var cursor = 0;
@@ -4981,8 +5032,17 @@ function cardioNormalizePlan(res, min) {
     var end = (typeof s.endSec === 'number') ? s.endSec : (start + 60);
     if (end <= start) end = start + 30;
     var speed = Number(s.speed);
-    if (!isFinite(speed) || speed < 0) speed = (type === 'run' ? 8.0 : type === 'walk' ? 5.5 : type === 'warmup' ? 5.0 : 5.0);
-    segs.push({ startSec: Math.round(start), endSec: Math.round(end), type: type, speed: Math.round(speed * 10) / 10, label: s.label || cardioTypeLabel(type) });
+    if (!isFinite(speed) || speed < 0) speed = isWalk ? WALK_PRESCRIPTION.speedDefault
+      : (type === 'run' ? 8.0 : type === 'walk' ? 5.5 : type === 'warmup' ? 5.0 : 5.0);
+    var seg = { startSec: Math.round(start), endSec: Math.round(end), type: type, speed: Math.round(speed * 10) / 10, label: s.label || cardioTypeLabel(type, mode) };
+    if (isWalk) {
+      // 경사는 화면 진입 직전에도 한 번 더 잘라낸다(상한 12% 절대 초과 금지 — §1-3).
+      var inc = Number(s.incline);
+      if (!isFinite(inc) || inc < 0) inc = 0;
+      if (inc > WALK_PRESCRIPTION.inclineMax) inc = WALK_PRESCRIPTION.inclineMax;
+      seg.incline = Math.round(inc * 2) / 2;
+    }
+    segs.push(seg);
     cursor = end;
   }
   // 정렬 후 0 부터 연속으로 재배치(겹침·구멍 제거) → 총시간 명확
@@ -4992,8 +5052,11 @@ function cardioNormalizePlan(res, min) {
     var dur = Math.max(5, segs[j].endSec - segs[j].startSec);
     segs[j].startSec = t; segs[j].endSec = t + dur; t += dur;
   }
-  if (!segs.length) return buildFallbackInterval(min, !state.apiKey);
-  return { headline: res.headline || (Math.round(t / 60) + '분 인터벌'), totalSec: t, segments: segs, note: res.note || '', source: 'ai' };
+  if (!segs.length) return isWalk ? buildFallbackWalk(min, !state.apiKey) : buildFallbackInterval(min, !state.apiKey);
+  return {
+    headline: res.headline || (Math.round(t / 60) + (isWalk ? '분 경사 걷기' : '분 인터벌')),
+    totalSec: t, segments: segs, note: res.note || '', source: 'ai'
+  };
 }
 
 // AI 미사용(키 없음·함수 없음·오류) 시 로컬 보수적 구성 — cardio-research.md 첫 회 처방 기반.
@@ -5027,10 +5090,57 @@ function buildFallbackInterval(min, noKey) {
   return { headline: '오늘 ' + T + '분 · 몸풀기 → 걷기·뛰기 반복 → 정리', totalSec: tot, segments: segs, note: note, source: 'fallback' };
 }
 
+// AI 미사용(키 없음·함수 없음·오류) 시 경사 걷기 로컬 구성 — §3-2 4구간 구조를 시간에 맞춰 스케일.
+// 경사는 최근 걷기 기록에서 이어받고(하향 게이트 반영), 기록이 없으면 4%(허리 이력 있으면 3%).
+function buildFallbackWalk(min, noKey) {
+  var asked = Math.max(5, Math.min(120, Math.round(min || 30)));
+  // 본 구간 33분 상한(§4-1) → 세션 총시간은 45분까지. 더 길게 요청하면 잘리고, 그 사실을 note 로 알린다.
+  var totalSec = cardioWalkClampTotalSec(asked * 60);
+  var T = Math.round(totalSec / 60);
+  var ctx = cardioWalkContext();
+  var inc = ctx.anchorIncline;
+
+  var segs = (cardioFitToTotal(buildWalkRawSegments(totalSec, inc), totalSec, {
+    incline: true, inclineMax: ctx.cap,
+    allowedTypes: CARDIO_WALK_ALLOWED_TYPES,                 // run 금지는 코드가 강제
+    speedMin: WALK_PRESCRIPTION.speedMin, speedMax: WALK_PRESCRIPTION.speedMax
+  }) || []).map(function(s) {
+    return { startSec: s.startSec, endSec: s.endSec, type: s.type, speed: s.speed, incline: s.incline, label: s.label };
+  });
+  var tot = segs.length ? segs[segs.length - 1].endSec : totalSec;
+  var note = '본 구간은 아무것도 바꾸지 않고 그대로 걷습니다. 손잡이는 놓고(균형이 필요하면 손가락만 가볍게), ' +
+    '"문장은 말할 수 있는데 노래는 안 되는" 정도로 유지하세요.';
+  if (ctx.back) note += ' 가슴은 들고 허리는 곧게 — 접히는 곳은 허리가 아니라 고관절이에요.';
+  if (asked > T) note += ' 본 구간 상한(33분)에 맞춰 ' + T + '분으로 줄였어요. 더 채우고 싶으면 세션을 늘리지 말고 횟수를 늘리세요.';
+  if (noKey) note += ' (더보기에서 AI 키를 넣으면 기록 기반 맞춤 구성을 받아요.)';
+  return {
+    headline: '오늘 ' + T + '분 · 경사 ' + cardioFmtIncline(inc) + '% 정속 걷기',
+    totalSec: tot, segments: segs, note: note, source: 'fallback'
+  };
+}
+
+// ── 모드 전환(인터벌 ↔ 경사 걷기) ─────────────────────────────
+window.setCardioMode = function(mode) {
+  ensureCardioState();
+  var c = state.cardio;
+  var next = (mode === 'walk') ? 'walk' : 'interval';
+  if (c.mode === next) return;
+  if (c.phase === 'running' || c.phase === 'rpe') return;      // 진행 중엔 못 바꿈
+  c.mode = next;
+  c.plan = null; c.phase = 'idle'; c.error = null;             // 모드가 다르면 구성도 다르다 → 초기화
+  // ★생성 중(AI 대기)에 모드를 바꾸면 먼저 보낸 요청의 응답이 나중에 도착한다.
+  //   그 응답이 새 모드 화면에 꽂히면 경사 없는 걷기 세션(또는 그 반대)이 만들어지고 기록도 잘못된 모드로 저장된다.
+  //   토큰을 올려 "지금 유효한 요청"을 바꾸면, 늦게 온 옛 응답은 buildCardioPlan 에서 버려진다.
+  c.reqId = (c.reqId || 0) + 1;
+  c.loading = false;
+  render();
+};
+
 // ── 시간(분) 입력 → 구성 만들기 ─────────────────────────────
 window.buildCardioPlan = function(explicitMin) {
   ensureCardioState();
   var c = state.cardio;
+  var mode = cardioMode();
   var min = explicitMin;
   if (min == null) {
     var el = (typeof document !== 'undefined' && document.getElementById) ? document.getElementById('cardio-min-input') : null;
@@ -5039,14 +5149,27 @@ window.buildCardioPlan = function(explicitMin) {
   if (!min || isNaN(min) || min < 5) { showToast('5분 이상 입력해 주세요', true); return; }
   if (min > 120) min = 120;
   c.inputMin = min; c.loading = true; c.error = null; c.plan = null; c.phase = 'idle';
+  // 이 요청의 표. 응답이 돌아왔을 때 이 값이 그대로면 "아직 유효한 요청", 달라졌으면 모드가 바뀐 뒤라 버린다.
+  c.reqId = (c.reqId || 0) + 1;
+  var myReq = c.reqId;
+  function stale() { return c.reqId !== myReq; }
   render();
 
-  function usefallback() { c.loading = false; c.plan = buildFallbackInterval(min, !state.apiKey); c.phase = 'preview'; render(); }
+  var generate = (mode === 'walk') ? (typeof generateCardioWalk === 'function' ? generateCardioWalk : null)
+                                   : (typeof generateCardioInterval === 'function' ? generateCardioInterval : null);
+  function usefallback() {
+    if (stale()) return;
+    c.loading = false;
+    c.plan = (mode === 'walk') ? buildFallbackWalk(min, !state.apiKey) : buildFallbackInterval(min, !state.apiKey);
+    c.phase = 'preview';
+    render();
+  }
   try {
-    if (typeof generateCardioInterval === 'function') {
-      Promise.resolve(generateCardioInterval(min)).then(function(res) {
+    if (generate) {
+      Promise.resolve(generate(min)).then(function(res) {
+        if (stale()) return;                                   // 모드가 바뀐 뒤 도착한 옛 응답 → 폐기
         if (res && res.segments && res.segments.length) {
-          c.loading = false; c.plan = cardioNormalizePlan(res, min); c.phase = 'preview'; render();
+          c.loading = false; c.plan = cardioNormalizePlan(res, min, mode); c.phase = 'preview'; render();
         } else {
           usefallback(); // null(키 없음) 또는 형식 이상 → 로컬 폴백
         }
@@ -5069,14 +5192,16 @@ window.startCardio = function() {
   var c = state.cardio;
   if (!c.plan || !c.plan.segments || !c.plan.segments.length) { showToast('먼저 구성을 만들어 주세요', true); return; }
   if (state.activeSession) { showToast('웨이트 세션 중에는 시작할 수 없어요', true); return; }
+  var mode = cardioMode();
   var segs = c.plan.segments.map(function(s) {
     return {
       type: s.type,
       targetSpeed: Number(s.speed) || 0,
       actualSpeed: Number(s.speed) || 0,   // 실제 속력 = 목표에서 시작, 구간별로 조정 가능
+      incline: Math.max(0, Number(s.incline) || 0),   // 경사 % — 인터벌 모드는 항상 0(하위 호환)
       startSec: s.startSec, endSec: s.endSec,
       sec: Math.max(0, Math.round(s.endSec - s.startSec)),
-      label: s.label || cardioTypeLabel(s.type)
+      label: s.label || cardioTypeLabel(s.type, mode)
     };
   });
   var totalSec = segs.length ? segs[segs.length - 1].endSec : (c.plan.totalSec || 0);
@@ -5087,7 +5212,8 @@ window.startCardio = function() {
     lastIntegratePerf: now,       // 거리 적분 기준점(단조 시계)
     lastIntegrateElapsed: 0,      // 거리 적분 기준점(경과초) — 구간별 정확 적분·복원용
     segs: segs, totalSec: totalSec, curIdx: 0,
-    distanceKm: 0, soundOn: true, completed: false, elapsedAtEnd: null
+    distanceKm: 0, soundOn: true, completed: false, elapsedAtEnd: null,
+    handrail: null                // 걷기 모드 종료 후 문항(§5-2) — 다음 세션 경사를 정하는 입력
   };
   c.phase = 'running';
   saveActiveCardio();             // 시작 즉시 저장(백그라운드 회수·새로고침에도 진행 유지)
@@ -5198,24 +5324,44 @@ function cardioPaintDynamic(elapsed) {
   var idx = run.curIdx;
   var seg = run.segs[idx]; if (!seg) return;
   var next = run.segs[idx + 1] || null;
+  var mode = cardioMode();
+  var isWalk = (mode === 'walk');
   function set(id, txt) { var el = document.getElementById(id); if (el) el.textContent = txt; }
   set('cardio-elapsed', cardioFmtClock(elapsed));
-  set('cardio-seg-icon', cardioTypeIcon(seg.type));
-  set('cardio-seg-label', cardioTypeLabel(seg.type));
+  set('cardio-seg-icon', cardioTypeIcon(seg.type, mode));
+  set('cardio-seg-label', cardioSegDisplayLabel(seg, mode));
   set('cardio-seg-remain', '남은 ' + cardioFmtClock(Math.max(0, Math.ceil(seg.endSec - elapsed))));
   set('cardio-target', (seg.targetSpeed || 0).toFixed(1));
   set('cardio-actual', (seg.actualSpeed || 0).toFixed(1));
   set('cardio-dist', run.distanceKm.toFixed(2));
   set('cardio-segcount', (idx + 1) + ' / ' + run.segs.length);
-  set('cardio-next', next ? (cardioTypeIcon(next.type) + ' ' + cardioTypeLabel(next.type) + ' ' + (next.targetSpeed || 0).toFixed(1)) : '마지막 구간');
+  if (isWalk) {
+    set('cardio-incline', cardioFmtIncline(seg.incline));
+    set('cardio-next', next ? (cardioTypeIcon(next.type, mode) + ' ' + cardioSegDisplayLabel(next, mode) + ' · ' + cardioInclineLabel(next)) : '마지막 구간');
+    // 본 구간 코칭 문구(무음) — 소리는 "지금 뭘 바꿔야 한다"는 신호로만 아껴 쓴다(§3-4)
+    var tipEl = document.getElementById('cardio-tip');
+    if (tipEl) {
+      var tip = cardioWalkTip(seg, elapsed);
+      if (tip) { tipEl.style.display = ''; tipEl.textContent = tip; }
+      else { tipEl.style.display = 'none'; tipEl.textContent = ''; }
+    }
+  } else {
+    set('cardio-next', next ? (cardioTypeIcon(next.type) + ' ' + cardioTypeLabel(next.type) + ' ' + (next.targetSpeed || 0).toFixed(1)) : '마지막 구간');
+  }
   var pf = document.getElementById('cardio-progress-fill');
   if (pf) { var pct = run.totalSec > 0 ? Math.min(100, (elapsed / run.totalSec) * 100) : 0; pf.style.width = pct.toFixed(1) + '%'; }
   var pc = document.getElementById('cardio-precue');
   if (pc) {
+    // 걷기 모드는 10초 전 예고 — 콘솔까지 손을 뻗고 버튼을 누르고 경사 모터가 이동하는 시간이 필요하다(§7-4).
+    var lead = isWalk ? WALK_PRESCRIPTION.precueSec : 3;
     var ttl = seg.endSec - elapsed;
-    if (ttl > 0 && ttl <= 3) {
+    if (ttl > 0 && ttl <= lead) {
       pc.style.display = '';
-      pc.textContent = next ? ('곧 ' + cardioTypeIcon(next.type) + ' ' + cardioTypeLabel(next.type) + ' ' + (next.targetSpeed || 0).toFixed(1) + '! (' + Math.ceil(ttl) + ')') : ('곧 완주! (' + Math.ceil(ttl) + ')');
+      if (isWalk) {
+        pc.textContent = '⚠️ ' + cardioInclineCue(seg, next) + ' (' + Math.ceil(ttl) + ')';
+      } else {
+        pc.textContent = next ? ('곧 ' + cardioTypeIcon(next.type) + ' ' + cardioTypeLabel(next.type) + ' ' + (next.targetSpeed || 0).toFixed(1) + '! (' + Math.ceil(ttl) + ')') : ('곧 완주! (' + Math.ceil(ttl) + ')');
+      }
     } else { pc.style.display = 'none'; pc.textContent = ''; }
   }
 }
@@ -5312,12 +5458,16 @@ function cardioScheduleTones(fromElapsed) {
   if (!ctx || !run || !run.soundOn) return;
   var base = ctx.currentTime;
   var segs = run.segs;
+  var isWalk = (cardioMode() === 'walk');
+  // 걷기 모드는 경계 10초 전부터 예고한다 — 콘솔까지 손을 뻗고 버튼을 누르고 경사 모터가 이동하는 시간(§7-4).
+  var lead = isWalk ? WALK_PRESCRIPTION.precueSec : 3;
   for (var i = 0; i < segs.length; i++) {
     var b = segs[i].endSec;              // 구간 경계(마지막은 완주 지점)
     if (b <= fromElapsed + 0.05) continue;
     var isFinal = (i === segs.length - 1);
-    // 전환 3초 전·2초 전·1초 전 매초 예고 '따'(총 3번) — 카운트다운처럼 놓치지 않게.
-    for (var k = 3; k >= 1; k--) {
+    // 예고 '따' 3번(인터벌: 3·2·1초 전 / 걷기: 10·9·8초 전) — 놓치지 않게 연속으로.
+    for (var k = lead; k >= lead - 2; k--) {
+      if (k < 1) continue;
       var pt = b - k;
       if (pt > fromElapsed + 0.05) cardioPushTones(cardioSchedSeq(ctx, base + (pt - fromElapsed), 'tick'));
     }
@@ -5325,8 +5475,15 @@ function cardioScheduleTones(fromElapsed) {
     if (isFinal) {
       cardioPushTones(cardioSchedSeq(ctx, base + (b - fromElapsed), 'finish'));
     } else {
-      var cur = segs[i].actualSpeed, nxt = segs[i + 1].targetSpeed;
-      var harder = (nxt > cur) || (segs[i + 1].type === 'run' && segs[i].type !== 'run');
+      var harder;
+      if (isWalk) {
+        // 걷기 모드에서 강도를 정하는 축은 속력이 아니라 경사다. 같으면 속도로 판정.
+        var ci = Number(segs[i].incline) || 0, ni = Number(segs[i + 1].incline) || 0;
+        harder = (ni > ci) || (ni === ci && segs[i + 1].targetSpeed > segs[i].actualSpeed);
+      } else {
+        var cur = segs[i].actualSpeed, nxt = segs[i + 1].targetSpeed;
+        harder = (nxt > cur) || (segs[i + 1].type === 'run' && segs[i].type !== 'run');
+      }
       cardioPushTones(cardioSchedSeq(ctx, base + (b - fromElapsed), harder ? 'up' : 'down'));
     }
   }
@@ -5405,10 +5562,19 @@ function applyStopCardio() {
   saveActiveCardio();          // rpe 단계로 저장(RPE 입력 중 회수 대비)
   render();
 }
+// 손잡이 문항(걷기 모드 전용, §5-2) — 이 한 문항이 다음 세션 경사를 정한다.
+window.setCardioHandrail = function(v) {
+  var run = state.cardio && state.cardio.run; if (!run) return;
+  run.handrail = (v === 'none' || v === 'light' || v === 'hold') ? v : null;
+  saveActiveCardio();          // RPE 입력 중 회수돼도 답이 남도록
+  render();
+};
+
 // RPE(1~10 또는 null=건너뛰기) → 세션 저장(saveCardioSession) 후 초기화
 window.submitCardioRpe = function(rpe) {
   var c = state.cardio; var run = c && c.run;
   if (!run) { if (c) { c.phase = 'idle'; } try { localStorage.removeItem(KEYS.ACTIVE_CARDIO_RUN); } catch (e) {} render(); return; }
+  var mode = cardioMode();
   var endSec = (run.elapsedAtEnd != null) ? run.elapsedAtEnd : run.totalSec;
   // 실제 수행한 구간만 기록(중단 시 진행중 구간은 실제 경과분만)
   var outSegs = [];
@@ -5418,17 +5584,19 @@ window.submitCardioRpe = function(rpe) {
     var segEnd = Math.min(s.endSec, endSec);
     var sec = Math.max(0, Math.round(segEnd - s.startSec));
     if (sec <= 0) continue;
-    outSegs.push({ type: s.type, targetSpeed: s.targetSpeed, actualSpeed: s.actualSpeed, sec: sec });
+    outSegs.push({ type: s.type, targetSpeed: s.targetSpeed, actualSpeed: s.actualSpeed, incline: Number(s.incline) || 0, sec: sec });
   }
-  if (!outSegs.length) outSegs = run.segs.map(function(s) { return { type: s.type, targetSpeed: s.targetSpeed, actualSpeed: s.actualSpeed, sec: s.sec }; });
+  if (!outSegs.length) outSegs = run.segs.map(function(s) { return { type: s.type, targetSpeed: s.targetSpeed, actualSpeed: s.actualSpeed, incline: Number(s.incline) || 0, sec: s.sec }; });
   var session = {
     id: 'cardio_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
     date: getTodayStr(),
+    mode: mode,                                   // 'interval' | 'walk' — 옛 기록엔 없으므로 읽는 쪽에서 폴백
     totalSec: Math.round(endSec),
     totalDistKm: Math.round(run.distanceKm * 100) / 100,
     segments: outSegs,
     completed: !!run.completed,
-    rpe: (rpe == null ? null : rpe)
+    rpe: (rpe == null ? null : rpe),
+    handrail: (mode === 'walk') ? (run.handrail || null) : null
   };
   c.run = null; c.plan = null; c.phase = 'idle';
   try { localStorage.removeItem(KEYS.ACTIVE_CARDIO_RUN); } catch (e) {}   // 진행 저장 삭제(세션이 CARDIO_LOG 로 확정됨)
@@ -5442,13 +5610,45 @@ function renderRunning() {
   ensureCardioState();
   var c = state.cardio;
   var accent = 'var(--accent)';
+  var mode = cardioMode();
+  var isWalk = (mode === 'walk');
 
-  // 정직한 톤 배너(cardio-research.md) + 근손실 넛지
-  var banner =
-    '<div class="card mb-4" style="margin-top:16px;border-color:rgba(var(--accent-rgb),0.15);">' +
+  // 모드 선택(§7-5) — 인터벌(걷기·뛰기) / 경사 걷기. 기본은 인터벌.
+  function modeCard(id, emoji, title, sub) {
+    var on = (mode === id);
+    return '<button class="option-card" style="flex:1;padding:12px 6px;' +
+      (on ? 'border-color:' + accent + ';background:var(--bg-3);' : '') + '" onclick="setCardioMode(\'' + id + '\')">' +
+      '<p style="font-size:20px;line-height:1.2;">' + emoji + '</p>' +
+      '<p class="text-xs font-display mt-1' + (on ? ' accent' : '') + '">' + title + '</p>' +
+      '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + sub + '</p>' +
+      '</button>';
+  }
+  var modeToggle =
+    '<div class="flex gap-2" style="margin-top:16px;">' +
+      modeCard('interval', '🏃', '인터벌', '걷기·뛰기 반복') +
+      modeCard('walk', '⛰️', '경사 걷기', '정속 · 무릎 편함') +
+    '</div>';
+
+  // 정직한 톤 배너 — 모드별로 다르되 과장은 금지(docs/research/incline-walking.md §0·§1-1: '지방 연소' 문구 금지)
+  var banner = isWalk ?
+    '<div class="card mb-4" style="margin-top:12px;border-color:rgba(var(--accent-rgb),0.15);">' +
+      '<p class="text-xs font-display" style="line-height:1.65;">경사 10% 걷기는 평지 조깅의 <b>약 90% 열량</b>을 쓰면서, 무릎에 오는 충격은 걷기 수준으로 남아요.</p>' +
+      '<p class="text-[10px] font-mono text-stone-500 mt-2">살 빠짐은 총 소비와 식사로 정해져요. 주 4회 45분씩 해도 운동만으로는 주 0.2kg 남짓이에요.</p>' +
+    '</div>' :
+    '<div class="card mb-4" style="margin-top:12px;border-color:rgba(var(--accent-rgb),0.15);">' +
       '<p class="text-xs font-display" style="line-height:1.65;">살 빠짐은 <b>총 소비와 식사</b>로 정해져요. 유산소는 소비를 안전하게 늘리는 방법이에요.</p>' +
       '<p class="text-[10px] font-mono text-stone-500 mt-2">유산소만 하면 근육이 빠질 수 있어요. 웨이트와 단백질을 함께 챙기세요.</p>' +
     '</div>';
+
+  // 경사 걷기 안전 안내(§5-2 · §5-4) — 손잡이 규칙이 이 모드의 가장 중요한 실행 규칙이다.
+  var safetyNote = isWalk ?
+    '<div class="card mb-4" style="border-color:rgba(251,191,36,0.25);">' +
+      '<p class="text-[10px] font-mono" style="color:#fbbf24;line-height:1.7;">' +
+        '✋ 손잡이는 놓으세요. 균형이 필요하면 손가락만 가볍게 얹기.<br>' +
+        '📉 <b>손잡이를 놓을 수 없다면 경사가 너무 높다는 신호</b>예요 — 잡고 12%보다, 놓고 8%가 실제로 더 센 운동이에요.<br>' +
+        '🦵 세션 뒤 종아리 스트레칭 30초씩 2번. 도입 2~3주엔 종아리·아킬레스가 가장 먼저 아파요.' +
+      '</p>' +
+    '</div>' : '';
 
   // 시간 입력 + 구성 버튼 + 빠른 선택 칩
   var quickChips = [15, 20, 30, 40, 50].map(function(m) {
@@ -5468,20 +5668,34 @@ function renderRunning() {
   // 로딩 / 미리보기
   var mid = '';
   if (c.loading) {
-    mid = '<div class="card mb-4 text-center" style="padding:28px 0;"><p class="text-sm font-mono accent">AI가 구성 중…</p><p class="text-[10px] font-mono text-stone-500 mt-2">시간에 딱 맞게 워밍업·인터벌·쿨다운을 짜요</p></div>';
+    mid = '<div class="card mb-4 text-center" style="padding:28px 0;"><p class="text-sm font-mono accent">AI가 구성 중…</p><p class="text-[10px] font-mono text-stone-500 mt-2">' +
+      (isWalk ? '시간에 딱 맞게 몸풀기·본 구간·정리를 짜요' : '시간에 딱 맞게 워밍업·인터벌·쿨다운을 짜요') + '</p></div>';
   } else if (c.plan) {
     var plan = c.plan;
     var segList = plan.segments.map(function(s) {
       var dur = s.endSec - s.startSec;
+      var right = isWalk
+        ? '<div style="text-align:right;">' +
+            '<p class="font-bebas text-xl' + (s.type === 'walk' ? ' accent' : '') + '">' + cardioFmtIncline(s.incline) + '<span class="text-[10px] text-stone-500"> %</span></p>' +
+            '<p class="text-[10px] font-mono text-stone-500">' + (Number(s.speed) || 0).toFixed(1) + ' km/h</p>' +
+          '</div>'
+        : '<p class="font-bebas text-xl' + (s.type === 'run' ? ' accent' : '') + '">' + (Number(s.speed) || 0).toFixed(1) + '<span class="text-[10px] text-stone-500"> km/h</span></p>';
       return '<div class="flex items-center justify-between" style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,0.06);">' +
           '<div class="flex items-center gap-2">' +
-            '<span style="font-size:17px;">' + cardioTypeIcon(s.type) + '</span>' +
-            '<div><p class="text-xs font-display">' + cardioTypeLabel(s.type) + '</p>' +
+            '<span style="font-size:17px;">' + cardioTypeIcon(s.type, mode) + '</span>' +
+            '<div><p class="text-xs font-display">' + escapeHtml(cardioSegDisplayLabel(s, mode)) + '</p>' +
             '<p class="text-[10px] font-mono text-stone-500">' + cardioFmtClock(dur) + '</p></div>' +
-          '</div>' +
-          '<p class="font-bebas text-xl' + (s.type === 'run' ? ' accent' : '') + '">' + (Number(s.speed) || 0).toFixed(1) + '<span class="text-[10px] text-stone-500"> km/h</span></p>' +
+          '</div>' + right +
         '</div>';
     }).join('');
+    // 경사 걷기: 예상 소모 열량을 "대략"으로만 (ACSM 공식은 실측 대비 약 +6% 과대추정 — §1-2·§7-8)
+    var kcalLine = '';
+    if (isWalk && typeof cardioWalkKcal === 'function') {
+      var kcal = cardioWalkKcal(plan.segments.map(function(s) {
+        return { sec: s.endSec - s.startSec, targetSpeed: s.speed, incline: s.incline };
+      }), cardioWalkBodyWeight());
+      if (kcal > 0) kcalLine = '<p class="text-[10px] font-mono text-stone-500 mt-2">예상 소모 <b>대략 ' + kcal + ' kcal</b> · 추정값이라 오차가 있어요</p>';
+    }
     mid =
       '<div class="card mb-4">' +
         '<div class="flex items-center justify-between mb-1">' +
@@ -5490,25 +5704,29 @@ function renderRunning() {
         '</div>' +
         (plan.headline ? '<p class="text-sm font-display mb-2">' + escapeHtml(plan.headline) + '</p>' : '') +
         (plan.source === 'fallback' ? '<p class="text-[10px] font-mono" style="color:#fbbf24;">AI 키가 없어 기본 구성을 사용했어요</p>' : '') +
-        '<div class="mt-2">' + segList + '</div>' +
+        '<div class="mt-2">' + segList + '</div>' + kcalLine +
         (plan.note ? '<p class="text-[10px] font-mono text-stone-400 mt-3" style="line-height:1.6;">' + escapeHtml(plan.note) + '</p>' : '') +
         '<button class="sheet-submit" style="margin-top:14px;" onclick="startCardio()">▶ 시작</button>' +
         '<button class="option-card" style="width:100%;margin-top:8px;text-align:center;" onclick="resetCardioPlan()"><p class="text-xs font-mono text-stone-400">다시 구성</p></button>' +
       '</div>';
   }
 
-  // 최근 유산소 한 줄
+  // 최근 유산소 한 줄 — 걷기 모드에선 걷기 세션만 보여준다(모드가 섞이면 기준선이 헷갈린다)
   var all = (state.data && state.data.cardioLog) ? state.data.cardioLog : [];
-  var recent = all.length
-    ? '<p class="text-[10px] font-mono text-stone-500 text-center mt-6">최근: ' + all[all.length - 1].date + ' · ' + cardioFmtClock(all[all.length - 1].totalSec || 0) + ' · ' + ((all[all.length - 1].totalDistKm || 0).toFixed(2)) + 'km' + (all[all.length - 1].completed ? ' · 완주' : '') + '</p>'
+  var pool = (isWalk ? cardioWalkSessions(all) : cardioIntervalSessions(all)).slice(0, 1);
+  var last = pool.length ? pool[0] : null;
+  var recent = last
+    ? '<p class="text-[10px] font-mono text-stone-500 text-center mt-6">최근: ' + last.date + ' · ' + cardioFmtClock(last.totalSec || 0) +
+      (isWalk ? (' · 경사 ' + cardioFmtIncline(cardioWalkMainIncline(last)) + '%') : (' · ' + ((last.totalDistKm || 0).toFixed(2)) + 'km')) +
+      (last.completed ? ' · 완주' : '') + '</p>'
     : '<p class="text-[10px] font-mono text-stone-600 text-center mt-6">첫 세션은 보수적으로 · 완주가 목표예요</p>';
 
   return '' +
     '<div class="px-5 pt-12 pb-32">' +
       '<p class="text-xs uppercase font-mono text-stone-500 mb-2" style="letter-spacing: 0.3em;">RUNNING</p>' +
       '<h1 class="font-bebas text-4xl">러닝</h1>' +
-      '<p class="text-xs font-mono text-stone-400 mt-1">러닝머신 인터벌 · 시간만 정하면 AI가 구성</p>' +
-      banner + input + mid + recent +
+      '<p class="text-xs font-mono text-stone-400 mt-1">' + (isWalk ? '러닝머신 경사 걷기 · 정속 한 구간' : '러닝머신 인터벌 · 시간만 정하면 AI가 구성') + '</p>' +
+      modeToggle + banner + safetyNote + input + mid + recent +
     '</div>';
 }
 
@@ -5524,6 +5742,31 @@ function renderCardioSession() {
   var accent = 'var(--accent)';
   var round = 'width:52px;height:52px;border-radius:50%;border:1px solid rgba(255,255,255,0.14);background:var(--bg-2);color:#fff;font-family:var(--font);font-weight:800;font-size:26px;line-height:1;display:flex;align-items:center;justify-content:center;';
   var chip = 'padding:6px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:var(--bg-1);color:var(--text-soft);font-family:var(--font);font-size:12px;';
+  var mode = cardioMode();
+  var isWalk = (mode === 'walk');
+
+  // 걷기 모드: 경사를 속도와 같은 크기로 나란히(§7-5 — 이 모드에서 경사가 속도보다 중요한 변수다).
+  var walkNumbers = isWalk ?
+    ('<div class="card" style="margin-top:16px;">' +
+      '<div class="flex" style="gap:10px;">' +
+        '<div style="flex:1;text-align:center;">' +
+          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">경사</p>' +
+          '<p class="font-bebas accent" style="font-size:52px;line-height:1.05;"><span id="cardio-incline">' + cardioFmtIncline(seg.incline) + '</span><span class="text-sm text-stone-400"> %</span></p>' +
+        '</div>' +
+        '<div style="width:1px;background:rgba(255,255,255,0.08);"></div>' +
+        '<div style="flex:1;text-align:center;">' +
+          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">속도</p>' +
+          '<p class="font-bebas" style="font-size:52px;line-height:1.05;"><span id="cardio-actual">' + (seg.actualSpeed || 0).toFixed(1) + '</span><span class="text-sm text-stone-400"> km/h</span></p>' +
+        '</div>' +
+      '</div>' +
+      '<div class="flex items-center justify-center gap-2" style="margin-top:12px;">' +
+        '<button style="' + round + '" onclick="adjustCardioSpeed(-0.1)">−</button>' +
+        '<p class="text-[10px] font-mono text-stone-500" style="width:120px;text-align:center;line-height:1.5;">속도만 미세 조정<br>목표 <span id="cardio-target">' + (seg.targetSpeed || 0).toFixed(1) + '</span> km/h</p>' +
+        '<button style="' + round + '" onclick="adjustCardioSpeed(0.1)">+</button>' +
+      '</div>' +
+    '</div>' +
+    '<div id="cardio-tip" class="card" style="display:none;margin-top:10px;padding:12px 14px;border-color:rgba(var(--accent-rgb),0.18);font-family:var(--font);font-size:13px;line-height:1.6;color:var(--text-soft);"></div>')
+    : '';
 
   return '' +
     // 헤더
@@ -5531,7 +5774,7 @@ function renderCardioSession() {
       '<div class="flex items-center justify-between mb-3">' +
         '<button class="session-header-btn" onclick="stopCardio(false)">' + icon('close', 18) + '</button>' +
         '<div class="text-center">' +
-          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">러닝 · 인터벌</p>' +
+          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">' + (isWalk ? '러닝 · 경사 걷기' : '러닝 · 인터벌') + '</p>' +
           '<p class="text-xs font-mono accent mt-0\\.5">총 ' + cardioFmtClock(run.totalSec) + '</p>' +
         '</div>' +
         '<button class="session-header-btn" onclick="toggleCardioSound()" title="소리">' + (run.soundOn ? '🔊' : '🔇') + '</button>' +
@@ -5543,7 +5786,7 @@ function renderCardioSession() {
 
       // 현재 구간
       '<div class="text-center" style="margin-top:6px;">' +
-        '<p class="text-sm" style="color:var(--text-soft);"><span id="cardio-seg-icon">' + cardioTypeIcon(seg.type) + '</span> <span id="cardio-seg-label" class="font-display">' + cardioTypeLabel(seg.type) + '</span></p>' +
+        '<p class="text-sm" style="color:var(--text-soft);"><span id="cardio-seg-icon">' + cardioTypeIcon(seg.type, mode) + '</span> <span id="cardio-seg-label" class="font-display">' + escapeHtml(cardioSegDisplayLabel(seg, mode)) + '</span></p>' +
         '<p id="cardio-seg-remain" class="text-[10px] font-mono text-stone-500 mt-1">남은 ' + cardioFmtClock(Math.max(0, Math.ceil(seg.endSec - elapsed))) + '</p>' +
       '</div>' +
 
@@ -5556,7 +5799,8 @@ function renderCardioSession() {
       // 예고 배너(3초 전)
       '<div id="cardio-precue" class="text-center" style="display:none;margin-top:8px;color:#fbbf24;font-family:var(--font);font-weight:700;font-size:15px;"></div>' +
 
-      // 목표 속력 + 실제 속력 조정
+      // 걷기 모드: 경사·속도 큰 숫자 카드 / 인터벌 모드: 기존 목표·실제 속력 카드
+      (isWalk ? walkNumbers :
       '<div class="card" style="margin-top:16px;">' +
         '<div class="flex items-center justify-between mb-1">' +
           '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">목표 속력</p>' +
@@ -5574,14 +5818,17 @@ function renderCardioSession() {
           '<button class="option-card" style="padding:6px 14px;" onclick="adjustCardioSpeed(-0.1)"><p class="text-xs font-mono text-stone-400">−0.1</p></button>' +
           '<button class="option-card" style="padding:6px 14px;" onclick="adjustCardioSpeed(0.1)"><p class="text-xs font-mono text-stone-400">+0.1</p></button>' +
         '</div>' +
-      '</div>' +
+      '</div>') +
 
       // 보조 정보(거리·다음·구간)
       '<div class="flex gap-2" style="margin-top:12px;">' +
         '<div style="flex:1;' + chip + '"><p class="text-[10px] text-stone-500">이동거리</p><p class="font-bebas text-xl" style="color:#34d399;"><span id="cardio-dist">' + run.distanceKm.toFixed(2) + '</span> km</p></div>' +
         '<div style="flex:1;' + chip + '"><p class="text-[10px] text-stone-500">구간</p><p class="font-bebas text-xl"><span id="cardio-segcount">' + (idx + 1) + ' / ' + run.segs.length + '</span></p></div>' +
       '</div>' +
-      '<div style="' + chip + 'margin-top:8px;"><p class="text-[10px] text-stone-500">다음 구간</p><p class="text-sm font-display" style="color:#fff;"><span id="cardio-next">' + (next ? (cardioTypeIcon(next.type) + ' ' + cardioTypeLabel(next.type) + ' ' + (next.targetSpeed || 0).toFixed(1)) : '마지막 구간') + '</span></p></div>' +
+      '<div style="' + chip + 'margin-top:8px;"><p class="text-[10px] text-stone-500">다음 구간</p><p class="text-sm font-display" style="color:#fff;"><span id="cardio-next">' +
+        (next ? (isWalk ? (cardioTypeIcon(next.type, mode) + ' ' + escapeHtml(cardioSegDisplayLabel(next, mode)) + ' · ' + cardioInclineLabel(next))
+                        : (cardioTypeIcon(next.type) + ' ' + cardioTypeLabel(next.type) + ' ' + (next.targetSpeed || 0).toFixed(1)))
+              : '마지막 구간') + '</span></p></div>' +
 
       '<button class="option-card" style="width:100%;margin-top:18px;text-align:center;padding:14px 0;" onclick="stopCardio(false)"><p class="text-sm font-mono accent">운동 종료 ✓</p></button>' +
 
@@ -5594,26 +5841,70 @@ function renderCardioRPE() {
   if (!run) return '<div class="px-5 pt-12">기록 없음</div>';
   var endSec = (run.elapsedAtEnd != null) ? run.elapsedAtEnd : run.totalSec;
   var completed = !!run.completed;
+  var mode = cardioMode();
+  var isWalk = (mode === 'walk');
   var btns = '';
   for (var n = 1; n <= 10; n++) {
     var col = n <= 3 ? '#10b981' : n <= 6 ? 'var(--accent)' : n <= 8 ? '#fbbf24' : '#ef4444';
     btns += '<button onclick="submitCardioRpe(' + n + ')" style="width:52px;height:52px;border-radius:14px;border:1.5px solid ' + col + ';background:var(--bg-1);color:' + col + ';font-family:var(--font);font-weight:800;font-size:24px;">' + n + '</button>';
   }
+
+  // 걷기 모드 전용 손잡이 문항(§5-2 · §7-5) — 이 한 문항이 다음 세션 경사를 결정한다.
+  var handrailCard = '';
+  if (isWalk) {
+    var opts = (typeof WALK_HANDRAIL_OPTIONS !== 'undefined') ? WALK_HANDRAIL_OPTIONS : [];
+    var hbtns = opts.map(function(o) {
+      var on = (run.handrail === o.value);
+      return '<button class="option-card" style="flex:1;padding:10px 4px;' + (on ? 'border-color:var(--accent);background:var(--bg-3);' : '') + '" onclick="setCardioHandrail(\'' + o.value + '\')">' +
+        '<p class="text-xs font-display' + (on ? ' accent' : '') + '">' + o.label + '</p>' +
+        '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + o.desc + '</p>' +
+        '</button>';
+    }).join('');
+    handrailCard =
+      '<div class="card" style="margin-top:16px;">' +
+        '<p class="text-sm font-display text-center mb-1">손잡이, 잡고 있었나요?</p>' +
+        '<p class="text-[10px] font-mono text-stone-500 text-center mb-3" style="line-height:1.6;">잡고 뒤로 기대면 경사 10%가 5%가 돼요. 정직하게 답할수록 다음 처방이 맞아요.</p>' +
+        '<div class="flex gap-2">' + hbtns + '</div>' +
+      '</div>';
+  }
+
+  // 오늘 대략 소모 열량(걷기 모드) — ACSM 추정치라 "대략"으로만 표시한다(§7-8).
+  var kcalLine = '';
+  if (isWalk && typeof cardioWalkKcal === 'function') {
+    var doneSegs = [];
+    run.segs.forEach(function(s) {
+      if (s.startSec >= endSec - 0.5) return;
+      var sec = Math.max(0, Math.round(Math.min(s.endSec, endSec) - s.startSec));
+      if (sec > 0) doneSegs.push({ sec: sec, actualSpeed: s.actualSpeed, incline: s.incline });
+    });
+    var kcal = cardioWalkKcal(doneSegs, cardioWalkBodyWeight());
+    if (kcal > 0) kcalLine = '<p class="text-xs font-mono text-stone-500 mt-1">오늘 대략 ' + kcal + ' kcal</p>';
+  }
+
   return '' +
     '<div class="px-5 pt-12 pb-32">' +
       '<div class="text-center" style="margin-top:8px;">' +
         '<div style="font-size:44px;">' + (completed ? '🎉' : '👏') + '</div>' +
         '<h1 class="font-bebas text-4xl mt-1">' + (completed ? '완주!' : '수고했어요') + '</h1>' +
         '<p class="text-sm font-mono text-stone-400 mt-2">' + cardioFmtClock(endSec) + ' · ' + run.distanceKm.toFixed(2) + 'km</p>' +
+        kcalLine +
+        (isWalk ? '<p class="text-[10px] font-mono text-stone-500 mt-2">🦵 종아리 스트레칭 30초씩 2번 하고 가세요 (무릎 편 상태 / 굽힌 상태)</p>' : '') +
       '</div>' +
 
-      '<div class="card" style="margin-top:22px;">' +
+      handrailCard +
+
+      '<div class="card" style="margin-top:16px;">' +
         '<p class="text-sm font-display text-center mb-1">오늘 세션, 얼마나 힘들었나요?</p>' +
         '<p class="text-[10px] font-mono text-stone-500 text-center mb-4">1~3 쉬움 · 4~6 적당 · 7~8 힘듦 · 9~10 매우 힘듦</p>' +
         '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;">' + btns + '</div>' +
-        '<p class="text-[10px] font-mono text-stone-500 text-center mt-4" style="line-height:1.6;">뛰기가 7 이하로 완주했다면 다음 구성은 걷기가 조금 줄어들어요. 통증이 있으면 쉬세요.</p>' +
+        '<p class="text-[10px] font-mono text-stone-500 text-center mt-4" style="line-height:1.6;">' +
+          (isWalk
+            ? '완주하고 RPE 6 이하면 다음엔 한 축만 조금 올라가요(시간 → 빈도 → 경사 → 속도 순). 허리·종아리 통증이 있으면 쉬세요.'
+            : '뛰기가 7 이하로 완주했다면 다음 구성은 걷기가 조금 줄어들어요. 통증이 있으면 쉬세요.') +
+        '</p>' +
         '<button class="option-card" style="width:100%;margin-top:12px;text-align:center;" onclick="submitCardioRpe(null)"><p class="text-xs font-mono text-stone-400">평가 건너뛰기</p></button>' +
       '</div>' +
+      (isWalk ? '<p class="text-[10px] font-mono text-stone-600 text-center mt-4" style="line-height:1.7;">디스크 증상은 몇 시간 뒤에 나올 수 있어요.<br>오늘 저녁까지 허리·다리 저림이 없는지 확인하고 다음 세션을 정하세요.</p>' : '') +
     '</div>';
 }
 
@@ -5632,24 +5923,32 @@ function cardioSummaryCardHtml(period) {
   var n = sorted.length;
   if (!n) return '';
   var totalKm = sorted.reduce(function(s, x) { return s + (x.totalDistKm || 0); }, 0);
+  var totalMin = Math.round(sorted.reduce(function(s, x) { return s + (x.totalSec || 0); }, 0) / 60);
   var completedN = sorted.filter(function(x) { return x.completed; }).length;
+  var walkN = sorted.filter(function(x) { return x.mode === 'walk'; }).length;
   var rpes = sorted.filter(function(x) { return typeof x.rpe === 'number'; }).map(function(x) { return x.rpe; });
   var avgRpe = rpes.length ? (rpes.reduce(function(s, x) { return s + x; }, 0) / rpes.length) : null;
   var recent = sorted.slice(-8);
-  var maxKm = Math.max.apply(null, recent.map(function(x) { return x.totalDistKm || 0; }).concat([0.1]));
+  // ★막대는 "시간"으로 그린다. 두 모드가 한 로그에 섞이는데 거리로 그리면, 같은 30분이라도 경사 걷기(5km/h)가
+  //   인터벌(8km/h)의 절반 높이로 보여 훈련이 후퇴한 것처럼 읽힌다 — 이 모드의 요지("같은 열량, 낮은 충격")와 정반대다.
+  var maxSec = Math.max.apply(null, recent.map(function(x) { return x.totalSec || 0; }).concat([1]));
   var bars = recent.map(function(x, i) {
-    var h = Math.max(6, Math.round(((x.totalDistKm || 0) / maxKm) * 70));
+    var h = Math.max(6, Math.round(((x.totalSec || 0) / maxSec) * 70));
     var isLast = i === recent.length - 1;
-    return '<div style="flex:1;display:flex;justify-content:center;align-items:flex-end;height:76px;"><div style="width:60%;height:' + h + 'px;border-radius:4px;background:' + (isLast ? 'var(--accent)' : 'var(--bg-3)') + ';"></div></div>';
+    var isW = (x.mode === 'walk');
+    return '<div style="flex:1;display:flex;justify-content:center;align-items:flex-end;height:76px;"><div style="width:60%;height:' + h + 'px;border-radius:4px;background:' + (isLast ? 'var(--accent)' : (isW ? '#34d399' : 'var(--bg-3)')) + ';"></div></div>';
   }).join('');
   var rows = sorted.slice(-5).reverse().map(function(x) {
-    var runSpd = cardioAvgRunSpeed(x);
+    // 옛 기록엔 mode 가 없다 → 'interval' 로 간주(하위 호환)
+    var isWalkRow = (x.mode === 'walk');
+    var runSpd = isWalkRow ? 0 : cardioAvgRunSpeed(x);
+    var detail = isWalkRow ? (' · 경사 ' + cardioFmtIncline(cardioWalkMainIncline(x)) + '%') : (runSpd ? (' · 뛰기 ' + runSpd.toFixed(1)) : '');
     return '<div class="workout-history-row">' +
         '<div class="flex items-center gap-3">' +
           '<div class="workout-history-dot" style="background:#34d399;box-shadow:0 0 6px rgba(52,211,153,0.5);"></div>' +
           '<div>' +
-            '<p class="text-xs font-display font-bold">' + cardioFmtClock(x.totalSec || 0) + ' · ' + ((x.totalDistKm || 0).toFixed(2)) + 'km</p>' +
-            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + x.date + ' · ' + (x.completed ? '완주' : '중단') + (typeof x.rpe === 'number' ? (' · RPE ' + x.rpe) : '') + (runSpd ? (' · 뛰기 ' + runSpd.toFixed(1)) : '') + '</p>' +
+            '<p class="text-xs font-display font-bold">' + (isWalkRow ? '⛰️ ' : '') + cardioFmtClock(x.totalSec || 0) + ' · ' + ((x.totalDistKm || 0).toFixed(2)) + 'km</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + x.date + ' · ' + (x.completed ? '완주' : '중단') + (typeof x.rpe === 'number' ? (' · RPE ' + x.rpe) : '') + detail + '</p>' +
           '</div>' +
         '</div>' +
       '</div>';
@@ -5660,11 +5959,13 @@ function cardioSummaryCardHtml(period) {
         '<p class="text-xs font-mono accent">' + n + '회</p>' +
       '</div>' +
       '<div class="flex items-baseline gap-4 mb-3">' +
-        '<div><p class="font-bebas text-3xl accent">' + totalKm.toFixed(1) + '</p><p class="text-[10px] font-mono text-stone-500">총 km</p></div>' +
+        '<div><p class="font-bebas text-3xl accent">' + totalMin + '</p><p class="text-[10px] font-mono text-stone-500">총 분</p></div>' +
+        '<div><p class="font-bebas text-3xl">' + totalKm.toFixed(1) + '</p><p class="text-[10px] font-mono text-stone-500">총 km</p></div>' +
         '<div><p class="font-bebas text-3xl">' + completedN + '</p><p class="text-[10px] font-mono text-stone-500">완주</p></div>' +
         (avgRpe != null ? '<div><p class="font-bebas text-3xl">' + avgRpe.toFixed(1) + '</p><p class="text-[10px] font-mono text-stone-500">평균 RPE</p></div>' : '') +
       '</div>' +
-      (recent.length >= 2 ? '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest mb-2">거리 추이</p><div style="display:flex;align-items:flex-end;gap:4px;margin-bottom:12px;">' + bars + '</div>' : '') +
+      (walkN ? '<p class="text-[10px] font-mono text-stone-500 mb-3">⛰️ 경사 걷기 ' + walkN + '회 포함 — 걷기는 같은 시간에 거리가 짧게 남아요(속도가 낮아서). 열량은 경사가 채워요.</p>' : '') +
+      (recent.length >= 2 ? '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest mb-2">시간 추이</p><div style="display:flex;align-items:flex-end;gap:4px;margin-bottom:12px;">' + bars + '</div>' : '') +
       '<div>' + rows + '</div>' +
     '</div>';
 }
