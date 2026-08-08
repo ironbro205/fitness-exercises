@@ -180,10 +180,24 @@ test('범례 문구 — 주동근/보조근을 한국어로 적는다', () => {
   assert.equal(app.buildMuscleLegendText('한글듣도보도못한종목'), '');
 });
 
-test('이스케이프 — 따옴표·꺾쇠가 든 종목명이 onclick 을 깨뜨리지 않는다', () => {
-  assert.equal(app.muscleMapJsArg("오늘's 스쿼트"), ' 오늘\\&#39;s 스쿼트'.trim());
-  assert.ok(!app.muscleMapJsArg('<img src=x>').includes('<'));
+test('이스케이프 — 따옴표·꺾쇠·줄바꿈이 든 종목명이 onclick 을 깨뜨리지 않는다', () => {
+  // 작은따옴표: JS 용으로 \' 로 막고 그 따옴표를 다시 HTML 엔티티로
+  assert.equal(app.muscleMapJsArg("오늘's 스쿼트"), '오늘\\&#39;s 스쿼트');
+  // 역슬래시는 두 배로 (안 그러면 뒤 문자를 이스케이프해 버림)
+  assert.equal(app.muscleMapJsArg('a\\b'), 'a\\\\b');
+  // 생 줄바꿈은 작은따옴표 JS 문자열에서 문법 오류 → \n 으로
+  assert.equal(app.muscleMapJsArg('line1\nline2'), 'line1\\nline2');
+  assert.ok(!app.muscleMapJsArg('line1\nline2').includes('\n'));
+  // HTML 속성을 깨는 문자는 전부 엔티티로
+  assert.ok(!app.muscleMapJsArg('<img src=x onerror=alert(1)>').includes('<'));
   assert.ok(!app.muscleMapJsArg('a"b').includes('"'));
+});
+
+test('블록 — role="button" 이면 키보드(Enter/Space)로도 확대된다', () => {
+  const html = app.buildMuscleMapBlock('랫 풀다운');
+  assert.ok(html.includes('role="button"'));
+  assert.ok(html.includes('onkeydown='), 'role=button 인데 키보드 핸들러가 없으면 접근성 함정');
+  assert.ok(html.includes("event.key==='Enter'"));
 });
 
 test('확대 오버레이 — state.muscleMapZoom 이 있을 때만 그려진다', () => {

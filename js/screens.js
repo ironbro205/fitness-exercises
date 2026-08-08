@@ -1924,7 +1924,7 @@ function startRestTimerTick() {
       restTickerInterval = null;
       // 시트(편집/종목변경/채팅)가 열려 있으면 전체 렌더 대신 타이머 UI만 제거
       // (채팅 입력·스트리밍 중 전체 렌더는 키보드/포커스/말풍선을 끊는다)
-      if (state.editingSet || state.exerciseSwapOpen || state.sessionChatOpen) {
+      if (state.editingSet || state.exerciseSwapOpen || state.sessionChatOpen || state.muscleMapZoom) {
         var wrapEl = document.querySelector('.rest-timer-wrap');
         if (wrapEl && wrapEl.parentNode) wrapEl.parentNode.removeChild(wrapEl);
       } else {
@@ -1934,7 +1934,7 @@ function startRestTimerTick() {
     }
     // 시트(편집/종목변경/세트사이채팅)가 열려 있으면 시트가 깜빡이지 않도록 타이머만 부분 갱신
     // (채팅은 입력·스트리밍 중이라 전체 렌더가 매초 돌면 입력이 초기화된다)
-    if (state.editingSet || state.exerciseSwapOpen || state.sessionChatOpen) {
+    if (state.editingSet || state.exerciseSwapOpen || state.sessionChatOpen || state.muscleMapZoom) {
       var remaining = state.restTimer.duration - elapsed;
       var el = document.getElementById('rest-time-text');
       if (el) {
@@ -5773,6 +5773,7 @@ function ensureBackTrap() {
     if (state.completedSession) return;
     if (state.itemDetailSheet) return;
     if (state.resetConfirming) return;
+    if (state.muscleMapZoom) return;   // 자극 근육 확대 중엔 스와이프로 종목이 넘어가면 안 된다
 
     var touch = e.changedTouches[0];
     if (!touch) return;

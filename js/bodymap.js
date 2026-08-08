@@ -234,10 +234,20 @@ function buildMuscleLegendText(exerciseName) {
   return text;
 }
 
-// onclick 속성에 문자열 인자를 안전하게 넣기 위한 이스케이프
-// (작은따옴표 JS 문자열 안에 들어가고, 그 전체가 큰따옴표 HTML 속성 안에 들어간다)
+// onclick 속성에 문자열 인자를 안전하게 넣기 위한 이스케이프.
+// 이 값은 **작은따옴표 JS 문자열** 안에 들어가고, 그 전체가 **큰따옴표 HTML 속성** 안에 들어간다.
+// 그래서 두 단계를 다 막아야 한다:
+//   1) JS 문자열 깨짐 — 역슬래시·작은따옴표·줄바꿈(작은따옴표 문자열에 생 줄바꿈은 문법 오류)
+//   2) HTML 속성 깨짐 — escapeHtml 이 & < > " ' 를 엔티티로
+// (AI 가 만든 종목명·사용자가 직접 입력한 종목명이 그대로 들어올 수 있다)
 function muscleMapJsArg(s) {
-  return escapeHtml(String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+  return escapeHtml(
+    String(s == null ? '' : s)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/\r/g, '\\r')
+      .replace(/\n/g, '\\n')
+  );
 }
 
 // ── 화면에 넣는 블록 ───────────────────────────────────────────────────
@@ -252,7 +262,10 @@ function buildMuscleMapBlock(exerciseName, opts) {
   var compactCls = opts.compact ? ' mm-block-compact' : '';
 
   return '<div class="mm-block' + compactCls + '" role="button" tabindex="0" '
-      + 'aria-label="자극 근육 그림 크게 보기" onclick="openMuscleMapZoom(\'' + arg + '\')">'
+      + 'aria-label="자극 근육 그림 크게 보기" '
+      + 'onclick="openMuscleMapZoom(\'' + arg + '\')" '
+      // role="button" 을 붙였으면 키보드로도 눌려야 한다 (Enter/Space)
+      + 'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();openMuscleMapZoom(\'' + arg + '\');}">'
       + '<div class="mm-views">'
         + '<div class="mm-view">' + buildMuscleMapSvgFor(muscles, 'front') + '<span class="mm-view-label">앞</span></div>'
         + '<div class="mm-view">' + buildMuscleMapSvgFor(muscles, 'back') + '<span class="mm-view-label">뒤</span></div>'
