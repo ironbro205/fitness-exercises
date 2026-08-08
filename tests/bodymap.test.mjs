@@ -193,6 +193,63 @@ test('이스케이프 — 따옴표·꺾쇠·줄바꿈이 든 종목명이 oncli
   assert.ok(!app.muscleMapJsArg('a"b').includes('"'));
 });
 
+// muscleMapJsArg 단위 테스트만으로는, buildMuscleMapBlock 이 그 함수를 안 쓰게 바뀌거나
+// onclick 문자열을 잘못 조립해도 통과해 버린다. 실제로 만들어진 속성을 뜯어본다.
+test('블록 — 위험한 종목명이 들어와도 만들어진 onclick 속성이 안 깨진다', () => {
+  const nasty = [
+    "'); alert(1); ('",          // JS 문자열 탈출 시도
+    '" onmouseover="alert(1)',   // HTML 속성 탈출 시도
+    '</div><script>alert(1)<\/script>',
+    'back\\slash',
+    'line1\nline2',
+  ];
+  for (const evil of nasty) {
+    // 퍼지 매칭에 걸리도록 실제 종목 키워드를 섞는다 (안 그러면 그냥 숨겨져서 검증이 무의미)
+    const name = evil + ' 바벨 스쿼트';
+    const html = app.buildMuscleMapBlock(name);
+    assert.ok(html, name + ' 은 매핑돼서 블록이 나와야 검증이 의미 있음');
+
+    // 1) onclick 속성값을 통째로 뽑아낸다 (속성이 조기 종료됐다면 여기서 티가 난다)
+    const m = html.match(/onclick="([^"]*)"/);
+    assert.ok(m, 'onclick 속성을 찾지 못함: ' + html.slice(0, 200));
+    const attr = m[1];
+
+    // 2) 속성값 안에 날 것의 " 가 없어야 한다 (있으면 속성이 거기서 끊긴 것)
+    assert.ok(!attr.includes('"'), 'onclick 속성이 따옴표로 끊김: ' + attr);
+    // 3) 태그를 새로 여는 문자가 남아 있으면 안 된다
+    assert.ok(!attr.includes('<') && !attr.includes('>'), '꺾쇠가 살아남음: ' + attr);
+    // 4) 생 줄바꿈이 남으면 작은따옴표 JS 문자열이 문법 오류가 된다
+    assert.ok(!/[\r\n]/.test(attr), '줄바꿈이 살아남음: ' + JSON.stringify(attr));
+
+    // 5) HTML 엔티티를 되돌린 뒤에도 openMuscleMapZoom('...') 한 덩어리여야 한다
+    const decoded = attr
+      .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    assert.ok(/^openMuscleMapZoom\('.*'\)$/s.test(decoded), '핸들러 형태가 깨짐: ' + decoded);
+
+    // 6) 작은따옴표 JS 문자열로서 성립하는지 + 원래 이름으로 되돌아오는지 (이스케이프 왕복)
+    //    eval/new Function 은 쓰지 않는다 — 이스케이프가 깨졌을 때 그 코드가 진짜로 실행돼버린다.
+    const jsLiteral = decoded.slice('openMuscleMapZoom('.length, -1);
+    assert.ok(jsLiteral.startsWith("'") && jsLiteral.endsWith("'"), '따옴표로 감싸이지 않음: ' + jsLiteral);
+    const inner = jsLiteral.slice(1, -1);
+
+    // 이스케이프 안 된 작은따옴표가 하나라도 있으면 문자열이 거기서 끝나 버린다 = 탈출
+    let restored = '';
+    for (let i = 0; i < inner.length; i++) {
+      const c = inner[i];
+      if (c !== '\\') {
+        assert.notEqual(c, "'", '이스케이프 안 된 작은따옴표로 문자열 탈출: ' + inner);
+        restored += c;
+        continue;
+      }
+      const next = inner[++i];
+      assert.ok(next !== undefined, '역슬래시로 끝남: ' + inner);
+      restored += next === 'n' ? '\n' : next === 'r' ? '\r' : next; // \\ \' \n \r
+    }
+    assert.equal(restored, name, '이스케이프 왕복에서 이름이 달라짐');
+  }
+});
+
 test('블록 — role="button" 이면 키보드(Enter/Space)로도 확대된다', () => {
   const html = app.buildMuscleMapBlock('랫 풀다운');
   assert.ok(html.includes('role="button"'));
@@ -213,6 +270,34 @@ test('확대 오버레이 — state.muscleMapZoom 이 있을 때만 그려진다
   app.state.muscleMapZoom = '한글듣도보도못한종목';
   assert.equal(app.buildMuscleMapZoomHtml(), '', '매핑 없으면 오버레이도 안 뜬다');
   app.state.muscleMapZoom = null;
+});
+
+// 루틴이 새로 생성·수정되면 종목 순서가 바뀐다. index 만 기억하면 엉뚱한 줄이 저절로 펼쳐진다.
+test('루틴 미리보기 — 루틴이 바뀌면 펼쳐둔 인체도가 저절로 닫힌다', () => {
+  const routine = { exercises: [{ name: '바벨 스쿼트' }, { name: '랫 풀다운' }, { name: '덤벨 컬' }] };
+  app.state.generatedRoutine = routine;
+
+  app.toggleRoutineExerciseMap(1);                       // '랫 풀다운' 펼침
+  assert.equal(app.state.routineExMapIdx, 1);
+  assert.equal(app.state.routineExMapKey, '랫 풀다운');
+  assert.equal(app.isRoutineExerciseMapOpen(1, '랫 풀다운'), true);
+
+  // 루틴이 바뀌어 index 1 에 다른 종목이 오면 → 닫힌 상태로 읽힌다
+  assert.equal(app.isRoutineExerciseMapOpen(1, '케이블 로우'), false);
+  // 같은 종목이 다른 자리로 옮겨가도 → 닫힌 상태
+  assert.equal(app.isRoutineExerciseMapOpen(0, '랫 풀다운'), false);
+
+  app.toggleRoutineExerciseMap(1);                       // 같은 줄 다시 누르면 접힘
+  assert.equal(app.state.routineExMapIdx, null);
+  assert.equal(app.state.routineExMapKey, null);
+
+  // 없는 index 는 아무 일도 없어야 한다
+  app.toggleRoutineExerciseMap(99);
+  assert.equal(app.state.routineExMapIdx, null);
+
+  app.state.generatedRoutine = null;
+  app.toggleRoutineExerciseMap(0);                       // 루틴 자체가 없을 때도 안 터진다
+  assert.equal(app.state.routineExMapIdx, null);
 });
 
 test('뒤로가기 — 확대 오버레이가 가장 위 레이어로 잡힌다', () => {

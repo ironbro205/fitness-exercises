@@ -1,5 +1,5 @@
 {
-  "functionCount": 294,
+  "functionCount": 295,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -174,6 +174,7 @@
     "invalidateSessionChat",
     "isExerciseAvailable",
     "isMappedMuscle",
+    "isRoutineExerciseMapOpen",
     "loadAIRecommendationIfNeeded",
     "loadPlateauCheckIfNeeded",
     "loadWeeklyReviewIfNeeded",

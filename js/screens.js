@@ -528,6 +528,7 @@ window.backToStep2 = function() {
 window.toggleRoutinePreview = function() {
   state.routinePreviewExpanded = !state.routinePreviewExpanded;
   state.routineExMapIdx = null;   // 접었다 펴면 인체도도 초기화
+  state.routineExMapKey = null;
   saveWizard();
   render();
 };
@@ -673,8 +674,9 @@ function renderWorkoutStep3() {
   if (state.routinePreviewExpanded) {
     routine.exercises.forEach(function(ex, idx) {
       var weight = ex.weight ? ex.weight + 'kg × ' : '';
-      // 종목 줄을 누르면 그 종목의 자극 근육 인체도를 펼친다 (한 번에 한 종목만)
-      var mapOpen = state.routineExMapIdx === idx;
+      // 종목 줄을 누르면 그 종목의 자극 근육 인체도를 펼친다 (한 번에 한 종목만).
+      // index + 종목명이 둘 다 맞아야 펼친다 — 루틴이 바뀌면 저절로 닫힌다.
+      var mapOpen = isRoutineExerciseMapOpen(idx, ex.name);
       var mapHtml = mapOpen ? buildMuscleMapBlock(ex.name, { compact: true }) : '';
       previewExHtml +=
         '<div class="routine-preview-ex" onclick="toggleRoutineExerciseMap(' + idx + ')">' +
@@ -1957,6 +1959,7 @@ function startRestTimerTick() {
 // 종목 변경 (이동)
 window.goToExercise = function(idx) {
   if (state.activeSession) {
+    state.muscleMapZoom = null;   // 종목이 바뀌면 열려 있던 자극 근육 확대는 닫는다
     var cur = state.activeSession.currentExerciseIdx;
     state._exSwipeDir = (idx === cur) ? null : (idx > cur ? 'next' : 'prev'); // 6-C② 들어오는 카드 방향
     state.activeSession.currentExerciseIdx = idx;
