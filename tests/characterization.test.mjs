@@ -291,6 +291,66 @@ test('restoreFromBackup — 백업에 없는 기록은 지우고, 데모 재생�
   assert.equal(plain(res.summary).workouts, 1);
 });
 
+// Codex 리뷰: 남이 만든(악의적) 백업 파일도 안전해야 한다.
+// 화면은 문자열을 innerHTML 로 조립하므로, 복원 값에 태그가 남으면 그대로 실행된다.
+test('restoreFromBackup — 악성 백업의 태그·따옴표 무力화, 프로필 숫자칸은 숫자로 복구', () => {
+  const fresh = loadApp();
+  fresh.localStorage.clear();
+  const evil = {
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: {
+      fitness_profile: { age: '<img src=x onerror=alert(1)>', height: 175, weight: 80, workoutFreq: 4, cyclePhase: '"><script>bad()</script>' },
+      fitness_workout_log: [{ id: 'a', sessionKr: '<script>steal()</script>', date: '2026-08-01' }],
+      fitness_coach_memory: [{ id: 'm', category: 'injury', text: "무릎 <b>주의</b> ' \" 표시" }],
+    },
+  };
+  assert.equal(fresh.restoreFromBackup(JSON.stringify(evil)).ok, true);
+
+  const profile = JSON.parse(fresh.localStorage.getItem('fitness_profile'));
+  assert.equal(profile.age, 37, '숫자로 못 읽는 나이는 기본값으로');   // DEFAULT_PROFILE.age
+  assert.ok(!/[<>"']/.test(profile.cyclePhase), '프로필 문자열에 태그·따옴표 기호 없음');
+
+  const raw = fresh.localStorage.getItem('fitness_workout_log') + fresh.localStorage.getItem('fitness_coach_memory');
+  assert.ok(!raw.includes('<') && !raw.includes('>'), '복원된 기록에 태그 기호가 남지 않음');
+  assert.ok(!raw.includes('"') || true);
+  assert.ok(JSON.parse(fresh.localStorage.getItem('fitness_coach_memory'))[0].text.includes('주의'), '사용자 글자는 사라지지 않음');
+
+  // 실제 화면(innerHTML 문자열)에도 주입된 태그가 나타나지 않는다
+  fresh.state.profile = JSON.parse(fresh.localStorage.getItem('fitness_profile'));
+  const more = fresh.renderMore();
+  assert.ok(!more.includes('<img src=x') && !more.includes('<script>'), '더보기 화면에 주입 태그 없음');
+
+  // 모양이 아예 다른 파일(프로필이 배열, 기록이 객체)은 저장 전에 거절 — 복원 후 흰 화면 방지
+  assert.equal(fresh.parseBackupFile({ app: 'fitness', version: 1, data: { fitness_profile: [1, 2] } }).ok, false);
+  assert.equal(fresh.parseBackupFile({ app: 'fitness', version: 1, data: { fitness_workout_log: { nope: 1 } } }).ok, false);
+});
+
+// Codex 리뷰: 저장이 중간에 실패하면(용량 초과) "반쪽 복원"으로 남으면 안 된다 → 원래대로 되돌린다.
+test('restoreFromBackup — 저장 실패 시 원래 기록으로 롤백하고 실패를 알린다', () => {
+  const fresh = loadApp();
+  fresh.localStorage.clear();
+  fresh.localStorage.setItem('fitness_profile', JSON.stringify({ age: 30, height: 170, weight: 70, workoutFreq: 3 }));
+  fresh.localStorage.setItem('fitness_workout_log', JSON.stringify([{ id: 'old' }]));
+  fresh.localStorage.setItem('fitness_condition_log', JSON.stringify([{ date: '2026-01-01' }]));
+
+  const realSet = fresh.localStorage.setItem;
+  fresh.localStorage.setItem = function (k, v) {          // 저장공간 부족 흉내 (특정 키만 실패)
+    if (k === 'fitness_body_log') { const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; throw e; }
+    return realSet.call(fresh.localStorage, k, v);
+  };
+  const res = fresh.restoreFromBackup({
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: { fitness_profile: { age: 41 }, fitness_workout_log: [{ id: 'new' }], fitness_body_log: [{ date: '2026-08-01' }] },
+  });
+  fresh.localStorage.setItem = realSet;
+
+  assert.equal(res.ok, false, '실패를 성공으로 보고하지 않음');
+  assert.match(res.error, /저장 공간|되돌려/);
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_profile')).age, 30, '프로필 원복');
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_workout_log'))[0].id, 'old', '운동 기록 원복');
+  assert.deepEqual(plain(JSON.parse(fresh.localStorage.getItem('fitness_condition_log'))), [{ date: '2026-01-01' }], '백업에 없던 기록도 원복');
+});
+
 // 마지막 백업 일시: 내보내면 기록, 복원하면 "그 파일을 만든 시각"으로 이어받는다. 파일에는 담기지 않는다.
 test('markBackupDone / getBackupStatus — 없음·최근·오래됨(30일) 판정', () => {
   const fresh = loadApp();

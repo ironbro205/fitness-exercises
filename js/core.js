@@ -209,41 +209,122 @@ function parseBackupFile(input) {
   if (parsed.data[KEYS.PROFILE] === undefined && parsed.data[KEYS.WORKOUT_LOG] === undefined) {
     return { ok: false, error: '복원할 운동 데이터가 없어요.\n빈 백업 파일이거나 형식이 다릅니다.' };
   }
+  // 모양 확인 — 프로필은 객체, 기록들은 목록이어야 한다.
+  // (엉뚱한 모양이 들어오면 복원 뒤 화면이 하얗게 뜨므로, 저장하기 전에 막는다.)
+  var prof = parsed.data[KEYS.PROFILE];
+  if (prof !== undefined && (prof === null || typeof prof !== 'object' || Array.isArray(prof))) {
+    return { ok: false, error: '백업 파일의 프로필 정보가 손상됐어요.\n다른 백업 파일을 골라 주세요.' };
+  }
+  var listKeys = [KEYS.WORKOUT_LOG, KEYS.CARDIO_LOG, KEYS.BODY_LOG, KEYS.PERSONAL_RECORDS,
+                  KEYS.CONDITION_LOG, KEYS.CYCLE_HISTORY, KEYS.COACH_MEMORY];
+  for (var i = 0; i < listKeys.length; i++) {
+    var v = parsed.data[listKeys[i]];
+    if (v !== undefined && v !== null && !Array.isArray(v)) {
+      return { ok: false, error: '백업 파일의 기록 형식이 손상됐어요.\n다른 백업 파일을 골라 주세요.' };
+    }
+  }
   return { ok: true, backup: parsed, summary: summarizeBackup(parsed) };
+}
+
+// 남의 파일에서 온 글자를 화면에 그려도 안전하게 만든다.
+// 앱 화면은 문자열을 innerHTML 로 조립하므로(예: 프로필의 나이·키), 백업 파일에 태그를 심어두면
+// 복원 직후 그 태그가 실행될 수 있다. 위험한 기호를 "보기엔 같은" 전각/따옴표 문자로 바꿔
+// 뜻은 남기고 태그·속성 탈출만 막는다. (지우지 않으므로 사용자 글이 사라지지 않음)
+function sanitizeBackupText(s) {
+  return String(s)
+    .replace(/</g, '＜').replace(/>/g, '＞')
+    .replace(/"/g, '”').replace(/'/g, '’');
+}
+
+// 복원 값 전체(객체·배열 안쪽까지)를 훑어 문자열을 안전하게 만든다.
+function sanitizeRestoredValue(v, depth) {
+  depth = depth || 0;
+  if (typeof v === 'string') return sanitizeBackupText(v);
+  if (typeof v !== 'object' || v === null) return v;          // 숫자·불리언·null 은 그대로
+  if (depth > 12) return Array.isArray(v) ? [] : {};          // 비정상적으로 깊은 파일 방어
+  if (Array.isArray(v)) {
+    return v.map(function(item) { return sanitizeRestoredValue(item, depth + 1); });
+  }
+  var out = {};
+  Object.keys(v).forEach(function(k) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') return;
+    out[sanitizeBackupText(k)] = sanitizeRestoredValue(v[k], depth + 1);
+  });
+  return out;
+}
+
+// 프로필은 숫자 칸(나이·키·몸무게…)이 화면에 그대로 찍히므로 숫자로 못 읽는 값은 기본값으로 되돌린다.
+function sanitizeRestoredProfile(profile) {
+  var p = sanitizeRestoredValue(profile, 0);
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
+  Object.keys(DEFAULT_PROFILE).forEach(function(field) {
+    if (typeof DEFAULT_PROFILE[field] !== 'number') return;
+    if (p[field] === undefined || p[field] === null) return;   // 백업에 없던 칸은 그대로 — init() 이 채운다
+    var n = Number(p[field]);
+    p[field] = isFinite(n) ? n : DEFAULT_PROFILE[field];
+  });
+  return p;
 }
 
 // 백업 JSON(문자열 또는 객체)을 저장소로 복원. 알려진 키만, 민감키는 절대 복원 안 함.
 // "덮어쓰기"이므로 백업에 없는 항목은 지운다 — 옛 기록이 섞여 남지 않도록.
+// 저장이 하나라도 실패하면(저장공간 부족 등) 원래 값으로 되돌린다 — 반쪽 복원 상태를 만들지 않기 위해.
 // 반환: { ok: true, summary } 또는 { ok: false, error }. 절대 throw 하지 않음.
 function restoreFromBackup(input) {
   var checked = parseBackupFile(input);
   if (!checked.ok) return checked;
+  var parsed = checked.backup;
+  var keys = getBackupKeys();
+
+  // 되돌리기용 스냅샷 (직렬화된 원본 문자열 그대로)
+  var snapshot = {};
   try {
-    var parsed = checked.backup;
-    getBackupKeys().forEach(function(key) {
+    keys.forEach(function(key) { snapshot[key] = localStorage.getItem(key); });
+  } catch (e) {
+    return { ok: false, error: '저장소를 읽지 못했어요.\n브라우저의 사이트 데이터 설정을 확인해 주세요.' };
+  }
+  function rollback() {
+    keys.forEach(function(key) {
+      try {
+        if (snapshot[key] === null || snapshot[key] === undefined) localStorage.removeItem(key);
+        else localStorage.setItem(key, snapshot[key]);
+      } catch (e) {}
+    });
+  }
+
+  var failed = false;
+  try {
+    keys.forEach(function(key) {
+      if (failed) return;
       var val = parsed.data[key];
       if (val === undefined || val === null) {
-        try { localStorage.removeItem(key); } catch (e) {}   // 백업에 없는 항목 → 지움(진짜 덮어쓰기)
-      } else {
-        storage.set(key, val);
+        localStorage.removeItem(key);                      // 백업에 없는 항목 → 지움(진짜 덮어쓰기)
+        return;
       }
+      var safe = (key === KEYS.PROFILE) ? sanitizeRestoredProfile(val) : sanitizeRestoredValue(val, 0);
+      if (!storage.set(key, safe)) failed = true;          // 저장 실패(용량 초과 등)
     });
-    // 기존 임시 진행상태·파생 캐시 정리 (옛 세션/캐시가 새 데이터와 충돌하지 않도록).
-    // API 키·코치 대화 같은 로컬 전용 값은 그대로 둔다.
-    BACKUP_TRANSIENT_KEYS.forEach(function(key) {
-      try { localStorage.removeItem(key); } catch (e) {}
-    });
-    // 첫 실행 플래그는 항상 세워 둔다 — 없으면 다음 로드에서 데모 데이터가 다시 깔린다.
-    storage.set(KEYS.INITIALIZED, true);
-    // 1RM을 복원했으면 '초기화됨' 플래그도 함께 세운다 — 없으면 다음 로드의 initializeOneRMData()가
-    // 복원한 1RM을 기본값(INITIAL_1RM)으로 덮어쓴다.
-    if (storage.get(KEYS.ONE_RM_DATA, null)) storage.set(KEYS.ONE_RM_INITIALIZED, true);
-    // 마지막 백업 일시는 "파일이 만들어진 시각" 기준으로 다시 세팅 (새 폰에서도 백업 주기가 이어지도록)
-    markBackupDone(parsed.exportedAt);
-    return { ok: true, summary: checked.summary };
   } catch (e) {
-    return { ok: false, error: '복원 중 문제가 생겼어요.\n저장 공간이 가득 찼는지 확인해 주세요.' };
+    failed = true;
   }
+  if (failed) {
+    rollback();
+    return { ok: false, error: '저장 공간이 부족해 복원을 끝내지 못했어요.\n원래 기록은 그대로 되돌려 놨습니다. 기기 저장 공간을 정리한 뒤 다시 시도해 주세요.' };
+  }
+
+  // 기존 임시 진행상태·파생 캐시 정리 (옛 세션/캐시가 새 데이터와 충돌하지 않도록).
+  // API 키·코치 대화 같은 로컬 전용 값은 그대로 둔다.
+  BACKUP_TRANSIENT_KEYS.forEach(function(key) {
+    try { localStorage.removeItem(key); } catch (e) {}
+  });
+  // 첫 실행 플래그는 항상 세워 둔다 — 없으면 다음 로드에서 데모 데이터가 다시 깔린다.
+  storage.set(KEYS.INITIALIZED, true);
+  // 1RM을 복원했으면 '초기화됨' 플래그도 함께 세운다 — 없으면 다음 로드의 initializeOneRMData()가
+  // 복원한 1RM을 기본값(INITIAL_1RM)으로 덮어쓴다.
+  if (storage.get(KEYS.ONE_RM_DATA, null)) storage.set(KEYS.ONE_RM_INITIALIZED, true);
+  // 마지막 백업 일시는 "파일이 만들어진 시각" 기준으로 다시 세팅 (새 폰에서도 백업 주기가 이어지도록)
+  markBackupDone(parsed.exportedAt);
+  return { ok: true, summary: checked.summary };
 }
 
 // 마지막 백업 일시 기록 (이 기기 전용 메모 — 백업 파일에는 안 담김)
