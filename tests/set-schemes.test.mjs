@@ -478,6 +478,21 @@ test('[신규] 무게를 모르는 종목은 새 스킴 3종도 스트레이트�
   resetOverrides();
 });
 
+test('[불변식] 세션 화면은 저장된 선택이 아니라 **실제 적용된** 세트법을 말한다', () => {
+  resetOverrides();
+  seedLog([]);
+  app.storage.set(app.KEYS.ONE_RM_DATA, {});
+  app.setSetSchemeOverride('풀업', 'pyramid');          // 무게를 모르는 종목 → 스트레이트로 접힌다
+  const plan = app.getSessionSetPlan('풀업', null, '본인 최대', { sets: 3 });
+  assert.equal(app.getSetScheme('풀업'), 'pyramid', '저장된 선택은 그대로 유지된다');
+  assert.equal(plan.scheme, 'straight');
+  assert.equal(app.sessionSchemeOf({ name: '풀업', scheme: plan.scheme }), 'straight',
+    '화면이 "피라미드"라 써 놓고 스트레이트 세트를 보여 주면 안 된다');
+  // scheme 필드가 없는 옛 세션은 저장된 선택으로 되돌아간다 (하위호환)
+  assert.equal(app.sessionSchemeOf({ name: '풀업' }), 'pyramid');
+  resetOverrides();
+});
+
 test('[신규] 백다운은 볼륨에는 들어가고, 증량 판정·지난기록·1RM은 오염시키지 않는다', () => {
   resetOverrides();
   // 탑 60×8 2세션 연속 + 백다운 50×15 → 탑세트 기준으로 증량돼야 하고, 백다운 15회가 섞이면 안 된다

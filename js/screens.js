@@ -1970,7 +1970,7 @@ window.addSetToExercise = function(exerciseIdx) {
   var addedSet = null;
   if (lastSet && lastSet.role === 'top') {
     // 스킴이 탑 다음에 두는 단. 없으면(스트레이트·피라미드 등) 기존 동작대로 백오프로 이어 붙인다.
-    var afterTop = nextStepAfterTop(exercise.scheme)
+    var afterTop = nextStepAfterTop(sessionSchemeOf(exercise))
       || { role: 'backoff', pct: BACKOFF_PCT, rir: '2-3' };
     addedRole = afterTop.role;
     addedPct = afterTop.pct;
@@ -2266,11 +2266,16 @@ window.applySetScheme = function(schemeId) {
     showToast('재활 종목은 세트법을 바꿀 수 없어요');
     return;
   }
-  rebuildPendingSets(ex);
+  var plan = rebuildPendingSets(ex);
   state.setSchemeOpen = false;
   saveActiveSession();
   render();
-  showToast(SET_SCHEMES[schemeId].kr + '로 바꿨어요');
+  // 무게를 모르는 종목에서는 감량 기반 스킴이 스트레이트로 접힌다 — 그때 "피라미드로 바꿨어요"라고
+  // 알리면 화면(스트레이트)과 말이 어긋난다. **실제로 적용된 스킴**을 알린다.
+  var applied = (plan && plan.scheme) || schemeId;
+  showToast(applied === schemeId
+    ? SET_SCHEMES[applied].kr + '로 바꿨어요'
+    : SET_SCHEMES[applied].kr + '로 했어요 — 무게를 모르는 종목이라 감량을 못 해요');
 };
 
 // 슈퍼세트 제안 해제 (기구가 붐비거나 힘들 때 — 사용자 판단 존중)
@@ -3030,7 +3035,9 @@ function renderWorkoutSession() {
           (exercise.addedInSession ? ' · 운동 중 추가' : '') + (exercise.skipped ? ' · 건너뜀' : '') + '</p>' +
         '<h2 class="font-bebas text-2xl mb-1">' + escapeHtml(exercise.name) + '</h2>' +
         '<p class="text-xs font-mono text-stone-400">' + escapeHtml(exercise.type) +
-          ' · ' + (SET_SCHEMES[getSetScheme(exercise.name)] || SET_SCHEMES.straight).short +
+          // **실제로 적용된** 세트법(exercise.scheme)을 적는다. 저장된 선택(getSetScheme)을 적으면
+          // 무게를 모르는 종목에서 스킴이 스트레이트로 접혔는데도 "탑+백오프"라 써 놓게 된다.
+          ' · ' + (SET_SCHEMES[sessionSchemeOf(exercise)] || SET_SCHEMES.straight).short +
           ' · 휴식 ' + getExerciseRestSec(exercise.name) + '초</p>' +
         (typeof exercise.supersetWith === 'number' && session.exercises[exercise.supersetWith]
           ? '<p class="text-[11px] font-mono mt-1" style="color: var(--accent);">슈퍼세트 ' +
@@ -3180,7 +3187,7 @@ function renderWorkoutSession() {
 // 시간 압박이 실제로 있을 때만 값어치가 있다(§4-C). 사용자가 눌러야 반영된다.
 function buildSetSchemeNoticeHtml(session, exercise) {
   var html = '';
-  var scheme = getSetScheme(exercise.name);
+  var scheme = sessionSchemeOf(exercise);
 
   // 어시스트 종목은 "가볍게 = 보조를 더" 라서 안내 문구를 그대로 두면 정반대로 읽힌다.
   var rev = isReverseProgression(exercise.name);

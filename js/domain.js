@@ -724,6 +724,16 @@ function getSetSchemeOptions(exerciseName) {
   });
 }
 
+// 세션 화면이 "이 종목은 지금 무슨 세트법인가"를 물을 때 쓰는 단일 원천.
+// 세트를 만들 때 확정된 값(exercise.scheme)이 우선이다 — 저장된 사용자 선택(getSetScheme)은
+// 무게를 모르는 종목에서 스트레이트로 접히기 전의 값이라, 그걸 그대로 적으면 화면이 거짓말을 한다.
+// scheme 이 없는 옛 세션은 저장된 선택으로 되돌아간다(하위호환).
+function sessionSchemeOf(exercise) {
+  var s = exercise && exercise.scheme;
+  if (s && SET_SCHEMES[s]) return s;
+  return getSetScheme(exercise ? exercise.name : '');
+}
+
 // 그 스킴이 탑세트 **다음**에 두는 단 (없으면 null).
 // "세트 추가"가 탑세트 뒤에 무엇을 붙일지 결정하는 데 쓴다 — 탑+백오프면 백오프, 탑+백다운이면 백다운.
 function nextStepAfterTop(scheme) {
@@ -744,7 +754,7 @@ function nextStepAfterTop(scheme) {
 // 반환: 실제로 낮춘 세트 수 (0이면 아무것도 안 바뀜)
 function applyTopSetAutoDeload(exercise) {
   if (!exercise || !Array.isArray(exercise.sets)) return 0;
-  var build = SET_SCHEMES[exercise.scheme] && SET_SCHEMES[exercise.scheme].build;
+  var build = SET_SCHEMES[sessionSchemeOf(exercise)] && SET_SCHEMES[sessionSchemeOf(exercise)].build;
   if (!build || !build.autoDeload) return 0;
 
   var top = null;

@@ -1,5 +1,5 @@
 {
-  "functionCount": 443,
+  "functionCount": 444,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -393,6 +393,7 @@
     "sendCoachMessage",
     "sendRoutineModification",
     "sendSessionChatMessage",
+    "sessionSchemeOf",
     "setCardioHandrail",
     "setCardioMode",
     "setCompleteCondition",
