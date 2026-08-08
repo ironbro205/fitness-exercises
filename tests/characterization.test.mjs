@@ -219,8 +219,407 @@ test('buildBackupObject / restoreFromBackup — 왕복 복원, API키·대화 �
 });
 
 // ═══════════════════════════════════════════════
+// 데이터 백업 확장 — 파일 검증 / 덮어쓰기 / 마지막 백업 일시
+// ═══════════════════════════════════════════════
+
+// 백업 파일을 "적용 전에" 검사한다 — 깨진 파일·남의 파일·미래 버전은 저장소를 건드리지 않고 거절.
+test('parseBackupFile — 손상/타앱/미래버전/빈파일 거절, 정상 파일은 요약 반환', () => {
+  const fresh = loadApp();
+  const ok = (r) => r.ok;
+
+  assert.equal(fresh.parseBackupFile('쓰레기{').ok, false);                      // JSON 아님
+  assert.equal(fresh.parseBackupFile(null).ok, false);                           // 빈 입력
+  assert.equal(fresh.parseBackupFile({ app: 'fitness', version: 1 }).ok, false);  // data 없음
+  assert.equal(fresh.parseBackupFile({ app: 'other', version: 1, data: { fitness_profile: {} } }).ok, false); // 다른 앱
+  assert.equal(fresh.parseBackupFile({ app: 'fitness', version: 999, data: { fitness_profile: {} } }).ok, false); // 미래 버전
+  assert.equal(fresh.parseBackupFile({ app: 'fitness', data: { fitness_profile: {} } }).ok, false); // 버전 없음
+  assert.equal(fresh.parseBackupFile({ app: 'fitness', version: 1, data: { fitness_settings: {} } }).ok, false); // 운동 데이터 없음
+
+  // 오류 문구는 한국어 안내 (사용자가 읽고 뭘 해야 할지 알 수 있어야 함)
+  assert.match(fresh.parseBackupFile('쓰레기{').error, /백업 파일|파일/);
+
+  const good = {
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: {
+      fitness_profile: { age: 40 },
+      fitness_workout_log: [{ id: 'a' }, { id: 'b' }],
+      fitness_cardio_log: [{ id: 'c' }],
+      fitness_body_log: [{ date: '2026-08-01', weight: 78 }],
+      fitness_personal_records: [{ id: 'p' }],
+      fitness_coach_memory: [{ id: 'm' }],
+      fitness_one_rm_data: { '레그 프레스': 200, '벤치': 80 }
+    }
+  };
+  const res = fresh.parseBackupFile(JSON.stringify(good));
+  assert.equal(ok(res), true);
+  assert.deepEqual(plain(res.summary), {
+    exportedAt: '2026-08-01T00:00:00.000Z',
+    workouts: 2, cardio: 1, body: 1, records: 1, memory: 1, oneRM: 2
+  });
+});
+
+// 확인 문구: 뭐가 들어있는지 + 되돌릴 수 없다는 경고 + API키/대화는 안 건드림
+test('buildRestoreConfirmMessage — 백업 내용 요약 + 덮어쓰기 경고', () => {
+  const fresh = loadApp();
+  const msg = fresh.buildRestoreConfirmMessage({ exportedAt: '2026-08-01T00:00:00.000Z', workouts: 12, body: 30, oneRM: 5 });
+  assert.match(msg, /2026\.08\.01/);
+  assert.match(msg, /운동 12회/);
+  assert.match(msg, /체중 30개/);
+  assert.match(msg, /되돌릴 수 없/);
+  assert.match(msg, /API 키/);
+  // 빈 백업도 문구가 깨지지 않는다
+  assert.match(fresh.buildRestoreConfirmMessage({}), /담긴 기록 없음/);
+});
+
+// 복원은 "덮어쓰기" — 백업에 없는 항목은 남기지 않는다(옛 기록이 섞이면 통계가 틀어짐).
+test('restoreFromBackup — 백업에 없는 기록은 지우고, 데모 재생성·1RM 초기화는 막는다', () => {
+  const fresh = loadApp();
+  fresh.localStorage.clear();
+  fresh.localStorage.setItem('fitness_condition_log', JSON.stringify([{ date: '2026-01-01' }])); // 백업엔 없는 옛 기록
+  fresh.localStorage.setItem('fitness_api_key', JSON.stringify('sk-keep'));
+
+  const backup = {
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: { fitness_profile: { age: 40 }, fitness_workout_log: [{ id: 'a' }], fitness_one_rm_data: { '벤치': 80 } }
+  };
+  const res = fresh.restoreFromBackup(JSON.stringify(backup));
+  assert.equal(res.ok, true);
+  assert.equal(fresh.localStorage.getItem('fitness_condition_log'), null, '백업에 없는 기록은 지워짐');
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_api_key')), 'sk-keep', 'API키는 그대로');
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_initialized')), true, '데모 데이터 재생성 방지');
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_one_rm_initialized')), true, '복원한 1RM이 기본값에 덮이지 않도록');
+  assert.equal(plain(res.summary).workouts, 1);
+});
+
+// Codex 리뷰: 남이 만든(악의적) 백업 파일을 가져와도 화면에서 코드가 실행되면 안 된다.
+// 원칙 — 저장된 글자는 그대로 두고(사용자 데이터 보존), 화면에 그릴 때 이스케이프한다.
+// 속성 안에 들어가는 id·날짜만 앱이 만드는 형식으로 제한한다(엔티티로 따옴표를 되살리는 우회 차단).
+test('복원 — 악성 백업이 화면에서 실행되지 않고, 사용자 글자는 그대로 보존된다', () => {
+  const fresh = loadApp();
+  fresh.localStorage.clear();
+  const memoText = "무릎 <b>주의</b> ' \" & 표시";   // 사용자가 실제로 쓸 수 있는 글자
+  const evil = {
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: {
+      fitness_profile: { age: '<img src=x onerror=alert(1)>', height: 175, weight: 80, workoutFreq: 4, cyclePhase: '"><script>bad()</script>' },
+      fitness_workout_log: [{ id: "&#39;);alert(1);//", sessionKr: '<img src=x onerror=steal()>', date: '2026-08-01', duration: 30, sets: 10 }],
+      fitness_body_log: [{ date: "&#39;);alert(2);//", weight: '<script>x</script>' }],
+      fitness_coach_memory: [{ id: 'mem_1', category: 'injury', text: memoText }],
+      fitness_one_rm_data: { '레그 프레스': 200, '벤치프레스': '<img src=x onerror=alert(1)>' },
+      __proto__: { polluted: true },
+    },
+  };
+  assert.equal(fresh.restoreFromBackup(JSON.stringify(evil)).ok, true);
+
+  // 1) 사용자 글자는 한 글자도 바뀌지 않는다 (정상 백업 왕복 보존)
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_coach_memory'))[0].text, memoText);
+
+  // 2) 프로필 숫자칸은 숫자만 (못 읽으면 기본값)
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_profile')).age, 37);   // DEFAULT_PROFILE.age
+
+  // 3) 속성에 들어가는 id·날짜는 안전한 글자만 남는다 → 엔티티로 따옴표를 되살릴 수 없음
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_workout_log'))[0].id, '39alert1');
+  assert.equal(Object.prototype.polluted, undefined, '프로토타입 오염 없음');
+
+  // 3-1) 숫자칸에 글자가 들어오면 화면 계산이 멈추므로(weight.toFixed) 버리거나 숫자로 맞춘다
+  assert.deepEqual(plain(JSON.parse(fresh.localStorage.getItem('fitness_body_log'))), [], '숫자 아닌 체중 기록은 제외');
+  // 1RM 표(종목→무게)도 숫자만 남는다 — 글자면 "내 1RM" 화면에 그대로 찍히고 작업무게 계산도 깨진다
+  assert.deepEqual(plain(JSON.parse(fresh.localStorage.getItem('fitness_one_rm_data'))), { '레그 프레스': 200 });
+  fresh.state.oneRMListOpen = true;
+  assert.ok(!fresh.renderOneRMList().includes('<img'), '1RM 화면에 주입 태그 없음');
+
+  // 4) 화면 문자열에 살아있는 태그·핸들러가 없다 (기록/체중/프로필 모두)
+  fresh.state.profile = JSON.parse(fresh.localStorage.getItem('fitness_profile'));
+  fresh.state.data.workoutLog = JSON.parse(fresh.localStorage.getItem('fitness_workout_log'));
+  fresh.state.data.bodyLog = JSON.parse(fresh.localStorage.getItem('fitness_body_log'));
+  const screens = fresh.renderMore() + fresh.renderStats() + fresh.renderHome();
+  assert.ok(!screens.includes('<img') && !screens.includes('<script'), '살아있는 태그로 들어가지 않음');
+  assert.ok(screens.includes('&lt;img src=x onerror=steal()&gt;'), '글자(이스케이프된 형태)로만 표시됨');
+  // 속성 안(onclick)에는 안전한 id 만 들어간다 — 따옴표·엔티티로 코드가 끊기지 않음
+  assert.ok(/onclick="openItemDetail\('workout', '39alert1'\)"/.test(screens), 'onclick 속성이 온전함');
+
+  // 5) 모양이 아예 다른 파일(프로필이 배열, 기록이 객체)은 저장 전에 거절 — 복원 후 흰 화면 방지
+  assert.equal(fresh.parseBackupFile({ app: 'fitness', version: 1, data: { fitness_profile: [1, 2] } }).ok, false);
+  assert.equal(fresh.parseBackupFile({ app: 'fitness', version: 1, data: { fitness_workout_log: { nope: 1 } } }).ok, false);
+});
+
+// 전면 점검(한 곳씩 놓치지 않게): 복원되는 모든 키에 태그를 심고 모든 화면을 그려본다.
+// 화면 문자열에 살아있는 <img/<script 가 하나라도 나오면 실패 — 새 화면이 생겨도 이 테스트가 잡는다.
+test('복원 — 모든 기록에 태그를 심어도 어떤 화면에서도 살아있는 태그가 안 나온다', () => {
+  const fresh = loadApp();
+  const P = '<img src=x onerror=eeek()>';
+  const today = fresh.getTodayStr();
+  fresh.localStorage.clear();
+  const poisoned = {
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: {
+      fitness_profile: { age: P, height: P, weight: P, workoutFreq: P, currentCycle: P, currentWeek: P, cyclePhase: P, weekSessionsDone: P, goal: P },
+      fitness_workout_log: [{
+        id: P, date: today, startTime: P, sessionKr: P, sessionName: P, sessionType: P, duration: P, sets: P,
+        exerciseCount: P, completed: true, note: P,
+        exercises: [{ name: P, weight: P, reps: P, note: P, setsDetail: [{ weight: P, reps: P, completed: true }] }],
+      }],
+      fitness_cardio_log: [{ id: P, date: today, totalSec: P, totalDistKm: P, rpe: P, segments: [{ type: P, label: P }] }],
+      fitness_body_log: [{ date: today, weight: 78.5, bodyFat: P, note: P }],
+      fitness_personal_records: [{ id: P, exerciseName: P, weight: P, reps: P, previousWeight: P, date: today }],
+      fitness_condition_log: [{ date: today, sleep: P, energy: P, soreness: P, note: P }],
+      fitness_cycle_history: [{ cycle: P, week: P, phase: P, endedAt: today }],
+      fitness_coach_memory: [{ id: P, category: P, text: P, source: P, date: today }],
+      fitness_one_rm_data: { [P]: P, '레그 프레스': P },
+      fitness_settings: { notifications: true, theme: P, unit: P },
+      fitness_chat_signals: [{ exName: P, pain: P, feel: P, date: today }],
+    },
+  };
+  assert.equal(fresh.restoreFromBackup(JSON.stringify(poisoned)).ok, true);
+
+  // 복원된 저장소를 앱 상태로 올린다 (init() 이 하는 일과 같은 경로)
+  fresh.state.profile = fresh.storage.get('fitness_profile', {});
+  fresh.state.data = {
+    workoutLog: fresh.storage.get('fitness_workout_log', []),
+    cardioLog: fresh.storage.get('fitness_cardio_log', []),
+    personalRecords: fresh.storage.get('fitness_personal_records', []),
+    bodyLog: fresh.storage.get('fitness_body_log', []),
+    conditionLog: fresh.storage.get('fitness_condition_log', []),
+    cycleHistory: fresh.storage.get('fitness_cycle_history', []),
+  };
+  fresh.state.coachMemory = fresh.storage.get('fitness_coach_memory', []);
+  fresh.state.settings = fresh.storage.get('fitness_settings', {});
+
+  // 인자 없이 부를 수 있는 화면 함수를 전부 그려본다
+  const screenFns = fresh.__APP_GLOBALS__
+    .filter((n) => /^render[A-Z]/.test(n) && typeof fresh[n] === 'function' && fresh[n].length === 0);
+  assert.ok(screenFns.length >= 8, '화면 함수를 찾지 못함: ' + screenFns.length);
+
+  const leaked = [];
+  for (const name of screenFns) {
+    let html;
+    try { html = fresh[name](); } catch (e) { continue; }   // 별도 상태가 필요한 화면은 건너뜀
+    if (typeof html !== 'string') continue;
+    if (html.includes('<img') || html.includes('<script')) leaked.push(name);   // 이스케이프되면 &lt;img 로만 나온다
+  }
+  assert.deepEqual(leaked, [], '이스케이프 안 된 화면: ' + leaked.join(', '));
+
+  // 기록 상세 시트(운동·체중)도 같은 기준으로 확인
+  const w = fresh.state.data.workoutLog[0];
+  fresh.state.itemDetailSheet = { type: 'workout', data: w };
+  const sheet = fresh.renderItemDetailSheet();
+  assert.ok(!sheet.includes('<img') && !sheet.includes('<script'), '기록 상세 시트에 살아있는 태그');
+});
+
+// 리뷰(고강도) 반영 — 덮어쓰기로 바뀌면서 생길 수 있는 데이터 손실 경로들
+test('복원 — 알맹이 없는 백업은 거절하고, 프로필 없는 백업도 기록을 잃지 않는다', () => {
+  const fresh = loadApp();
+
+  // ① 목록만 있고 전부 비어 있는 파일 → 거절 (덮어쓰기로 기존 기록을 날리면 안 됨)
+  const empty = fresh.parseBackupFile({
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: { fitness_workout_log: [], fitness_body_log: [] },
+  });
+  assert.equal(empty.ok, false);
+  assert.match(empty.error, /복원할 기록이 없어요/);
+
+  // 실제로 기존 데이터가 남아있는지까지 확인
+  fresh.localStorage.clear();
+  fresh.localStorage.setItem('fitness_profile', JSON.stringify({ age: 44 }));
+  fresh.localStorage.setItem('fitness_coach_memory', JSON.stringify([{ id: 'mem_1', text: '유지되어야 함' }]));
+  assert.equal(fresh.restoreFromBackup({ app: 'fitness', version: 1, data: { fitness_workout_log: [] } }).ok, false);
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_profile')).age, 44, '거절된 복원은 기존 기록을 안 건드림');
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_coach_memory')).length, 1);
+
+  // ② 프로필이 없는 백업 → 프로필을 지우지 않고 기본값 "복사본"을 남긴다
+  //    (지워두면 다음 로드에서 전역 DEFAULT_PROFILE 을 그대로 물고 매번 초기화된다)
+  fresh.localStorage.clear();
+  const beforeAge = fresh.DEFAULT_PROFILE.age;
+  assert.equal(fresh.restoreFromBackup({
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: { fitness_workout_log: [{ id: 'w_1', date: '2026-08-01' }] },
+  }).ok, true);
+  const storedProfile = JSON.parse(fresh.localStorage.getItem('fitness_profile'));
+  assert.ok(storedProfile && typeof storedProfile === 'object', '프로필이 저장돼 있음');
+  storedProfile.age = 99;                       // 저장본을 바꿔도
+  assert.equal(fresh.DEFAULT_PROFILE.age, beforeAge, '전역 기본 프로필은 오염되지 않음');
+  fresh.init();
+  fresh.state.profile.currentWeek = 4;          // init 이 물려준 객체를 바꿔도
+  assert.equal(fresh.DEFAULT_PROFILE.currentWeek, 1, 'init 도 기본값 복사본을 쓴다');
+
+  // ③ 1RM이 비면 '초기화됨' 플래그를 세우지 않는다 → 다음 로드에서 기본 1RM이 다시 깔린다
+  fresh.localStorage.clear();
+  assert.equal(fresh.restoreFromBackup({
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: { fitness_workout_log: [{ id: 'w_1', date: '2026-08-01' }], fitness_one_rm_data: { '벤치': '무거움' } },
+  }).ok, true);
+  assert.equal(fresh.localStorage.getItem('fitness_one_rm_initialized'), null, '빈 1RM에는 플래그 안 세움');
+  fresh.initializeOneRMData();
+  assert.ok(Object.keys(JSON.parse(fresh.localStorage.getItem('fitness_one_rm_data'))).length > 0, '기본 1RM 재시드됨');
+
+  // ③-1 파일이 '초기화됨' 플래그를 들고 있어도 1RM이 비면 그 플래그는 남기지 않는다
+  fresh.localStorage.clear();
+  assert.equal(fresh.restoreFromBackup({
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: { fitness_workout_log: [{ id: 'w_1', date: '2026-08-01' }], fitness_one_rm_data: {}, fitness_one_rm_initialized: true },
+  }).ok, true);
+  assert.equal(fresh.localStorage.getItem('fitness_one_rm_initialized'), null, '파일에 든 플래그도 정리됨');
+
+  // ④ 확인창 개수 = 실제로 저장될 개수 (정리로 버려질 줄은 미리 빠져야 함)
+  const checked = fresh.parseBackupFile({
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: {
+      fitness_profile: { age: 40 },
+      fitness_body_log: [{ date: '2026-08-01', weight: 78 }, { date: '2026-08-02', weight: '무거움' }],
+      fitness_one_rm_data: { '벤치': 80, '스쿼트': 'x' },
+    },
+  });
+  assert.equal(checked.summary.body, 1, '버려질 체중 기록은 확인창 숫자에서도 빠짐');
+  assert.equal(checked.summary.oneRM, 1);
+
+  // ⑤ 날짜가 숫자(에폭 ms)여도 기록 탭 정렬이 멈추지 않는다
+  fresh.localStorage.clear();
+  assert.equal(fresh.restoreFromBackup({
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: { fitness_profile: { age: 40 }, fitness_body_log: [{ date: 1754611200000, weight: 78 }] },
+  }).ok, true);
+  assert.equal(typeof JSON.parse(fresh.localStorage.getItem('fitness_body_log'))[0].date, 'string');
+  fresh.state.data.bodyLog = JSON.parse(fresh.localStorage.getItem('fitness_body_log'));
+  assert.doesNotThrow(() => fresh.renderStats(), '기록 탭이 멈추지 않음');
+});
+
+// 되돌리기까지 실패하면 "되돌려 놨다"고 단언하면 안 된다 — 안내가 달라야 한다.
+test('복원 실패 — 되돌리기까지 실패하면 다른 안내를 준다', () => {
+  const fresh = loadApp();
+  fresh.localStorage.clear();
+  fresh.localStorage.setItem('fitness_profile', JSON.stringify({ age: 30 }));
+  fresh.localStorage.setItem('fitness_body_log', JSON.stringify([{ date: '2026-01-01', weight: 70 }]));
+
+  const realSet = fresh.localStorage.setItem;
+  fresh.localStorage.setItem = function (k, v) {   // 체중 기록 쓰기는 저장·되돌리기 모두 실패
+    if (k === 'fitness_body_log') { const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; throw e; }
+    return realSet.call(fresh.localStorage, k, v);
+  };
+  const res = fresh.restoreFromBackup({
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: { fitness_profile: { age: 41 }, fitness_body_log: [{ date: '2026-08-01', weight: 78 }] },
+  });
+  fresh.localStorage.setItem = realSet;
+
+  assert.equal(res.ok, false);
+  assert.match(res.error, /되돌리지도 못했어요/, '되돌리기 실패를 사실대로 알림');
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_profile')).age, 30, '되돌릴 수 있는 건 되돌림');
+});
+
+// 정상 백업 왕복 — 따옴표·꺾쇠가 든 사용자 글자가 내보내기→가져오기 후에도 완전히 같아야 한다.
+test('백업 왕복 — 사용자 글자가 글자 단위로 그대로 돌아온다', () => {
+  const fresh = loadApp();
+  fresh.localStorage.clear();
+  const notes = [
+    { id: 'mem_1', category: 'goal', text: '목표: 체중 < 75kg & 벤치 "100kg"' },
+    { id: 'mem_2', category: 'injury', text: "왼쪽 어깨 '뚝' 소리 — 오버헤드 주의" },
+  ];
+  fresh.localStorage.setItem('fitness_profile', JSON.stringify({ age: 40, height: 175, weight: 80, workoutFreq: 4 }));
+  fresh.localStorage.setItem('fitness_workout_log', JSON.stringify([{ id: 'w_1749', date: '2026-08-01', sessionKr: 'PUSH' }]));
+  fresh.localStorage.setItem('fitness_coach_memory', JSON.stringify(notes));
+
+  const file = JSON.stringify(fresh.buildBackupObject());
+  fresh.localStorage.clear();
+  assert.equal(fresh.restoreFromBackup(file).ok, true);
+  assert.deepEqual(plain(JSON.parse(fresh.localStorage.getItem('fitness_coach_memory'))), notes);
+  assert.deepEqual(plain(JSON.parse(fresh.localStorage.getItem('fitness_workout_log'))), [{ id: 'w_1749', date: '2026-08-01', sessionKr: 'PUSH' }]);
+
+  // 두 번 복원해도 계속 같다 (치환이 누적되지 않음)
+  assert.equal(fresh.restoreFromBackup(JSON.stringify(fresh.buildBackupObject())).ok, true);
+  assert.deepEqual(plain(JSON.parse(fresh.localStorage.getItem('fitness_coach_memory'))), notes);
+});
+
+// Codex 리뷰: 저장이 중간에 실패하면(용량 초과) "반쪽 복원"으로 남으면 안 된다 → 원래대로 되돌린다.
+test('restoreFromBackup — 저장 실패 시 원래 기록으로 롤백하고 실패를 알린다', () => {
+  const fresh = loadApp();
+  fresh.localStorage.clear();
+  fresh.localStorage.setItem('fitness_profile', JSON.stringify({ age: 30, height: 170, weight: 70, workoutFreq: 3 }));
+  fresh.localStorage.setItem('fitness_workout_log', JSON.stringify([{ id: 'old' }]));
+  fresh.localStorage.setItem('fitness_condition_log', JSON.stringify([{ date: '2026-01-01' }]));
+
+  const realSet = fresh.localStorage.setItem;
+  fresh.localStorage.setItem = function (k, v) {          // 저장공간 부족 흉내 (특정 키만 실패)
+    if (k === 'fitness_body_log') { const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; throw e; }
+    return realSet.call(fresh.localStorage, k, v);
+  };
+  const res = fresh.restoreFromBackup({
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: { fitness_profile: { age: 41 }, fitness_workout_log: [{ id: 'new' }], fitness_body_log: [{ date: '2026-08-01' }] },
+  });
+  fresh.localStorage.setItem = realSet;
+
+  assert.equal(res.ok, false, '실패를 성공으로 보고하지 않음');
+  assert.match(res.error, /저장 공간|되돌려/);
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_profile')).age, 30, '프로필 원복');
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_workout_log'))[0].id, 'old', '운동 기록 원복');
+  assert.deepEqual(plain(JSON.parse(fresh.localStorage.getItem('fitness_condition_log'))), [{ date: '2026-01-01' }], '백업에 없던 기록도 원복');
+});
+
+// 마지막 백업 일시: 내보내면 기록, 복원하면 "그 파일을 만든 시각"으로 이어받는다. 파일에는 담기지 않는다.
+test('markBackupDone / getBackupStatus — 없음·최근·오래됨(30일) 판정', () => {
+  const fresh = loadApp();
+  fresh.localStorage.clear();
+
+  const none = fresh.getBackupStatus();
+  assert.equal(none.never, true);
+  assert.equal(none.at, null);
+  assert.equal(none.stale, true, '한 번도 백업 안 했으면 리마인더 대상');
+
+  const now = Date.UTC(2026, 7, 8);                                   // 2026-08-08 기준
+  fresh.markBackupDone(new Date(now - 3 * 86400000).toISOString());   // 3일 전
+  const recent = fresh.getBackupStatus(now);
+  assert.equal(recent.never, false);
+  assert.equal(recent.daysSince, 3);
+  assert.equal(recent.stale, false);
+
+  fresh.markBackupDone(new Date(now - 31 * 86400000).toISOString());  // 31일 전
+  const old = fresh.getBackupStatus(now);
+  assert.equal(old.daysSince, 31);
+  assert.equal(old.stale, true, '30일 넘으면 리마인더');
+
+  // 기기 시계가 뒤로 간 경우에도 음수 일수가 나오지 않는다
+  assert.equal(fresh.getBackupStatus(now - 40 * 86400000).daysSince, 0);
+
+  // 마지막 백업 일시는 기기별 메모 → 백업 파일에 담기지 않음
+  fresh.localStorage.setItem('fitness_profile', JSON.stringify({ age: 40 }));
+  assert.equal(fresh.buildBackupObject().data.fitness_last_backup, undefined);
+
+  // 복원하면 파일이 만들어진 시각으로 세팅된다 (새 폰에서도 백업 주기가 이어짐)
+  const res = fresh.restoreFromBackup({
+    app: 'fitness', version: 1, exportedAt: '2026-07-01T00:00:00.000Z',
+    data: { fitness_profile: { age: 40 }, fitness_workout_log: [] }
+  });
+  assert.equal(res.ok, true);
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_last_backup')).at, '2026-07-01T00:00:00.000Z');
+});
+
+// ═══════════════════════════════════════════════
 // 묶음1/2 UI 회귀 (fresh app — 격리)
 // ═══════════════════════════════════════════════
+
+// 더보기 화면의 '데이터 백업' 섹션 — 내보내기/가져오기/마지막 백업 + 오래되면 리마인더
+test('renderMore — 데이터 백업 섹션 + 마지막 백업 표시 + 오래된 백업 리마인더', () => {
+  const fresh = loadApp();
+  fresh.localStorage.removeItem('fitness_last_backup');
+  const never = fresh.renderMore();
+  assert.ok(never.includes('데이터 백업'), '백업 섹션 제목');
+  assert.ok(never.includes('exportData()') && never.includes('openBackupImport()'), '내보내기/가져오기 연결');
+  assert.ok(never.includes('마지막 백업') && never.includes('아직 백업한 적이 없어요'), '백업 이력 없음 표시');
+  assert.ok(never.includes('backup-reminder'), '백업 이력이 없으면 리마인더 노출');
+  assert.ok(never.includes('API 키'), 'API 키 제외 안내');
+
+  // 최근 백업 → 리마인더 없음
+  fresh.markBackupDone(new Date(Date.now() - 2 * 86400000).toISOString());
+  const recent = fresh.renderMore();
+  assert.ok(!recent.includes('backup-reminder'), '최근 백업이면 리마인더 없음');
+  assert.ok(recent.includes('마지막 백업'), '마지막 백업 줄 유지');
+
+  // 31일 전 백업 → 리마인더 노출
+  fresh.markBackupDone(new Date(Date.now() - 31 * 86400000).toISOString());
+  const stale = fresh.renderMore();
+  assert.ok(stale.includes('backup-reminder') && stale.includes('지금 백업하기'), '오래되면 리마인더 + 바로 백업 버튼');
+});
+
 test('renderMore — 껍데기 메뉴 7개 삭제 + 백업/프로필 반영', () => {
   const fresh = loadApp();
   const more = fresh.renderMore();

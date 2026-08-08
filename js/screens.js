@@ -71,7 +71,7 @@ function renderHome() {
     
     weekBoxes += '<div class="text-center">' +
       '<div class="day-box ' + boxClass + '">' +
-        (completed ? '<p class="text-[9px] font-display font-bold accent">' + completed + '</p>' : '') +
+        (completed ? '<p class="text-[9px] font-display font-bold accent">' + escapeHtml(completed) + '</p>' : '') +
         (!completed && isToday ? '<div class="today-dot"></div>' : '') +
       '</div>' +
       '<p class="text-[9px] font-mono mt-1" style="color: ' + dayColor + '">' + day + '</p>' +
@@ -112,7 +112,7 @@ function renderHome() {
             '<p class="text-xs font-mono accent">' + profile.currentWeek + '주차 / ' + CYCLE_LENGTH + '</p>' +
           '</div>' +
           '<div class="flex items-end justify-between mb-4">' +
-            '<h2 class="font-bebas text-4xl">' + profile.cyclePhase + (isDeloadWeek ? '' : ' ' + profile.currentWeek + '주차') + '</h2>' +
+            '<h2 class="font-bebas text-4xl">' + escapeHtml(profile.cyclePhase) + (isDeloadWeek ? '' : ' ' + escapeHtml(profile.currentWeek) + '주차') + '</h2>' +
             '<p class="text-xs text-stone-500 font-mono">' + phaseHint + '</p>' +
           '</div>' +
           '<div class="flex items-center gap-1\\.5">' + weekDots + '</div>' +
@@ -145,12 +145,12 @@ function renderHome() {
             thisWeekWorkouts.slice(-3).reverse().map(function(w) {
               var d = new Date(w.date);
               var dStr = ['일','월','화','수','목','금','토'][d.getDay()];
-              return '<div class="workout-history-row" onclick="openItemDetail(\'workout\', \'' + (w.startTime || w.id) + '\')">' +
+              return '<div class="workout-history-row" onclick="openItemDetail(\'workout\', \'' + escapeHtml(w.startTime || w.id) + '\')">' +
                 '<div class="flex items-center gap-3">' +
                   '<div class="workout-history-dot"></div>' +
                   '<div>' +
-                    '<p class="text-xs font-display font-bold">' + (w.sessionKr || w.sessionName) + '</p>' +
-                    '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + w.date.substring(5) + ' (' + dStr + ') · ' + (w.duration || 0) + '분 · ' + (w.sets || 0) + '세트</p>' +
+                    '<p class="text-xs font-display font-bold">' + escapeHtml(w.sessionKr || w.sessionName) + '</p>' +
+                    '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + escapeHtml(String(w.date).substring(5)) + ' (' + dStr + ') · ' + escapeHtml(w.duration || 0) + '분 · ' + escapeHtml(w.sets || 0) + '세트</p>' +
                   '</div>' +
                 '</div>' +
                 '<div style="color: var(--text-muted);">' + icon('chevron', 14) + '</div>' +
@@ -267,8 +267,8 @@ function renderWorkout() {
     var barHtml;
     if (dayWorkouts.length > 0) {
       var w = dayWorkouts[0];
-      var part = w.sessionKr ? w.sessionKr.toLowerCase() : 'free';
-      var heightPct = Math.min(90, 50 + (w.duration || 60) / 2);
+      var part = w.sessionKr ? escapeHtml(String(w.sessionKr).toLowerCase()) : 'free';
+      var heightPct = Math.min(90, 50 + (Number(w.duration) || 60) / 2);
       barHtml = '<div class="day-bar-shape ' + part + (isToday ? ' today' : '') + '" style="height: ' + heightPct + '%;"></div>';
     } else {
       var height = isFuture ? 6 : 8;
@@ -1229,8 +1229,8 @@ function renderItemDetailSheet() {
     var exCount = (data.exercises && data.exercises.length) || data.exerciseCount || 0;
     var totalSets = data.sets || 0;
     var dateObj = new Date(data.date);
-    var dateStr = data.date + ' (' + ['일','월','화','수','목','금','토'][dateObj.getDay()] + ')';
-    var sessionLabel = data.sessionKr || data.sessionName || data.sessionType || data.session || 'WORKOUT';
+    var dateStr = escapeHtml(data.date) + ' (' + ['일','월','화','수','목','금','토'][dateObj.getDay()] + ')';
+    var sessionLabel = escapeHtml(data.sessionKr || data.sessionName || data.sessionType || data.session || 'WORKOUT');
     
     var exercisesList = '';
     if (data.exercises && Array.isArray(data.exercises) && data.exercises.length > 0) {
@@ -1241,10 +1241,10 @@ function renderItemDetailSheet() {
           var completedSets = ex.sets.filter(function(s) { return s.completed && !s.isWarmup; });
           if (completedSets.length > 0) {
             var lastSet = completedSets[completedSets.length - 1];
-            setSummary = (lastSet.weight ? lastSet.weight + 'kg × ' : '') + lastSet.reps + ' · ' + completedSets.length + '세트';
+            setSummary = (lastSet.weight ? escapeHtml(lastSet.weight) + 'kg × ' : '') + escapeHtml(lastSet.reps) + ' · ' + completedSets.length + '세트';
           }
         } else if (ex.weight) {
-          setSummary = ex.weight + 'kg × ' + (ex.reps || '?') + ' · ' + (ex.completedSets || ex.setsCount || '?') + '세트';
+          setSummary = escapeHtml(ex.weight) + 'kg × ' + escapeHtml(ex.reps || '?') + ' · ' + escapeHtml(ex.completedSets || ex.setsCount || '?') + '세트';
         }
         return '<div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--bg-3); font-size: 12px;">' +
           '<span><strong>' + (idx + 1) + '.</strong> ' + escapeHtml(exName) + '</span>' +
@@ -1284,8 +1284,8 @@ function renderItemDetailSheet() {
     headerLabel = '체중 기록';
     bodyHtml = 
       '<div class="text-center mb-5">' +
-        '<p class="font-bebas text-5xl mb-1" style="color: var(--accent);">' + data.weight + '<span class="text-lg text-stone-400">kg</span></p>' +
-        '<p class="text-xs font-mono text-stone-400">' + data.date + '</p>' +
+        '<p class="font-bebas text-5xl mb-1" style="color: var(--accent);">' + escapeHtml(data.weight) + '<span class="text-lg text-stone-400">kg</span></p>' +
+        '<p class="text-xs font-mono text-stone-400">' + escapeHtml(data.date) + '</p>' +
       '</div>';
   }
   
@@ -3070,10 +3070,10 @@ function renderOneRMList() {
       var w75 = snapWeightToEquipment(rm * 0.75, name);
       return '<div class="menu-row" style="cursor: default;">' +
         '<div class="flex-1">' +
-          '<p class="text-sm font-display font-bold">' + name + '</p>' +
-          '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">75% 작업무게 ' + w75 + 'kg</p>' +
+          '<p class="text-sm font-display font-bold">' + escapeHtml(name) + '</p>' +
+          '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">75% 작업무게 ' + escapeHtml(w75) + 'kg</p>' +
         '</div>' +
-        '<p class="font-bebas text-xl" style="color: #fbbf24;">' + rm + '<span class="text-xs text-stone-400">kg</span></p>' +
+        '<p class="font-bebas text-xl" style="color: #fbbf24;">' + escapeHtml(rm) + '<span class="text-xs text-stone-400">kg</span></p>' +
       '</div>';
     }).join('');
     
@@ -3162,21 +3162,37 @@ window.executeResetAll = function() {
 };
 
 // 백업/내보내기 (복원 가능한 JSON 파일)
+// 파일 하나에 운동·유산소·체중·1RM·기억 노트 등 기록을 모아 담는다.
+// API 키(fitness_api_key)와 코치 대화는 보안·용량 때문에 담지 않는다 (BACKUP_LOCAL_ONLY_KEYS).
 window.exportData = function() {
-  var json = JSON.stringify(buildBackupObject(), null, 2);
-  var blob = new Blob([json], { type: 'application/json' });
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a');
-  a.href = url;
-  a.download = 'fitness-backup-' + getTodayStr() + '.json';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  showToast('백업 파일을 저장했어요');
+  var url = null;
+  // 파일 만들기 + 내려받기 시작까지만 try 로 감싼다 (뒤의 화면 갱신이 실패해도 '백업 실패'로 보이지 않게)
+  try {
+    var json = JSON.stringify(buildBackupObject(), null, 2);
+    var blob = new Blob([json], { type: 'application/json' });
+    url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'fitness-backup-' + getTodayStr() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch (e) {
+    if (url) URL.revokeObjectURL(url);
+    showAlert('백업 파일을 만들지 못했어요.\n잠시 뒤 다시 시도해 주세요.', { title: '백업 실패', danger: true });
+    return;
+  }
+  // 링크 주소는 조금 뒤에 해제한다 — 클릭 직후 바로 해제하면 브라우저가 내려받기를 취소할 수 있다.
+  if (url) setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+  // 주의: 브라우저는 "실제로 저장됐는지"를 알려주지 않는다(공유 시트 취소 등도 감지 불가).
+  // 그래서 여기 기록은 "저장을 시도한 시각"이다 — 그래서 화면에서도 파일 확인을 권한다.
+  markBackupDone();                         // 마지막 백업 일시 기록 → 더보기 화면 표시·리마인더 갱신
+  showToast('백업 파일을 저장했어요 (API 키 제외)');
+  render();
 };
 
-// 가져오기: 파일 선택 → 복원 → 새로고침. (운동 데이터만 복원; API키·대화는 미포함)
+// 가져오기: 파일 선택 → 검사 → "덮어씁니다" 확인 → 복원 → 새로고침.
+// (운동 데이터만 복원. API 키·코치 대화는 백업에 없으므로 이 폰 값이 그대로 남는다.)
 window.openBackupImport = function() {
   var input = document.createElement('input');
   input.type = 'file';
@@ -3185,20 +3201,49 @@ window.openBackupImport = function() {
     var file = e.target.files && e.target.files[0];
     if (!file) return;
     var reader = new FileReader();
-    reader.onload = function(ev) {
-      var res = restoreFromBackup(ev.target.result);
-      if (res.ok) {
-        showToast('복원 완료 — 새로고침합니다');
-        setTimeout(function() { location.reload(); }, 1000);
-      } else {
-        alert('복원 실패: ' + (res.error || '알 수 없는 오류'));
-      }
+    reader.onload = function(ev) { applyBackupText(ev.target.result); };
+    reader.onerror = function() {
+      showAlert('파일을 열지 못했어요.\n파일이 지워졌거나 접근 권한이 없을 수 있습니다.', { title: '가져오기 실패', danger: true });
     };
-    reader.onerror = function() { alert('파일을 읽지 못했습니다.'); };
     reader.readAsText(file);
   };
   input.click();
 };
+
+// 읽어들인 백업 파일 내용(문자열) 처리: 검사 → 덮어쓰기 확인 → 복원 → 새로고침.
+// 파일 고르기(FileReader)와 분리해 둬서 브라우저 QA·테스트에서 이 경로를 그대로 확인할 수 있다.
+window.applyBackupText = function(text) {
+  var checked = parseBackupFile(text);
+  if (!checked.ok) {
+    showAlert(checked.error || '백업 파일을 읽지 못했어요.', { title: '가져오기 실패', danger: true });
+    return;
+  }
+  showConfirm(buildRestoreConfirmMessage(checked.summary), function() {
+    var res = restoreFromBackup(checked.backup);
+    if (!res.ok) {
+      showAlert(res.error || '복원하지 못했어요.', { title: '복원 실패', danger: true });
+      return;
+    }
+    showToast('복원 완료 — 새로고침합니다');
+    setTimeout(function() { location.reload(); }, 1000);
+  }, { confirmLabel: '덮어쓰기', danger: true });
+};
+
+// 덮어쓰기 확인 문구 — 백업 파일에 뭐가 들어있는지 먼저 보여주고 되돌릴 수 없음을 알린다.
+function buildRestoreConfirmMessage(s) {
+  s = s || {};
+  var when = s.exportedAt ? fmtDate(s.exportedAt) + ' 백업' : '날짜를 알 수 없는 백업';
+  var items = [];
+  if (s.workouts) items.push('운동 ' + s.workouts + '회');
+  if (s.cardio) items.push('유산소 ' + s.cardio + '회');
+  if (s.body) items.push('체중 ' + s.body + '개');
+  if (s.records) items.push('기록 ' + s.records + '개');
+  if (s.oneRM) items.push('1RM ' + s.oneRM + '종목');
+  if (s.memory) items.push('기억 노트 ' + s.memory + '개');
+  return when + '\n' + (items.length ? items.join(' · ') : '담긴 기록 없음') + '\n\n' +
+    '지금 이 폰에 있는 기록을 이 파일 내용으로 모두 바꿉니다. 되돌릴 수 없어요.\n' +
+    '(API 키와 코치 대화는 그대로 남습니다)';
+}
 
 // ═══════════════════════════════════════════════
 // 더보기 화면 - 렌더
@@ -3207,7 +3252,61 @@ function renderMore() {
   var profile = state.profile;
   var apiKey = state.apiKey;
   var settings = state.settings;
-  
+
+  // ── 데이터 백업 섹션 (마지막 백업 표시 + 오래되면 부드러운 리마인더) ──
+  var backupStatus = getBackupStatus();
+  // 경과일은 getBackupStatus 한 곳에서만 계산한다(리마인더와 같은 값) — daysAgo 는 기기 시계가
+  // 앞서 있을 때 '-3일 전' 같은 음수를 그대로 보여주므로 0일일 때는 쓰지 않는다.
+  var backupWhenText = backupStatus.never
+    ? '아직 백업한 적이 없어요'
+    : (backupStatus.daysSince === 0 ? '오늘' : daysAgo(backupStatus.at)) + ' · ' + fmtDate(backupStatus.at);
+  var backupReminderHtml = '';
+  if (backupStatus.stale) {
+    var reminderText = backupStatus.never
+      ? '아직 백업 파일을 만든 적이 없어요. 지금 한 번 저장해 두면 폰을 바꿔도 기록을 그대로 옮길 수 있어요.'
+      : '마지막 백업이 ' + backupStatus.daysSince + '일 전이에요. 그 뒤로 쌓인 기록은 아직 저장돼 있지 않아요.';
+    backupReminderHtml =
+      '<div class="backup-reminder">' +
+        '<div class="backup-reminder-icon">' + icon('info', 16) + '</div>' +
+        '<div class="flex-1">' +
+          '<p class="text-xs leading-relaxed" style="color: var(--text-soft);">' + escapeHtml(reminderText) + '</p>' +
+          '<button class="backup-reminder-btn" onclick="exportData()">지금 백업하기</button>' +
+        '</div>' +
+      '</div>';
+  }
+  var backupSectionHtml =
+    '<div>' +
+      '<p class="section-label">데이터 백업</p>' +
+      backupReminderHtml +
+      '<div class="section-group">' +
+        '<div class="menu-row" onclick="exportData()">' +
+          '<div class="menu-icon-sm accent-bg-soft">' + icon('download', 18) + '</div>' +
+          '<div class="menu-row-content">' +
+            '<p class="text-sm font-display font-bold">백업 파일 저장 (내보내기)' + (backupStatus.stale ? ' <span class="backup-dot"></span>' : '') + '</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">지금까지의 기록을 파일 하나(.json)로 내려받기</p>' +
+          '</div>' +
+          '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
+        '</div>' +
+        '<div class="menu-row" onclick="openBackupImport()">' +
+          '<div class="menu-icon-sm">' + icon('upload', 18) + '</div>' +
+          '<div class="menu-row-content">' +
+            '<p class="text-sm font-display font-bold">백업 파일 불러오기 (가져오기)</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">저장해 둔 파일로 되돌리기 · 지금 기록은 덮어써져요</p>' +
+          '</div>' +
+          '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
+        '</div>' +
+        '<div class="menu-row" style="cursor: default;">' +
+          '<div class="menu-icon-sm">' + icon('calendar', 18) + '</div>' +
+          '<div class="menu-row-content">' +
+            '<p class="text-sm font-display font-bold">마지막 백업</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + escapeHtml(backupWhenText) + '</p>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<p class="backup-hint">폰을 바꾸거나 브라우저 데이터를 지우면 기록이 모두 사라져요. 백업 파일을 저장해 두면 그대로 되살릴 수 있습니다. ' +
+        '안전을 위해 <b>API 키</b>(AI 코치를 쓰기 위한 비밀번호 같은 값)는 백업 파일에 담지 않으니, 새 폰에서는 한 번 더 입력해 주세요.</p>' +
+    '</div>';
+
   // API 키 모달
   var apiModalHtml = '';
   if (state.apiKeyModalOpen) {
@@ -3269,7 +3368,7 @@ function renderMore() {
         '<div class="flex items-center gap-3">' +
           '<div class="flex-1">' +
             '<p class="font-display font-bold text-base">사용자</p>' +
-            '<p class="text-[10px] font-mono text-stone-500 mt-1">' + profile.age + '세 · ' + profile.height + 'cm · ' + profile.weight + 'kg</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-1">' + escapeHtml(profile.age) + '세 · ' + escapeHtml(profile.height) + 'cm · ' + escapeHtml(profile.weight) + 'kg</p>' +
             '<div class="flex items-center gap-2 mt-1">' +
               '<span class="text-[10px] font-mono text-stone-500">주 ' + (profile.workoutFreq || 4) + '회 운동</span>' +
             '</div>' +
@@ -3353,7 +3452,7 @@ function renderMore() {
             '<div class="menu-icon-sm accent-bg-soft">' + icon('refresh', 18) + '</div>' +
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold">현재 사이클</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">Cycle ' + profile.currentCycle + ' · ' + profile.cyclePhase + ' · ' + profile.currentWeek + '/' + CYCLE_LENGTH + '주</p>' +
+              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">Cycle ' + escapeHtml(profile.currentCycle) + ' · ' + escapeHtml(profile.cyclePhase) + ' · ' + escapeHtml(profile.currentWeek) + '/' + CYCLE_LENGTH + '주</p>' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -3393,26 +3492,13 @@ function renderMore() {
         '</div>' +
       '</div>' +
       
+      // 데이터 백업 (내보내기 / 가져오기 / 마지막 백업)
+      backupSectionHtml +
+
       // 데이터
       '<div>' +
         '<p class="section-label">데이터</p>' +
         '<div class="section-group">' +
-          '<div class="menu-row" onclick="exportData()">' +
-            '<div class="menu-icon-sm">' + icon('download', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">백업 / 내보내기</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">운동 데이터 백업 파일 (.json)</p>' +
-            '</div>' +
-            '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
-          '</div>' +
-          '<div class="menu-row" onclick="openBackupImport()">' +
-            '<div class="menu-icon-sm">' + icon('upload', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">가져오기</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">백업 파일에서 복원</p>' +
-            '</div>' +
-            '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
-          '</div>' +
           '<div class="menu-row" onclick="resetAllData()">' +
             '<div class="menu-icon-sm danger-bg-soft">' + icon('trash', 18) + '</div>' +
             '<div class="menu-row-content">' +
@@ -3712,7 +3798,7 @@ function renderCoachMemory() {
             '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">정말 삭제할까요?</p></div>' +
           '<div style="display:flex; gap:6px;">' +
             '<button onclick="cancelMemoryDelete()" style="padding:6px 12px; border-radius:10px; background:transparent; border:1px solid var(--bg-4); color:var(--text-soft); font-size:12px;">취소</button>' +
-            '<button class="btn-danger" style="padding:6px 12px; width:auto;" onclick="executeDeleteMemory(\'' + m.id + '\')">삭제</button>' +
+            '<button class="btn-danger" style="padding:6px 12px; width:auto;" onclick="executeDeleteMemory(\'' + escapeHtml(m.id) + '\')">삭제</button>' +
           '</div>' +
         '</div>';
       }
@@ -3720,11 +3806,11 @@ function renderCoachMemory() {
         ? '<span class="accent">자동</span>'
         : '<span class="text-stone-500">직접</span>';
       return '<div class="menu-row">' +
-        '<div class="flex-1" onclick="editMemoryNote(\'' + m.id + '\')" style="cursor:pointer;">' +
+        '<div class="flex-1" onclick="editMemoryNote(\'' + escapeHtml(m.id) + '\')" style="cursor:pointer;">' +
           '<p class="text-sm">' + escapeHtml(m.text) + '</p>' +
           '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + srcBadge + ' · ' + (m.date || '') + ' · 탭하여 수정</p>' +
         '</div>' +
-        '<button class="session-header-btn" onclick="deleteMemoryNote(\'' + m.id + '\')">' + icon('trash', 16) + '</button>' +
+        '<button class="session-header-btn" onclick="deleteMemoryNote(\'' + escapeHtml(m.id) + '\')">' + icon('trash', 16) + '</button>' +
       '</div>';
     }).join('');
     groups += '<p class="section-label">' + meta.emoji + ' ' + meta.kr + '</p><div class="section-group" style="margin-bottom:16px;">' + rows + '</div>';
@@ -4486,12 +4572,12 @@ function renderStats() {
             workoutLog.slice(-10).reverse().map(function(w) {
               var d = new Date(w.date);
               var dStr = ['일','월','화','수','목','금','토'][d.getDay()];
-              return '<div class="workout-history-row" onclick="openItemDetail(\'workout\', \'' + (w.startTime || w.id) + '\')">' +
+              return '<div class="workout-history-row" onclick="openItemDetail(\'workout\', \'' + escapeHtml(w.startTime || w.id) + '\')">' +
                 '<div class="flex items-center gap-3">' +
                   '<div class="workout-history-dot"></div>' +
                   '<div>' +
-                    '<p class="text-xs font-display font-bold">' + (w.sessionKr || w.sessionName) + '</p>' +
-                    '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + w.date + ' (' + dStr + ') · ' + (w.duration || 0) + '분 · ' + (w.sets || 0) + '세트</p>' +
+                    '<p class="text-xs font-display font-bold">' + escapeHtml(w.sessionKr || w.sessionName) + '</p>' +
+                    '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + escapeHtml(w.date) + ' (' + dStr + ') · ' + escapeHtml(w.duration || 0) + '분 · ' + escapeHtml(w.sets || 0) + '세트</p>' +
                   '</div>' +
                 '</div>' +
                 '<div style="color: var(--text-muted);">' + icon('chevron', 14) + '</div>' +
@@ -4511,12 +4597,12 @@ function renderStats() {
           '<p class="text-[10px] font-mono text-stone-500 mb-3">클릭하여 상세 보기 / 삭제</p>' +
           '<div>' +
             state.data.bodyLog.slice(-10).reverse().map(function(b) {
-              return '<div class="workout-history-row" onclick="openItemDetail(\'body\', \'' + b.date + '\')">' +
+              return '<div class="workout-history-row" onclick="openItemDetail(\'body\', \'' + escapeHtml(b.date) + '\')">' +
                 '<div class="flex items-center gap-3">' +
                   '<div class="workout-history-dot" style="background: var(--text-muted); box-shadow: 0 0 6px rgba(var(--muted-rgb), 0.45);"></div>' +
                   '<div>' +
-                    '<p class="text-xs font-display font-bold">' + b.weight + 'kg</p>' +
-                    '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + b.date + '</p>' +
+                    '<p class="text-xs font-display font-bold">' + escapeHtml(b.weight) + 'kg</p>' +
+                    '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + escapeHtml(b.date) + '</p>' +
                   '</div>' +
                 '</div>' +
                 '<div style="color: var(--text-muted);">' + icon('chevron', 14) + '</div>' +
@@ -4533,7 +4619,7 @@ function renderStats() {
           '<p class="text-xs font-mono accent">' + profile.currentWeek + ' / ' + CYCLE_LENGTH + ' 주</p>' +
         '</div>' +
         '<div class="progress-bg mb-2"><div class="progress-fill" style="width: ' + Math.round((profile.currentWeek / CYCLE_LENGTH) * 100) + '%;"></div></div>' +
-        '<p class="text-[10px] font-mono text-stone-500">' + profile.cyclePhase + ' · ' + (profile.currentWeek >= CYCLE_LENGTH ? '디로드 주간' : (CYCLE_LENGTH - profile.currentWeek) + '주 후 디로드') + '</p>' +
+        '<p class="text-[10px] font-mono text-stone-500">' + escapeHtml(profile.cyclePhase) + ' · ' + (profile.currentWeek >= CYCLE_LENGTH ? '디로드 주간' : (CYCLE_LENGTH - profile.currentWeek) + '주 후 디로드') + '</p>' +
       '</div>' +
       
     '</div>';
