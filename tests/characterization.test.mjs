@@ -2127,7 +2127,9 @@ test('XSS 회귀 — AI 응답·사용자 입력을 심어도 어떤 화면에�
     if (html.includes('<img') || html.includes('<script')) leakedTag.push(name);
     if (html.includes(ATTR)) leakedAttr.push(name);         // 따옴표가 살아 있으면 속성 탈출
   }
-  assert.ok(rendered >= 8, '실제로 그려진 화면이 너무 적다: ' + rendered);
+  // 지금 23개가 실제로 그려진다. 화면이 throw 하면 위에서 조용히 건너뛰므로,
+  // 하한을 넉넉히 잡아 두면 "예외 때문에 검사가 통째로 비는" 상황을 이 줄이 잡는다.
+  assert.ok(rendered >= 20, '실제로 그려진 화면이 너무 적다(예외로 건너뛴 화면 의심): ' + rendered + '/' + screenFns.length);
   assert.deepEqual(leakedTag, [], '태그가 살아있는 화면: ' + leakedTag.join(', '));
   assert.deepEqual(leakedAttr, [], '속성 탈출이 가능한 화면: ' + leakedAttr.join(', '));
 
