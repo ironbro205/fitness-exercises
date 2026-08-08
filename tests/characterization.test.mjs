@@ -2099,6 +2099,9 @@ test('XSS 회귀 — AI 응답·사용자 입력을 심어도 어떤 화면에�
                   sets: [{ weight: null, reps: 8, isWarmup: false, completed: false, role: 'work' }] }],
   };
 
+  // 코치 기억 노트 — 사용자가 쓴 글이 그대로 화면에 남는 목록
+  fresh.state.coachMemory = [{ id: 'm_1', category: 'other', text: P, source: P, date: P }];
+
   // 완료 화면 (세션과 배타적이지 않다 — render 우선순위상 completedSession 이 위)
   fresh.state.completedSession = {
     workoutId: 'w_1', sessionName: P, duration: 42, exerciseCount: 1, setCount: 3,

@@ -225,6 +225,14 @@ function renderHome() {
 // 상태 4가지: API 키 없음 / 로딩 / 오늘 실패 / 결과
 // CSS는 이미 있는 .ai-rec-card 계열을 그대로 쓴다 (css/styles.css:1978~2029)
 // ═══════════════════════════════════════════════
+// 주간 리뷰 등급 → 색상. AI가 준 grade 를 **객체 키로 그냥 조회하면** 프로토타입까지 훑는다
+// (grade='__proto__' 면 [object Object], 'constructor' 면 함수 소스가 색상 자리에 들어가 CSS가 깨진다).
+// 소유 속성일 때만 인정하고 아니면 기본색 — S/A/B/C/D 외에는 전부 기본색이라는 뜻이다.
+var GRADE_COLORS = { S: 'var(--accent)', A: 'var(--accent)', B: '#a78bfa', C: '#fbbf24', D: '#ef4444' };
+function gradeColor(grade) {
+  return Object.prototype.hasOwnProperty.call(GRADE_COLORS, grade) ? GRADE_COLORS[grade] : '#a78bfa';
+}
+
 function renderAIRecommendationCard() {
   // API 키 없음 — 키 모달은 더보기 화면에서만 렌더되므로 탭 이동으로 유도
   if (!state.apiKey) {
@@ -5013,7 +5021,7 @@ function renderCoachMemory() {
       return '<div class="menu-row">' +
         '<div class="flex-1" onclick="editMemoryNote(\'' + escapeHtml(m.id) + '\')" style="cursor:pointer;">' +
           '<p class="text-sm">' + escapeHtml(m.text) + '</p>' +
-          '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + srcBadge + ' · ' + (m.date || '') + ' · 탭하여 수정</p>' +
+          '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + srcBadge + ' · ' + escapeHtml(m.date || '') + ' · 탭하여 수정</p>' +
         '</div>' +
         '<button class="session-header-btn" onclick="deleteMemoryNote(\'' + escapeHtml(m.id) + '\')">' + icon('trash', 16) + '</button>' +
       '</div>';
