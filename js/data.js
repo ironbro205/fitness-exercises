@@ -1245,9 +1245,16 @@ var COACH_KNOWLEDGE =
   '- 디로드: 약 5~6주마다 1주, 볼륨 약 50%로 낮추고 무게 유지, RIR 3~5로 가볍게. 누적 피로를 비우는 계획적 휴식.\n' +
   '- 컨디션/스트레스: 평균 RIR 체감이 급격히 높아지거나 컨디션이 떨어지면 강도·볼륨을 일시 낮추는 게 장기적으로 이득.\n\n' +
 
-  '### 8. 워밍업·가동성\n' +
-  '- 본운동 전 일반 워밍업(가벼운 유산소 5분) + 해당 종목 점진적 램프업 세트(빈봉~목표무게로 2~4세트). 정적 스트레칭을 본세트 직전 길게 하는 건 권장하지 않음.\n' +
-  '- 가동성 부족(발목/고관절/흉추/어깨)은 자세를 무너뜨림. 문제 부위 위주로 짧은 동적 가동성 루틴을 운동 전 배치.\n\n' +
+  '### 8. 워밍업·가동성·스트레칭\n' +
+  '- 웜업 구조는 3단계다: ① 일반 유산소 3~5분(RPE 3~4) → ② 그날 부위 동적 드릴 3~5동작·2~3분 → ③ 종목별 램프업 세트. 총 6분 안팎이면 충분하고, 그 이상은 근비대 볼륨을 갉아먹는다.\n' +
+  '- ①의 근거가 가장 확실하다: 근온이 1분당 약 0.1℃ 올라 수축 속도·신경전도가 개선된다(Bishop 2003). ②는 수행 +1.3%로 효과가 작다(Behm 2016) — "둔근을 깨우면 스쿼트가 강해진다" 식으로 과장하지 말고 "그날 쓸 패턴을 예행연습한다"로 말한다(활성화 운동의 직접 근거는 빈약).\n' +
+  '- ⚠️ 본세트 전 한 근육당 60초 이상 정적 스트레칭 금지: 최대근력 −5.4%(Simic 2013, 104편), ≥60초 ES −0.84 / <60초 ES −0.18(Warneke 2024, 83편). 짧게(<60초) 하고 뒤에 동적 활동이 이어지면 손실은 무시할 만하다.\n' +
+  '- 운동 후 스트레칭이 근거로 주는 건 **유연성(가동범위) 유지** 하나뿐이다(2025 국제 델파이 합의문, 연구자 20명 전 항목 80%+ 합의). 부위당 30초씩 3~4동작 = ACSM "유지" 기준(근육당 총 60초)은 맞지만, "유연성 향상"(3세트×120초) 기준에는 한참 못 미친다 — 이 차이를 정직하게 말한다.\n' +
+  '- ★금지 문구(전부 근거 없음 — 사용자가 물어도 명확히 아니라고 답한다): "스트레칭하면 근육이 잘 큰다"(근비대 d=0.20, 근육당 15분×주5회 필요 vs 근력운동 d=1.60 · Warneke 2024) / "스트레칭하면 내일 안 아프다"(DOMS 유의차 없음 · Herbert 2011 Cochrane, Afonso 2021) / "스트레칭이 부상을 막는다"(유의하지 않음 · Lauersen 2014 — 부상을 실제로 줄이는 건 근력운동으로 1/3 미만).\n' +
+  '- 전 가동범위 근력운동 자체가 스트레칭만큼 ROM을 올린다(Afonso 2021 ES −0.22 ns, Alizadeh 2023 ES 0.08 ns). 이미 주 5일 웨이트를 하면 유연성 이득의 상당 부분은 이미 얻고 있다.\n' +
+  '- 허리디스크: 손상 기전은 큰 압박력이 아니라 **부하 상태의 반복 요추 굴곡**이다(McGill). 배제 = 선 채 발끝 닿기·앉아 전굴·무릎 가슴 당기기·차일드 포즈·크런치/싯업 웜업·로잉머신 웜업·허리 비틀기. 대체 = 누워서 스트랩 햄스트링 / 선 자세 광배 힌지 / 누워서 피겨-4 / 캣-카멜(무부하) / McGill 빅3. 순서는 "먼저 척추를 굳히고 그 다음 고관절을 움직인다"(캣-카멜 → 버드독 → 힙힌지·스쿼트 → 램프업).\n' +
+  '- 기상 직후엔 디스크 내압이 약 240%, 굽힘 응력이 약 300% 높다(Adams·Dolan 1990) — 아침 운동이면 숙이는 동작을 특히 조심하라고 안내한다.\n' +
+  '- 가동성 부족(발목/고관절/흉추/어깨)은 자세를 무너뜨린다. 문제 부위 위주로 짧은 동적 루틴을 운동 전에 배치한다.\n\n' +
 
   '### 9. 강도·진행 기법 (정체 돌파)\n' +
   '- 더블 프로그레션: 목표 횟수 상단 도달 → 무게↑ → 하단부터 다시. 가장 단순하고 신뢰도 높은 진행.\n' +
@@ -1294,3 +1301,368 @@ var WALK_HANDRAIL_OPTIONS = [
   { value: 'light', label: '가볍게 얹음',    desc: '손실 거의 없음' },
   { value: 'hold',  label: '계속 잡음',      desc: '다음엔 경사 −2%' }
 ];
+
+// ═══════════════════════════════════════════════
+// 웜업 · 스트레칭 동작 사전 (부위별 가이드)
+// 근거: docs/research/warmup-stretching.md
+//   §1 웜업 · §2 스트레칭 · §3 부위별 루틴 · §4 허리디스크 · §6 앱 적용 설계
+//
+// ★정직성 규칙 (§2 · Warneke 2025 델파이 합의문, 전문가 20명 전 항목 80%+ 합의):
+//   스트레칭이 근거로 약속할 수 있는 건 **유연성(가동범위) 유지** 하나뿐이다.
+//   근비대(d=0.20, 근육당 15분×주5회 필요) · 근육통/DOMS(유의차 없음) · 부상 예방(유의하지 않음)
+//   — 이 셋을 시사하는 문구는 이 테이블·화면·AI 프롬프트 어디에도 쓰지 않는다.
+// ★본세트 전 한 근육당 60초 이상 정적 스트레칭 금지 (§1-D: 최대근력 −5.4%, Simic 2013 / ES −0.84, Warneke 2024).
+//   → 웜업 목록은 전부 동적 드릴이고, 정적 유지가 섞여도 한 부위 30초를 넘기지 않는다.
+// ★허리디스크 (§4): 손상 기전은 "큰 압박력"이 아니라 **부하 상태의 반복 요추 굴곡**이다(McGill).
+//   기본 목록에는 굴곡 동작을 애초에 넣지 않았다. discSafe:false 항목은 §4-A 배제 목록을 코드에
+//   남겨둔 것이며 어떤 기본 목록에도 등장하지 않는다 — 목록에 잘못 섞이면 buildWarmupPlan이 discAlt로 치환한다.
+// ★"활성화(activation)" 과대 표현 금지 (§1-F, 근거 등급 낮음): "둔근을 깨우면 스쿼트가 강해진다" X
+//   → "그날 쓸 패턴을 가볍게 예행연습한다" O.
+//
+// mode: 'reps'(횟수) | 'time'(시간 유지) | 'timePerSide'(좌우 각각 시간) | 'repsPerSide'(좌우 각각 횟수)
+// sec        : time 계열의 유지 시간(초) — 타이머가 실제로 세는 값
+// reps/secPerRep : 횟수와 1회 참고 소요(초). secPerRep은 타이머가 아니라 **총시간 추정용**이다
+//                  (횟수 모드는 사용자가 "완료"를 눌러 넘어간다 — §6-D)
+// gear : 'none'|'mat'|'wall'|'band'|'foamroller'|'cardio' — 이 테이블 전용 값(GYM_EQUIPMENT id 아님)
+// phase: 그 동작의 주 용도('warmup'|'stretch'). 어떤 목록에 들어갈지는 아래 *_BY_PART가 정한다
+//        (캣-카멜처럼 양쪽에 쓰이는 동작이 있다).
+// ═══════════════════════════════════════════════
+var MOBILITY_DRILLS = {
+
+  // ── 공통 오프닝 (§3-A · §1-A) ─────────────────────────────
+  general_cardio: {
+    kr: '빠르게 걷기 · 실내자전거', phase: 'warmup',
+    mode: 'time', sec: 180, gear: 'cardio',
+    cue: 'RPE 3~4 — 숨은 차되 옆 사람과 대화는 되는 정도. 러닝머신이면 경사 3~5%로 걷기.',
+    why: '근육 온도가 1분에 약 0.1℃ 오르면서 수축·이완 속도와 신경전도가 빨라진다(Bishop 2003). 웜업에서 기전이 가장 확실한 부분.',
+    warn: '로잉머신은 쓰지 않는다 — 부하 상태의 요추 굴곡을 수백 번 반복하는 동작이라 디스크 손상 기전과 겹친다.',
+    discSafe: true
+  },
+
+  // ── 웜업 드릴 (§3-B ~ §3-G) ─────────────────────────────
+  cat_camel: {
+    kr: '캣-카멜', phase: 'warmup',
+    mode: 'reps', reps: 6, secPerRep: 4, gear: 'mat',
+    cue: '네발 기기 자세에서 등을 둥글게 말았다가 아래로 내린다. 천천히, 통증 없는 범위까지만.',
+    why: '척추를 부하 없이 움직여 뻣뻣함을 줄인다. 스트레칭이 아니라 관절 윤활이다 — McGill은 빅3 전에 5~6회를 권한다.',
+    discSafe: true
+  },
+  bird_dog: {
+    kr: '버드독', phase: 'warmup',
+    mode: 'repsPerSide', reps: 6, secPerRep: 5, gear: 'mat',
+    cue: '반대쪽 팔·다리를 뻗어 3~5초 버틴다. 허리는 중립 고정, 골반이 돌아가지 않게.',
+    why: '척추를 굳힌 뒤 팔·다리를 움직이는 McGill 원칙. 허리엔 근력보다 지구력이 필요하다.',
+    discSafe: true
+  },
+  mcgill_curlup: {
+    kr: '맥길 컬업', phase: 'warmup',
+    mode: 'repsPerSide', reps: 3, secPerRep: 12, gear: 'mat',
+    cue: '한쪽 무릎만 세우고 손은 허리 아래에. 머리·목·상체를 통짜로 살짝만 들어 10초 버틴다.',
+    why: '일반 윗몸일으키기와 달리 요추를 말지 않고 복부 지구력만 쓴다(McGill 빅3).',
+    discSafe: true
+  },
+  side_bridge: {
+    kr: '사이드 브리지', phase: 'warmup',
+    mode: 'repsPerSide', reps: 3, secPerRep: 12, gear: 'mat',
+    cue: '무릎 대고 하는 버전부터. 몸이 일직선이 되게 10초 버틴다.',
+    why: 'McGill 빅3. 척추 강성을 지구력 방식으로 만든다.',
+    discSafe: true
+  },
+  scap_pushup: {
+    kr: '견갑 푸시업', phase: 'warmup',
+    mode: 'reps', reps: 10, secPerRep: 3, gear: 'none',
+    cue: '팔은 편 채로 어깨뼈만 모았다 벌린다. 힘들면 벽을 짚고 해도 된다.',
+    why: '어깨뼈가 먼저 움직여야 미는 동작에서 어깨가 대신 무리하지 않는다.',
+    discSafe: true
+  },
+  band_pull_apart: {
+    kr: '팔 벌려 뒤로 모으기 (밴드 풀 어파트)', phase: 'warmup',
+    mode: 'reps', reps: 15, secPerRep: 2, gear: 'band',
+    cue: '팔꿈치를 살짝 굽히고 가슴을 연다. 어깨를 으쓱하지 않는다. 밴드가 없으면 맨손으로 크게.',
+    why: '그날 쓸 견갑 움직임을 가볍게 예행연습한다.',
+    discSafe: true
+  },
+  wall_slide: {
+    kr: '월 슬라이드', phase: 'warmup',
+    mode: 'reps', reps: 10, secPerRep: 3, gear: 'wall',
+    cue: '등·팔꿈치·손등을 벽에 붙인 채 팔을 위아래로. 허리가 벽에서 뜨지 않게.',
+    why: '머리 위로 미는 동작 전에 어깨 가동범위를 확보한다.',
+    discSafe: true
+  },
+  open_book: {
+    kr: '오픈 북 (흉추 회전)', phase: 'warmup',
+    mode: 'repsPerSide', reps: 6, secPerRep: 4, gear: 'mat',
+    cue: '옆으로 누워 무릎은 붙인 채 위쪽 팔만 크게 연다. 가슴부터 돌리고, 허리를 비틀지 않는다.',
+    why: '흉추(등 상부) 회전이다. 허리를 비트는 동작은 디스크에 전단력이 걸려 이 앱에서 아예 뺐다.',
+    discSafe: true
+  },
+  straight_arm_pulldown: {
+    kr: '스트레이트 암 풀다운 (밴드)', phase: 'warmup',
+    mode: 'reps', reps: 15, secPerRep: 2, gear: 'band',
+    cue: '팔을 편 채 광배로 아래로 누른다. 아주 가벼운 부하로. 밴드가 없으면 팔을 뻗어 뒤로 당기는 동작으로.',
+    why: '당기는 날 쓸 광배 패턴을 미리 한 번 지나간다.',
+    discSafe: true
+  },
+  prone_y_raise: {
+    kr: '프론 Y-레이즈', phase: 'warmup',
+    mode: 'reps', reps: 8, secPerRep: 3, gear: 'mat',
+    cue: '엎드려 이마는 바닥이나 수건에. 허리를 젖히지 말고 팔만 Y자로 든다.',
+    why: '등 하부 승모근·회전근개를 가볍게 준비시킨다.',
+    discSafe: true
+  },
+  arm_circle: {
+    kr: '팔 원 그리기', phase: 'warmup',
+    mode: 'reps', reps: 20, secPerRep: 1.5, gear: 'none',
+    cue: '앞으로 10회, 뒤로 10회. 작게 시작해 점점 크게.',
+    why: '어깨는 가동범위가 크고 불안정한 관절이라 미리 움직여두면 편하다.',
+    discSafe: true
+  },
+  band_external_rotation: {
+    kr: '밴드 외회전', phase: 'warmup',
+    mode: 'reps', reps: 15, secPerRep: 2, gear: 'band',
+    cue: '팔꿈치를 옆구리에 붙이고 아래팔만 바깥으로. 밴드가 없으면 팔꿈치 90도로 벽을 5초씩 5회 민다.',
+    why: '회전근개를 그날 각도로 미리 지나가게 한다.',
+    discSafe: true
+  },
+  glute_bridge: {
+    kr: '글루트 브리지', phase: 'warmup',
+    mode: 'reps', reps: 12, secPerRep: 4, gear: 'mat',
+    cue: '누워서 엉덩이 들고 위에서 2초. 허리로 젖히지 말고 엉덩이로 민다 — 갈비뼈가 들리면 잘못된 것.',
+    why: '요추 중립을 유지한 채 고관절 신전을 예행연습한다.',
+    discSafe: true
+  },
+  bw_squat: {
+    kr: '맨몸 스쿼트', phase: 'warmup',
+    mode: 'reps', reps: 12, secPerRep: 3, gear: 'none',
+    cue: '얕게 시작해 점점 깊게. 무릎이 안으로 모이지 않게.',
+    why: '그날 쓸 패턴을 부하 없이 한 번 지나간다.',
+    discSafe: true
+  },
+  reverse_lunge: {
+    kr: '리버스 런지', phase: 'warmup',
+    mode: 'repsPerSide', reps: 8, secPerRep: 3, gear: 'none',
+    cue: '뒤로 내딛는다(앞으로보다 무릎 부담이 적다). 뒷다리 고관절 앞쪽이 늘어나는 느낌으로.',
+    why: '한 다리 균형과 고관절 굴곡근 길이를 함께 준비한다.',
+    discSafe: true
+  },
+  ankle_wall_knee: {
+    kr: '벽 무릎 터치 (발목)', phase: 'warmup',
+    mode: 'repsPerSide', reps: 10, secPerRep: 2, gear: 'wall',
+    cue: '발뒤꿈치를 떼지 말고 무릎으로 벽을 터치한다.',
+    why: '발목이 안 굽으면 스쿼트 깊이가 안 나온다.',
+    discSafe: true
+  },
+  wrist_circle: {
+    kr: '손목 원 그리기 + 굴곡·신전', phase: 'warmup',
+    mode: 'reps', reps: 10, secPerRep: 2, gear: 'none',
+    cue: '원을 10회 그리고, 손목을 위아래로 10회 접었다 편다.',
+    why: '컬·푸시다운 전에 손목을 준비시킨다.',
+    discSafe: true
+  },
+  elbow_flex_ext: {
+    kr: '팔꿈치 굴곡-신전 (맨몸)', phase: 'warmup',
+    mode: 'reps', reps: 15, secPerRep: 2, gear: 'none',
+    cue: '완전히 폈다가 완전히 접는다. 전체 가동범위로.',
+    why: '팔 종목 전 관절 가동범위를 한 번 확인한다.',
+    discSafe: true
+  },
+  band_curl_pushdown: {
+    kr: '밴드 컬 + 밴드 푸시다운', phase: 'warmup',
+    mode: 'reps', reps: 15, secPerRep: 2, gear: 'band',
+    cue: '아주 가벼운 부하로 각 15회.',
+    why: '그날 쓸 팔 패턴의 예행연습.',
+    discSafe: true
+  },
+
+  // ── 스트레칭 (§3-B ~ §3-G) ─────────────────────────────
+  // 전부 30초 안팎이다: ACSM(2011)의 "10~30초 × 2~4회 = 근육당 총 60초" 유지 기준을 맞춘 값이며,
+  // 델파이 합의문의 "만성 유연성 향상(3세트×120초)" 기준에는 못 미친다 — 화면 문구도 그렇게 정직하게 쓴다(§2-A).
+  doorway_chest: {
+    kr: '도어웨이 가슴 스트레칭', phase: 'stretch',
+    mode: 'timePerSide', sec: 30, gear: 'wall',
+    cue: '팔꿈치 90도, 어깨 높이로 문틀·기둥에 대고 몸통을 천천히 돌린다. 가벼운 당김까지만.',
+    why: '미는 종목 뒤 가슴·어깨 전면의 가동범위를 지킨다.',
+    discSafe: true
+  },
+  cross_body_rear_delt: {
+    kr: '어깨 후면 크로스바디', phase: 'stretch',
+    mode: 'timePerSide', sec: 30, gear: 'none',
+    cue: '팔을 몸 앞으로 가로질러 당긴다. 어깨가 위로 올라가지 않게.',
+    why: '미는 날·당기는 날 모두 많이 쓰는 후면 삼각근의 가동범위 유지.',
+    discSafe: true
+  },
+  overhead_triceps: {
+    kr: '삼두 오버헤드', phase: 'stretch',
+    mode: 'timePerSide', sec: 30, gear: 'none',
+    cue: '팔꿈치를 머리 뒤로 넘긴다. 허리가 젖혀지지 않게 배에 살짝 힘.',
+    why: '삼두 장두는 어깨를 지나가므로 팔을 올려야 늘어난다.',
+    discSafe: true
+  },
+  tspine_foamroll: {
+    kr: '흉추 폼롤러 신전 (선택)', phase: 'stretch',
+    mode: 'time', sec: 40, gear: 'foamroller', optional: true,
+    cue: '폼롤러를 등 상부(날개뼈 높이)에만 댄다.',
+    why: '폼롤링은 가동범위를 소폭 올리고 수행을 떨어뜨리지 않는다(Wiewelhove 2019). 해도 되고 안 해도 되는 항목.',
+    warn: '허리(요추)에는 폼롤러를 직접 대지 않는다.',
+    discSafe: true
+  },
+  standing_lat_hinge: {
+    kr: '선 자세 광배 스트레칭', phase: 'stretch',
+    mode: 'timePerSide', sec: 30, gear: 'none',
+    cue: '랙이나 문틀을 잡고 고관절 힌지로 엉덩이만 뒤로 뺀다. 허리는 중립 — 요추가 말리면 잘못된 것.',
+    why: '무릎 꿇고 상체를 낮추는 차일드 포즈는 허리를 말기 때문에, 이 자세로 대신한다.',
+    discSafe: true
+  },
+  biceps_wall: {
+    kr: '이두 · 전완 벽 스트레칭', phase: 'stretch',
+    mode: 'timePerSide', sec: 30, gear: 'wall',
+    cue: '손바닥을 벽에 대고 몸통을 반대쪽으로 천천히 돌린다.',
+    why: '당기는 날·팔 날에 짧아지기 쉬운 이두와 전완의 가동범위 유지.',
+    discSafe: true
+  },
+  seated_tspine_rotation: {
+    kr: '앉아서 흉추 회전', phase: 'stretch',
+    mode: 'timePerSide', sec: 30, gear: 'none',
+    cue: '의자에 앉아 가슴부터 돌린다. 허리로 비틀지 않는다.',
+    why: '흉추 회전이 나오지 않으면 어깨와 허리가 대신 움직인다.',
+    discSafe: true
+  },
+  neck_lateral: {
+    kr: '목 · 승모근 측면', phase: 'stretch',
+    mode: 'timePerSide', sec: 30, gear: 'none',
+    cue: '머리를 옆으로 기울이고 반대 손은 아래로. 당기지 말고 머리 무게만 쓴다.',
+    why: '어깨 종목 뒤 위쪽 승모근이 짧아진 느낌을 푼다.',
+    discSafe: true
+  },
+  supine_hamstring_strap: {
+    kr: '누워서 스트랩 햄스트링', phase: 'stretch',
+    mode: 'timePerSide', sec: 30, gear: 'mat',
+    cue: '바닥에 누워 수건·밴드를 발바닥에 걸고 다리를 든다. 허리는 바닥에 붙인 채로. 반대쪽 무릎은 세워도 된다.',
+    why: '바닥이 허리를 받쳐 중립이 강제된다. 선 채 발끝 닿기를 대신하는 가장 중요한 동작이다.',
+    discSafe: true
+  },
+  lunge_hipflexor: {
+    kr: '런지 자세 고관절 굴곡근', phase: 'stretch',
+    mode: 'timePerSide', sec: 30, gear: 'mat',
+    cue: '뒷다리 쪽 엉덩이를 앞으로 밀며 골반을 살짝 뒤로 말아 허리가 젖혀지지 않게 한다.',
+    why: '오래 앉아 있으면 짧아지는 부위. 골반을 말지 않으면 허리로 늘어난다.',
+    discSafe: true
+  },
+  supine_figure4: {
+    kr: '누워서 90/90 둔근 (피겨-4)', phase: 'stretch',
+    mode: 'timePerSide', sec: 30, gear: 'mat',
+    cue: '누운 채 발목을 반대쪽 무릎에 걸고 허벅지를 당긴다.',
+    why: '앉아서 상체를 숙이는 비둘기 자세 대신, 바닥에 누워 허리를 보호한다.',
+    discSafe: true
+  },
+  calf_wall: {
+    kr: '종아리 벽 스트레칭', phase: 'stretch',
+    mode: 'timePerSide', sec: 30, gear: 'wall',
+    cue: '뒷발 뒤꿈치를 바닥에 붙이고 벽을 밀듯 앞으로 기댄다.',
+    why: '발목 가동범위는 스쿼트 깊이에 직접 영향을 준다.',
+    discSafe: true
+  },
+  quad_standing: {
+    kr: '대퇴사두 (서서)', phase: 'stretch',
+    mode: 'timePerSide', sec: 30, gear: 'none',
+    cue: '무릎을 뒤로 접어 발목을 잡는다. 골반은 중립 — 허리가 젖혀지면 잘못된 것. 균형이 안 잡히면 옆으로 누워서.',
+    why: '대퇴사두는 무릎을 접어야 늘어난다. 허리를 젖혀 보상하기 쉬운 동작이라 골반 위치가 핵심.',
+    discSafe: true
+  },
+  wrist_flexor_extensor: {
+    kr: '손목 굴곡근 · 신전근', phase: 'stretch',
+    mode: 'time', sec: 40, gear: 'none',
+    cue: '손바닥을 위로 20초, 아래로 뒤집어 20초.',
+    why: '컬·데드행이 많은 날 전완 가동범위 유지.',
+    discSafe: true
+  },
+  standing_side_bend: {
+    kr: '서서 옆구리 측굴', phase: 'stretch',
+    mode: 'timePerSide', sec: 20, gear: 'none',
+    cue: '한 손을 머리 위로 올려 옆으로만 기운다. 앞으로 숙이거나 비틀지 않는다.',
+    why: '굴곡·회전을 섞지 않으면 요추에 안전한 범위에서 옆구리를 늘릴 수 있다.',
+    discSafe: true
+  },
+  breathing_9090: {
+    kr: '누워서 90/90 호흡', phase: 'stretch',
+    mode: 'time', sec: 60, gear: 'mat',
+    cue: '다리를 의자·벽에 90도로 올리고 코로 4초 들이쉬고 6초 내쉰다. 갈비뼈를 내리는 감각.',
+    why: '운동이 끝났다는 신호를 주는 마무리 동작. 편안한 느낌 말고 다른 효과는 근거가 약하다.',
+    discSafe: true
+  },
+
+  // ── ⚠️ 배제 동작 (§4-A) — 어떤 기본 목록에도 넣지 않는다 ─────────────────
+  // 여기 남겨 둔 이유: ① "왜 이 동작이 없는가"를 코드에 문서로 남기고, ② 앞으로 목록에 잘못
+  // 섞여 들어와도 buildWarmupPlan/buildStretchPlan이 discAlt로 자동 치환하게 하기 위해서다.
+  standing_toe_touch: {
+    kr: '선 채 발끝 닿기', phase: 'stretch',
+    mode: 'timePerSide', sec: 30, gear: 'none',
+    cue: '(앱에서 쓰지 않는 동작)',
+    why: '요추 굴곡 + 중력 + 햄스트링 장력이 겹쳐 디스크 후벽에 부하가 몰린다.',
+    discSafe: false, discAlt: 'supine_hamstring_strap'
+  },
+  seated_forward_fold: {
+    kr: '앉아 전굴', phase: 'stretch',
+    mode: 'time', sec: 30, gear: 'mat',
+    cue: '(앱에서 쓰지 않는 동작)',
+    why: '앉은 자세는 골반이 뒤로 말려 요추 굴곡이 더 커진다.',
+    discSafe: false, discAlt: 'supine_hamstring_strap'
+  },
+  knee_to_chest: {
+    kr: '무릎 가슴으로 당기기', phase: 'stretch',
+    mode: 'timePerSide', sec: 30, gear: 'mat',
+    cue: '(앱에서 쓰지 않는 동작)',
+    why: '순간 편해도 요추 굴곡이라 반복하면 손상 기전이 된다.',
+    discSafe: false, discAlt: 'supine_figure4'
+  },
+  child_pose: {
+    kr: '차일드 포즈', phase: 'stretch',
+    mode: 'time', sec: 30, gear: 'mat',
+    cue: '(앱에서 쓰지 않는 동작)',
+    why: '요추 굴곡. 광배 스트레칭은 선 자세 힌지 버전으로 대체한다.',
+    discSafe: false, discAlt: 'standing_lat_hinge'
+  }
+};
+
+// 모든 날 맨 앞에 고정되는 일반 웜업 (§3-A · §1-A)
+var WARMUP_GENERAL = ['general_cardio'];
+
+// 부위(대분류 6개) → 웜업 드릴 (§3-B ~ §3-G)
+var WARMUP_BY_PART = {
+  chest:     ['scap_pushup', 'band_pull_apart', 'wall_slide', 'open_book'],
+  back:      ['cat_camel', 'bird_dog', 'straight_arm_pulldown', 'band_pull_apart', 'prone_y_raise'],
+  shoulders: ['arm_circle', 'band_external_rotation', 'wall_slide', 'band_pull_apart', 'open_book'],
+  legs:      ['cat_camel', 'glute_bridge', 'bw_squat', 'reverse_lunge', 'ankle_wall_knee'],
+  arms:      ['wrist_circle', 'elbow_flex_ext', 'scap_pushup', 'band_curl_pushdown'],
+  core:      ['cat_camel', 'mcgill_curlup', 'side_bridge', 'bird_dog']
+};
+
+// 부위(대분류 6개) → 마무리 스트레칭 (§3-B ~ §3-G)
+var STRETCH_BY_PART = {
+  chest:     ['doorway_chest', 'cross_body_rear_delt', 'overhead_triceps', 'tspine_foamroll'],
+  back:      ['standing_lat_hinge', 'cross_body_rear_delt', 'biceps_wall', 'seated_tspine_rotation'],
+  shoulders: ['cross_body_rear_delt', 'doorway_chest', 'neck_lateral', 'overhead_triceps'],
+  legs:      ['supine_hamstring_strap', 'lunge_hipflexor', 'supine_figure4', 'calf_wall', 'quad_standing'],
+  arms:      ['overhead_triceps', 'biceps_wall', 'wrist_flexor_extensor'],
+  core:      ['cat_camel', 'standing_side_bend', 'breathing_9090']
+};
+
+// 템플릿 세션 → 웜업 부위 (§3-H). free/AI 루틴은 null → 종목 목록에서 유도한다.
+var SESSION_WARMUP_MAP = {
+  push:  ['chest', 'shoulders'],
+  pull:  ['back'],
+  legs:  ['legs'],
+  upper: ['chest', 'back', 'shoulders'],
+  free:  null
+};
+
+// 세부 부위(EXERCISE_BODY_PART_MAP.primary) → 웜업 대분류 6개 (§6-B③)
+var PART_TO_WARMUP_GROUP = {
+  chest: 'chest', chest_upper: 'chest', chest_lower: 'chest',
+  lats: 'back', upper_back: 'back', traps: 'back',
+  shoulders_front: 'shoulders', shoulders_side: 'shoulders', shoulders_rear: 'shoulders',
+  quads: 'legs', hamstrings: 'legs', glutes: 'legs', glutes_med: 'legs',
+  calves: 'legs', adductors: 'legs',
+  biceps: 'arms', triceps: 'arms', forearms: 'arms',
+  abs: 'core', obliques: 'core', lower_back: 'core'
+};
