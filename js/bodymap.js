@@ -261,6 +261,21 @@ function buildMuscleMapBlock(exerciseName, opts) {
   var arg = muscleMapJsArg(exerciseName);
   var compactCls = opts.compact ? ' mm-block-compact' : '';
 
+  // opts.fold: 세로 200px 그림 대신 한 줄로 접어 둔다 — 담긴 정보(근육 이름)는 접힌 줄에 그대로 있고,
+  // 그림이 필요할 때만 편다. 네이티브 <details> 라 재렌더가 없어 스크롤이 튀지 않는다.
+  if (opts.fold) {
+    var names = [muscleLabel(muscles.primary)]
+      .concat(muscles.secondary.length ? [muscles.secondary.map(muscleLabel).join(', ')] : [])
+      .join(' · ');
+    return '<details class="note mm-fold">'
+      + '<summary>' + (typeof icon === 'function' ? icon('info', 13) : '')
+        + '<span class="note-summary-text">자극 근육 — ' + escapeHtml(names) + '</span>'
+        + '<span class="note-caret">' + (typeof icon === 'function' ? icon('chevron', 12) : '') + '</span>'
+      + '</summary>'
+      + '<div class="note-body" style="padding-left:0;">' + buildMuscleMapBlock(exerciseName, { compact: opts.compact }) + '</div>'
+      + '</details>';
+  }
+
   return '<div class="mm-block' + compactCls + '" role="button" tabindex="0" '
       + 'aria-label="자극 근육 그림 크게 보기" '
       + 'onclick="openMuscleMapZoom(\'' + arg + '\')" '
@@ -291,11 +306,11 @@ function buildMuscleMapZoomHtml() {
     + '<div class="mm-zoom-card" onclick="event.stopPropagation()">'
       + '<div class="mm-zoom-head">'
         + '<div>'
-          + '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">자극 근육</p>'
+          + '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">자극 근육</p>'
           + '<p class="font-bebas text-2xl mt-1">' + escapeHtml(name) + '</p>'
         + '</div>'
         + '<button class="session-header-btn" onclick="closeMuscleMapZoom()" aria-label="닫기">'
-          + (typeof icon === 'function' ? icon('close', 18) : '✕')
+          + (typeof icon === 'function' ? icon('close', 18) : '×')
         + '</button>'
       + '</div>'
       + '<div class="mm-views mm-views-lg">'

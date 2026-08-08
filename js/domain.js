@@ -129,6 +129,18 @@ function getRecentPerformances(exerciseName, n) {
   return list.slice(0, n || 2);
 }
 
+// 표시용 정렬 — 최신이 위. 원본 배열은 건드리지 않는다(복사본을 정렬).
+// 운동 기록은 저장이 unshift(최신 먼저)라 화면에서 slice(-N).reverse() 를 쓰면
+// 기록이 N개를 넘는 순간 "가장 오래된 것"만 남았다. 자르기 전에 날짜(같은 날이면
+// 시작시각) 내림차순으로 다시 세워, 저장 순서와 상관없이 최신 N개가 나오게 한다.
+function sortByDateDesc(list) {
+  return (list || []).slice().sort(function(a, b) {
+    var byDate = String((b && b.date) || '').localeCompare(String((a && a.date) || ''));
+    if (byDate !== 0) return byDate;
+    return (Number(b && b.startTime) || 0) - (Number(a && a.startTime) || 0);
+  });
+}
+
 // ═══════════════════════════════════════════════
 // 역방향 진행 (어시스트 보조 기구) — docs/research/assisted-progression.md
 // ═══════════════════════════════════════════════
@@ -283,7 +295,8 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
                note: '첫 시도 — 체중의 약 ' + Math.round(ASSIST_INITIAL_BW_RATIO * 100) + '%를 보조로. 한 세트 해보고 조절하세요' };
     }
     var w = suggestWorkingWeight(exerciseName, 0.7);
-    if (w) return { weight: w, source: 'rm_estimate', note: '1RM 추정 기반 (첫 시도)', repRange: range, exClass: cls };
+    // 라벨이 이미 "첫 시도 추천"이라 note 에 '(첫 시도)'를 또 붙이지 않는다.
+    if (w) return { weight: w, source: 'rm_estimate', note: '1RM 추정 기반', repRange: range, exClass: cls };
     return null;
   }
 
@@ -1634,7 +1647,7 @@ function generateLinePath(data, width, height, padding) {
     }
     
     var isLast = i === data.length - 1;
-    pointsData += '<circle cx="' + x + '" cy="' + y + '" r="' + (isLast ? 4 : 3) + '" fill="#F68460"' + (isLast ? ' stroke="white" stroke-width="2"' : '') + '/>';
+    pointsData += '<circle cx="' + x + '" cy="' + y + '" r="' + (isLast ? 4 : 3) + '" fill="var(--accent)"' + (isLast ? ' stroke="white" stroke-width="2"' : '') + '/>';
   });
   
   areaData += ' L ' + width + ',' + height + ' Z';

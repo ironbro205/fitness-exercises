@@ -128,7 +128,7 @@ var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v51';
+var APP_VERSION = 'v52';
 // 백업에 담지 않는 키. 두 부류:
 // (1) 로컬 전용·민감 → 복원해도 그대로 보존 (API 키·코치 대화)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
@@ -548,6 +548,20 @@ function icon(name, size) {
   if (!size) size = 22;
   var svg = ICONS[name];
   return svg.replace('<svg ', '<svg width="' + size + '" height="' + size + '" ');
+}
+
+// 접이식 안내 — 화면에는 첫 줄(summary)만 두고, 나머지(detailHtml)는 ⓘ 를 눌렀을 때 편다.
+// 네이티브 <details> 라 state·render() 를 거치지 않는다 → 펼쳐도 스크롤이 맨 위로 튀지 않는다.
+// summary/detailHtml 은 **앱이 직접 쓴 고정 문구 전용**이다. 사용자·AI 문자열을 넣을 때는
+// 부르는 쪽에서 escapeHtml 로 감싸 넣는다(여기서 이스케이프하면 <b> 같은 강조가 죽는다).
+function noteBlock(summary, detailHtml) {
+  return '<details class="note">' +
+      '<summary>' + icon('info', 13) +
+        '<span class="note-summary-text">' + summary + '</span>' +
+        '<span class="note-caret">' + icon('chevron', 12) + '</span>' +
+      '</summary>' +
+      '<div class="note-body">' + detailHtml + '</div>' +
+    '</details>';
 }
 
 // ═══════════════════════════════════════════════
