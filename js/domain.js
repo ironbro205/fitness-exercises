@@ -140,10 +140,16 @@ function getRecentPerformances(exerciseName, n) {
 function isReverseProgression(exerciseName) {
   var name = canonicalExerciseName(exerciseName || '');
   if (REVERSE_PROGRESSION_EXERCISES.indexOf(name) !== -1) return true;
+  // 키워드 경로는 '어시스트' + '풀업/친업/딥스'가 **둘 다** 있어야 한다 (오탐 방지 — data.js 주석).
+  var hasAssist = false, hasMovement = false;
   for (var i = 0; i < ASSIST_NAME_KEYWORDS.length; i++) {
-    if (name.indexOf(ASSIST_NAME_KEYWORDS[i]) !== -1) return true;
+    if (name.indexOf(ASSIST_NAME_KEYWORDS[i]) !== -1) { hasAssist = true; break; }
   }
-  return false;
+  if (!hasAssist) return false;
+  for (var j = 0; j < ASSIST_MOVEMENT_KEYWORDS.length; j++) {
+    if (name.indexOf(ASSIST_MOVEMENT_KEYWORDS[j]) !== -1) { hasMovement = true; break; }
+  }
+  return hasMovement;
 }
 
 // 이 종목에서 "더 어려운 쪽" 무게. 정방향=최대, 역방향=최소(보조가 적을수록 어렵다).
@@ -571,10 +577,16 @@ function getSessionSetPlan(exerciseName, fallbackWeight, targetReps, opts) {
   var range = clampRepsToClass(exerciseName, targetReps);
   var prog = getProgressiveRecommendation(exerciseName, targetReps);
 
+  // 어시스트 종목은 **보조 0kg(맨몸)이 유효한 값**이다 — falsy라고 버리면 AI/템플릿이 지정한
+  // "맨몸으로 하세요"가 조용히 체중 기반 첫 보조(30kg 등)로 되돌아간다.
+  var hasFallback = isReverseProgression(exerciseName)
+    ? (typeof fallbackWeight === 'number' && fallbackWeight >= 0)
+    : !!fallbackWeight;
+
   var weight = null;
   if (prog && prog.source !== 'rm_estimate') {
     weight = prog.weight;
-  } else if (fallbackWeight) {
+  } else if (hasFallback) {
     weight = snapWeightToEquipment(fallbackWeight, exerciseName);
   } else if (prog) {
     weight = prog.weight; // 1RM 추정 폴백

@@ -422,6 +422,7 @@
     "warnExerciseSafety"
   ],
   "objects": [
+    "ASSIST_MOVEMENT_KEYWORDS",
     "ASSIST_NAME_KEYWORDS",
     "BACKUP_EXCLUDE_KEYS",
     "BACKUP_LIST_KEYS",

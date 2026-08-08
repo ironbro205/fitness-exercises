@@ -1198,7 +1198,9 @@ async function generateFullRoutine(bodyPart) {
         isMain: !!ex.isMain,
         sets: ex.sets || 3,
         reps: ex.reps || '8-12',
-        weight: ex.weight ? snapWeightToEquipment(ex.weight, ex.name) : null,
+        // 어시스트 종목의 보조 0kg(맨몸)은 유효한 값이라 falsy로 버리면 안 된다.
+        weight: (ex.weight || (ex.weight === 0 && isReverseProgression(ex.name)))
+          ? snapWeightToEquipment(ex.weight, ex.name) : null,
         rir: ex.rir || 2,
         rest: ex.rest || null,
         note: ex.note || ''

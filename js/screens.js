@@ -3430,7 +3430,9 @@ function renderWorkoutComplete() {
   var prAlertsHtml = '';
   if (cs.newPRs.length > 0) {
     cs.newPRs.forEach(function(pr) {
-      var prChange = formatPRChange(pr); // 어시스트 종목은 '보조 40kg → 보조 35kg (보조 −5kg)'
+      // 어시스트 종목은 '보조 40kg → 보조 35kg (보조 −5kg)'. 옛/가져온 기록의 값이 숫자가
+      // 아닐 수 있어 PR 히스토리 화면과 같은 규칙으로 escape한다.
+      var prChange = escapeHtml(formatPRChange(pr));
 
       prAlertsHtml += 
         '<div class="card-accent mb-4">' +

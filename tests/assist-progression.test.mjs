@@ -39,6 +39,13 @@ test('판정: 어시스트 풀업·딥스는 역방향, 맨몸 풀업·딥스·�
 test('판정: AI가 만든 이름 변형도 키워드로 잡는다', () => {
   assert.equal(app.isReverseProgression('어시스티드 풀업'), true);
   assert.equal(app.isReverseProgression('머신 어시스트 딥스'), true);
+  assert.equal(app.isReverseProgression('어시스트 친업'), true);
+});
+
+test('판정: "어시스트"만 있고 풀업/딥스가 아니면 역방향이 아니다 (키워드 오탐 방지)', () => {
+  // 보조 기구는 풀업·친업·딥스 전용이다. 이 가드가 없으면 아래 이름의 1RM이 조용히 삭제된다.
+  assert.equal(app.isReverseProgression('어시스트 레그 프레스'), false);
+  assert.equal(app.isReverseProgression('어시스트 체스트 프레스'), false);
 });
 
 // ═══ 2. 진행 방향 (핵심) ═══
@@ -176,11 +183,25 @@ test('1RM: INITIAL_1RM에 어시스트 종목이 없고, 저장소에 남은 값
   // 옛 버전 사용자 시뮬레이션 — 보조 무게가 1RM으로 저장돼 있던 상태
   const data = app.storage.get(app.KEYS.ONE_RM_DATA, {});
   data['어시스트 딥스'] = 66.67;
+  data['어시스트 레그 프레스'] = 120; // 정방향 커스텀 종목 (삭제되면 안 된다)
   app.storage.set(app.KEYS.ONE_RM_DATA, data);
   assert.equal(app.pruneReverseProgression1RM(), true);
-  assert.equal(app.storage.get(app.KEYS.ONE_RM_DATA, {})['어시스트 딥스'], undefined);
+  const after = app.storage.get(app.KEYS.ONE_RM_DATA, {});
+  assert.equal(after['어시스트 딥스'], undefined);
+  assert.equal(after['어시스트 레그 프레스'], 120, '이름에 "어시스트"만 있는 정방향 종목은 보존해야 한다');
   // 정방향 종목은 건드리지 않는다
-  assert.ok(app.storage.get(app.KEYS.ONE_RM_DATA, {})['레그 프레스'] > 0);
+  assert.ok(after['레그 프레스'] > 0);
+  // 두 번째 호출은 지울 게 없다 (매 부팅 호출되므로 멱등해야 한다)
+  assert.equal(app.pruneReverseProgression1RM(), false);
+});
+
+test('0kg 보존: 템플릿/AI가 준 보조 0kg(맨몸)이 falsy로 버려지지 않는다', () => {
+  seedLog([]); // 기록 없음 → fallbackWeight 경로
+  const plan = app.getSessionSetPlan('어시스트 풀업', 0, '5-8', { sets: 3, warmup: false });
+  assert.equal(plan.weight, 0, '보조 0kg 지시가 체중 기반 첫 보조로 되돌아가면 안 된다');
+  // 정방향은 기존 동작 유지 — 0은 "무게 미정"이라 폴백으로 넘어간다
+  const fwd = app.getSessionSetPlan('레그 프레스', 0, '8-12', { sets: 3, warmup: false });
+  assert.ok(fwd.weight > 0);
 });
 
 // ═══ 5. 진행 지표 (보조 감소 추이) ═══
