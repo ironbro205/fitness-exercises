@@ -999,6 +999,53 @@ function buildEquipmentPromptBlock() {
   return block;
 }
 
+// 장비 코드 가드레일: AI가 프롬프트를 어기고 이 헬스장에 없는 기구 종목을 넣었을 때
+// 같은 부위의 보유 종목으로 교체(마땅한 게 없으면 제거)한다.
+// 안전 가드레일(applySafetyGuardrail) **다음에** 돌린다 — 안전 교체가 우선이고, 그 결과를 장비로 한 번 더 거른다.
+// 반환: { exercises: 교정된 배열, changes: [{from, to}] }
+function applyEquipmentGuardrail(exercises) {
+  if (!Array.isArray(exercises) || !exercises.length) return { exercises: exercises, changes: [] };
+  var changes = [];
+  var names = {};
+  exercises.forEach(function(e) { if (e && e.name) names[e.name] = true; });
+  var out = exercises.map(function(ex) {
+    if (!ex || !ex.name || isExerciseAvailable(ex.name)) return ex;
+    var info = EXERCISE_BODY_PART_MAP[ex.name] || getExercisePart(ex.name);
+    var pool = (info && EXERCISES_BY_PRIMARY[info.primary]) || [];
+    // 같은 부위 후보 중 점수가 가장 높은 것을 고른다:
+    // 복합/고립 성격이 같으면 +2, 부하를 걸 수 있으면(맨몸이 아니면) +1.
+    // 무게를 싣던 머신 종목이 맨몸 종목으로 바뀌어 자극이 통째로 빠지는 걸 막는다.
+    var sub = null, best = -1;
+    for (var i = 0; i < pool.length; i++) {
+      var cand = pool[i];
+      if (cand === ex.name || names[cand] || !isExerciseAvailable(cand)) continue;
+      var candInfo = EXERCISE_BODY_PART_MAP[cand];
+      var score = 0;
+      if (info && candInfo.compound === info.compound) score += 2;
+      if (candInfo.equipment !== 'bodyweight') score += 1;
+      if (score > best) { best = score; sub = cand; }
+    }
+    if (!sub) { changes.push({ from: ex.name, to: null }); return null; }
+    changes.push({ from: ex.name, to: sub });
+    names[sub] = true;
+    var copy = {};
+    Object.keys(ex).forEach(function(k) { copy[k] = ex[k]; });
+    copy.name = sub;
+    copy.weight = null; // 다른 종목이므로 무게는 기록 기반으로 다시 계산
+    var subInfo = EXERCISE_BODY_PART_MAP[sub];
+    if (subInfo) {
+      copy.type = subInfo.compound ? '복합' : '고립';
+      copy.isMain = !!(ex.isMain && subInfo.mainEligible);
+    }
+    if (copy.reps !== undefined) copy.reps = repRangeToStr(clampRepsToClass(sub, copy.reps));
+    if (copy.rir !== undefined) copy.rir = (copy.type === '복합') ? '2-3' : '0-2';
+    if (copy.rest !== undefined && copy.rest) copy.rest = (copy.type === '복합') ? '120-180' : '60-120';
+    copy.note = '헬스장에 ' + ex.name + ' 기구가 없어 대신 배치';
+    return copy;
+  }).filter(Boolean);
+  return { exercises: out, changes: changes };
+}
+
 // ═══════════════════════════════════════════════
 // 종목 안전 (부상 대조 + VETO 가드레일)
 // ═══════════════════════════════════════════════

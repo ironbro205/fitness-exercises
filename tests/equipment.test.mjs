@@ -80,7 +80,7 @@ test('isExerciseAvailable — 맨몸 가능 / 미보유 기구 불가 / 미등�
 
 test('getExerciseEquipment — 미등록 이름도 퍼지 매칭으로 장비를 찾는다', () => {
   // SESSIONS 템플릿의 표시명들은 맵에 정확 키가 없지만 부위·장비가 해석돼야 한다
-  assert.equal(app.getExerciseEquipment('카프 레이즈 머신'), 'bodyweight');
+  assert.equal(app.getExerciseEquipment('카프 레이즈 머신'), 'calf_machine'); // 옛 템플릿 이름 = 미보유 전용 머신
   assert.equal(app.getExerciseEquipment('시티드 햄스트링 컬'), 'leg_curl');
   assert.equal(app.getExerciseEquipment('인클라인 덤벨 프레스'), 'dumbbell');
 });
@@ -94,6 +94,31 @@ test('buildEquipmentPromptBlock — 보유 장비를 나열하고 미보유 종�
   const labels = app.getOwnedEquipmentLabels();
   assert.ok(!labels.includes('시티드 카프 레이즈 머신'));
   assert.ok(labels.includes('핵스쿼트 머신'));
+});
+
+// ═══ 3-1. 코드 가드레일 (AI가 프롬프트를 어겨도 막는 마지막 방어선) ═══
+test('applyEquipmentGuardrail — 미보유 기구 종목을 같은 부위의 보유 종목으로 교체', () => {
+  const r = app.applyEquipmentGuardrail([
+    { name: '카프 레이즈 머신', type: '고립', isMain: false, sets: 3, reps: '15-20', weight: 80, rir: '0-2' },
+  ]);
+  assert.equal(r.changes.length, 1);
+  assert.equal(r.changes[0].from, '카프 레이즈 머신');
+  assert.ok(app.isExerciseAvailable(r.changes[0].to), '대체 종목도 보유 장비로 가능해야 한다');
+  assert.equal(r.exercises[0].weight, null, '다른 종목이므로 무게는 다시 계산해야 한다');
+  assert.match(r.exercises[0].note, /기구가 없어/);
+});
+
+test('applyEquipmentGuardrail — 부하를 걸 수 있는 대체를 맨몸보다 우선', () => {
+  // 종아리 후보에는 맨몸 '카프 레이즈'도 있지만, 무게를 싣던 머신 종목의 대체로는 부적절하다
+  const r = app.applyEquipmentGuardrail([{ name: '시티드 카프 레이즈', type: '고립', sets: 3, reps: '15' }]);
+  const to = r.changes[0].to;
+  assert.notEqual(app.EXERCISE_BODY_PART_MAP[to].equipment, 'bodyweight');
+});
+
+test('applyEquipmentGuardrail — 보유 종목만 있으면 아무것도 바꾸지 않는다', () => {
+  const r = app.applyEquipmentGuardrail([{ name: '레그 프레스' }, { name: '플랭크' }]);
+  assert.equal(r.changes.length, 0);
+  assert.deepEqual(r.exercises.map((e) => e.name), ['레그 프레스', '플랭크']);
 });
 
 // ═══ 4. 신규 종목이 기존 스키마·규칙을 지킨다 ═══

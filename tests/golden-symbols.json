@@ -1,5 +1,5 @@
 {
-  "functionCount": 264,
+  "functionCount": 265,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -17,6 +17,7 @@
     "applyChatSignalToExercise",
     "applyCoachQuickQuestion",
     "applyDeleteSet",
+    "applyEquipmentGuardrail",
     "applyExerciseSwap",
     "applyRoutineQuickChip",
     "applySafetyGuardrail",

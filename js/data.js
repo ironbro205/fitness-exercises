@@ -281,7 +281,7 @@ var GYM_EQUIPMENT = {
   band:                       { kr: '탄력 밴드',                      owned: true,  source: 'inferred' },
 
   // ── 미보유 (이 장비를 쓰는 종목은 추천되지 않는다) ──
-  seated_calf_machine:        { kr: '시티드 카프 레이즈 머신',          owned: false, source: 'none' }
+  calf_machine:               { kr: '전용 카프 레이즈 머신',            owned: false, source: 'none' }
 };
 
 // ═══════════════════════════════════════════════
@@ -406,7 +406,8 @@ var EXERCISE_BODY_PART_MAP = {
   
   // 종아리
   '카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'bodyweight' },
-  '시티드 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'seated_calf_machine' },
+  '시티드 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'calf_machine' },
+  '카프 레이즈 머신': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'calf_machine' },  // 옛 LEGS 템플릿 이름 (저장된 세션에 남아 있음) — 전용 카프 머신은 이 헬스장에 없다
   '스탠딩 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'smith' },
   '레그 프레스 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'leg_press' },
   '덤벨 시티드 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'dumbbell' },

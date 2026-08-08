@@ -249,6 +249,14 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
         });
         replyText += '\n\n🛡️ 안전 교체: ' + changeMsgs.join(', ');
       }
+      // 장비 가드레일 (안전 다음) — 프롬프트를 어기고 없는 기구 종목이 들어왔으면 여기서 교체/제거
+      var eqGuarded = applyEquipmentGuardrail(validRoutine.exercises);
+      if (eqGuarded.changes.length) {
+        validRoutine.exercises = eqGuarded.exercises;
+        replyText += '\n\n🏋️ 장비 교체: ' + eqGuarded.changes.map(function(c) {
+          return c.to ? (c.from + ' → ' + c.to) : (c.from + ' 제외');
+        }).join(', ') + ' (헬스장에 없는 기구)';
+      }
       if (!validRoutine.exercises.length) validRoutine = null;
     }
 
@@ -1163,6 +1171,17 @@ async function generateFullRoutine(bodyPart) {
         return c.to ? (c.from + ' → ' + c.to + ' (' + c.areaKr + ' 보호)') : (c.from + ' 제외 (' + c.areaKr + ' 보호)');
       });
       cautionText = (cautionText ? cautionText + ' · ' : '') + '🛡️ 안전 교체: ' + changeMsgs.join(', ');
+    }
+    // 장비 가드레일 (안전 다음) — 풀에 없는 미보유 기구 종목이 응답에 섞여 들어왔으면 여기서 교체/제거
+    var eqGuarded = applyEquipmentGuardrail(guarded.exercises);
+    if (!eqGuarded.exercises.length) {
+      return { error: '보유 장비 필터로 모든 종목이 제외됐어요. 다시 시도해주세요.' };
+    }
+    guarded.exercises = eqGuarded.exercises;
+    if (eqGuarded.changes.length) {
+      cautionText = (cautionText ? cautionText + ' · ' : '') + '🏋️ 장비 교체: ' + eqGuarded.changes.map(function(c) {
+        return c.to ? (c.from + ' → ' + c.to) : (c.from + ' 제외');
+      }).join(', ') + ' (헬스장에 없는 기구)';
     }
 
     return {
