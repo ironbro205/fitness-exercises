@@ -2414,10 +2414,11 @@ button {
   color: var(--text-muted);
   margin-top: 2px;
 }
-/* 처방 표: 머리글은 목록 위에 한 줄만, 카드 안은 같은 격자에 값만 */
+/* 처방 표: 머리글은 목록 위에 한 줄만, 카드 안은 같은 격자에 값만.
+   격자가 같아야 값이 머리글 아래로 줄을 맞춘다 — 열 수는 JS 가 인라인으로 넣는다. */
 .routine-ex-prescription-head {
   display: grid;
-  gap: 14px;
+  gap: 10px;
   padding: 0 16px 6px 16px;
   font-size: 11px;
   font-family: var(--font-mono);
@@ -2427,16 +2428,24 @@ button {
 }
 .routine-ex-prescription {
   display: grid;
-  gap: 14px;
+  gap: 10px;
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px dashed var(--bg-3);
+}
+/* 세트 구성 한 줄 (탑세트 1 + 백오프 2) — '세트' 열의 숫자가 어떻게 나뉘는지 */
+.routine-ex-scheme {
+  margin-top: 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
 }
 .routine-ex-stat-value {
   font-family: var(--font-bebas);
   font-size: 18px;
   color: var(--accent);
   letter-spacing: 0.02em;
+  white-space: nowrap;   /* '15-20' 이 두 줄로 접히면 그 줄만 키가 두 배가 된다 */
 }
 .routine-ex-stat-value.regular { color: white; }
 .routine-ex-tag {
@@ -2563,6 +2572,12 @@ button {
   border-radius: 10px;
   margin-bottom: 6px;
   font-size: 11px;
+}
+/* 오른쪽 처방 조각은 줄바꿈하지 않는다 — 자리가 모자라면 왼쪽 종목명이 접힌다 */
+.routine-preview-ex-stat {
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: 8px;
 }
 .routine-preview-ex.changed {
   background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.08), var(--bg-2));

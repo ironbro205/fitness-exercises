@@ -1,5 +1,5 @@
 {
-  "functionCount": 431,
+  "functionCount": 435,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -57,6 +57,7 @@
     "buildMuscleMapSvg",
     "buildMuscleMapSvgFor",
     "buildMuscleMapZoomHtml",
+    "buildPrescriptionValues",
     "buildRestoreConfirmMessage",
     "buildSafetyPromptBlock",
     "buildSchemeSets",
@@ -154,6 +155,7 @@
     "deleteMemoryNote",
     "deleteSet",
     "deriveWarmupGroups",
+    "describeSetStructure",
     "detectPlateauSignals",
     "dismissChatSignal",
     "dismissPlateau",
@@ -218,6 +220,7 @@
     "getRecentVolumeSplitByPart",
     "getRecommendedSession",
     "getResponseText",
+    "getRoutinePreviewPlan",
     "getSessionSetPlan",
     "getSetScheme",
     "getSetSchemeOptions",
@@ -355,6 +358,7 @@
     "resetOneRM",
     "resolveRestSec",
     "resolveWarmupGroups",
+    "restSecToMin",
     "restoreFromBackup",
     "restoreSkippedSets",
     "rolling1RMMaxReps",
