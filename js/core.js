@@ -30,7 +30,9 @@ var KEYS = {
   AI_RECOMMENDATION_HISTORY: 'fitness_ai_recommendation_history',
   AI_REC_FAILED_DATE: 'fitness_ai_rec_failed_date',
   CHAT_SIGNALS: 'fitness_chat_signals',
-  LAST_BACKUP: 'fitness_last_backup'
+  LAST_BACKUP: 'fitness_last_backup',
+  // 종목별 사용자 지정 세트법 { "핵 스쿼트": "straight", ... }. 없으면 클래스 기본값(EXERCISE_CLASS_RULES.scheme).
+  SET_SCHEMES: 'fitness_set_schemes'
 };
 
 var storage = {
@@ -126,7 +128,7 @@ var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v46';
+var APP_VERSION = 'v47';
 // 백업에 담지 않는 키. 두 부류:
 // (1) 로컬 전용·민감 → 복원해도 그대로 보존 (API 키·코치 대화)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
@@ -551,6 +553,7 @@ var state = {
   activeSession: null,
   editingSet: null,
   exerciseSwapOpen: false,
+  setSchemeOpen: false,
   restTimer: null,
   completedSession: null,
   // 더보기 화면 - 모달

@@ -972,36 +972,20 @@ window.startGeneratedRoutine = function() {
   
   // 종목 데이터를 운동 세션 형식으로 변환
   var exercises = r.exercises.map(function(ex, idx) {
-    var sets = [];
     // 가드레일 + 추천 일치: 세트 시작 무게·횟수를 추천 카드와 같은 계산(getSessionSetPlan)으로.
     // (AI 무게를 따로 스냅하면 "5kg 유지" 카드 옆 세트가 6kg로 어긋나는 문제 방지)
-    var plan = getSessionSetPlan(ex.name, ex.weight, ex.reps || '8-12');
-
-    // 워밍업 1세트 (메인 종목만)
-    if (ex.isMain) {
-      sets.push({
-        weight: plan.weight ? snapWeightToEquipment(plan.weight * 0.5, ex.name) : null,
-        reps: 10,
-        completed: false,
-        isWarmup: true
-      });
-    }
-
-    // 본 세트
-    for (var s = 0; s < (ex.sets || 3); s++) {
-      sets.push({
-        weight: plan.weight,
-        reps: plan.reps,
-        completed: false,
-        isWarmup: false
-      });
-    }
+    // 세트 배열 자체도 여기서 나온다 — 세트법(스킴)별 무게·횟수·역할이 세트마다 개별로 붙는다.
+    var plan = getSessionSetPlan(ex.name, ex.weight, ex.reps || '8-12', {
+      sets: ex.sets || 3,
+      warmup: !!ex.isMain   // 워밍업은 메인 종목만 (기존 동작 유지)
+    });
 
     return {
       name: ex.name,
       type: ex.type || '보조',
       rest: ex.rest,
-      sets: sets,
+      sets: plan.sets,
+      scheme: plan.scheme,
       reps: ex.reps,
       targetReps: repRangeToStr(plan.repRange),  // 세션 화면에서 사용 (클래스 범위로 교정됨)
       lastWeight: (plan.prog && plan.prog.previousWeight !== undefined) ? plan.prog.previousWeight : (ex.weight !== undefined ? ex.weight : null),
@@ -1010,7 +994,10 @@ window.startGeneratedRoutine = function() {
       note: ex.note
     };
   });
-  
+
+  // 길항근 슈퍼세트 자동 제안 (사용자가 종목 메뉴에서 해제 가능)
+  applySupersetSuggestions(exercises);
+
   state.activeSession = {
     sessionType: sessionType,
     sessionName: sessionData.name || sessionType.toUpperCase(),
@@ -1335,7 +1322,10 @@ function renderItemDetailSheet() {
         var exName = ex.name || ex.exerciseName || '종목 ' + (idx + 1);
         var setSummary = '';
         if (ex.sets && ex.sets.length > 0) {
-          var completedSets = ex.sets.filter(function(s) { return s.completed && !s.isWarmup; });
+          // 드롭·마이오렙 제외 — 안 빼면 요약이 가장 가벼운 드롭 무게로 뜨고 세트 수도 부풀려진다
+          var completedSets = ex.sets.filter(function(s) {
+            return s.completed && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+          });
           if (completedSets.length > 0) {
             var lastSet = completedSets[completedSets.length - 1];
             setSummary = (lastSet.weight ? escapeHtml(lastSet.weight) + 'kg × ' : '') + escapeHtml(lastSet.reps) + ' · ' + completedSets.length + '세트';
@@ -1431,34 +1421,24 @@ window.startSession = function(sessionType) {
   
   // 세션 데이터 초기화
   var exercises = sessionData.exercises.map(function(ex) {
-    var sets = [];
-    // 가드레일 + 추천 일치: 템플릿 세트도 추천 카드와 같은 계산(getSessionSetPlan)으로
-    var plan = getSessionSetPlan(ex.name, ex.lastWeight, ex.reps || '8-10');
-    // 워밍업 1세트 + 본 세트 3개
-    sets.push({
-      weight: plan.weight ? snapWeightToEquipment(plan.weight * 0.5, ex.name) : null,
-      reps: 10,
-      isWarmup: true,
-      completed: false
-    });
-    for (var i = 0; i < ex.sets; i++) {
-      sets.push({
-        weight: plan.weight,
-        reps: plan.reps,
-        isWarmup: false,
-        completed: false
-      });
-    }
+    // 가드레일 + 추천 일치: 템플릿 세트도 추천 카드와 같은 계산(getSessionSetPlan)으로.
+    // 워밍업 구성도 클래스가 정한다 — 고중량 복합 2세트 / 중강도 복합 1세트 / 고립 이하는 없음
+    // (고립은 첫 워킹세트가 자체 워밍업 역할. 60분 예산을 맞추는 전제이기도 하다)
+    var plan = getSessionSetPlan(ex.name, ex.lastWeight, ex.reps || '8-10', { sets: ex.sets });
     return {
       name: ex.name,
       type: ex.type,
       targetReps: repRangeToStr(plan.repRange),
       lastWeight: (plan.prog && plan.prog.previousWeight !== undefined) ? plan.prog.previousWeight : ex.lastWeight,
       lastReps: ex.reps_done,
-      sets: sets
+      sets: plan.sets,
+      scheme: plan.scheme
     };
   });
-  
+
+  // 길항근 슈퍼세트 자동 제안 (사용자가 종목 메뉴에서 해제 가능)
+  applySupersetSuggestions(exercises);
+
   state.activeSession = {
     sessionType: sessionType,
     sessionName: sessionData.name,
@@ -1486,6 +1466,8 @@ window.endSession = function(fromBack) {
     state.activeSession = null;
     state.restTimer = null;
     state.editingSet = null;
+    state.setSchemeOpen = false;        // 세션 위 시트는 세션과 함께 닫는다 (남으면 다른 화면의 뒤로가기·스와이프를 먹는다)
+    state.exerciseSwapOpen = false;
     state.sessionChatOpen = false;      // 세트 사이 채팅은 세션과 함께 소멸
     state.sessionChatPending = null;
     state._sessionChatStreaming = false;
@@ -1556,20 +1538,26 @@ function finalizeSession() {
   
   session.exercises.forEach(function(ex) {
     var doneSets = ex.sets.filter(function(s) { return s.completed && !s.isWarmup; });
+    // 볼륨 카운트용 세트 수에서는 드롭·마이오렙을 뺀다. 이들은 마지막 워킹세트의 **연장**이지
+    // 독립 세트가 아니다 — 그대로 세면 3세트 종목이 5세트로 잡혀 주간 볼륨 폐루프가 부풀려진다.
+    // (근비대 이득도 동등할 뿐 더 크지 않다 — Sødal 2023 SMD 0.155 p=0.392)
+    var countedSets = doneSets.filter(function(s) { return s.role !== 'drop' && s.role !== 'myo'; });
+    if (!countedSets.length) countedSets = doneSets; // 본 세트를 지우고 드롭만 남은 예외 — 0세트로 기록하지 않는다
+    // (같은 규칙의 단일 원천은 domain.js countWorkingSets — setsCount 없는 옛 로그도 그쪽에서 같게 센다)
     if (doneSets.length > 0) {
-      completedSets += doneSets.length;
-      
+      completedSets += countedSets.length;
+
       // 종목별 요약
       var weights = doneSets.map(function(s) { return s.weight; });
       var reps = doneSets.map(function(s) { return s.reps; });
       var maxWeight = Math.max.apply(null, weights);
-      
+
       var doneEntry = {
         name: ex.name,
         type: ex.type,
-        sets: doneSets.length,        // 숫자 (기존 호환)
-        setsCount: doneSets.length,   // 명시적 (새 분석 함수용)
-        setsDetail: doneSets,          // 풀 세트 배열 (상세 분석용)
+        sets: countedSets.length,        // 숫자 (기존 호환)
+        setsCount: countedSets.length,   // 명시적 (새 분석 함수용)
+        setsDetail: doneSets,            // 풀 세트 배열 (드롭·마이오렙 포함 — 상세 분석용)
         weights: weights,
         reps: reps,
         maxWeight: maxWeight,
@@ -1671,6 +1659,8 @@ function finalizeSession() {
   state.activeSession = null;
   state.restTimer = null;
   state.editingSet = null;
+  state.setSchemeOpen = false;          // 세션 위 시트는 세션과 함께 닫는다
+  state.exerciseSwapOpen = false;
   state.sessionChatOpen = false;        // 세트 사이 채팅은 세션과 함께 소멸
   state.sessionChatPending = null;
   state._sessionChatStreaming = false;
@@ -1913,13 +1903,24 @@ window.addSetToExercise = function(exerciseIdx) {
   if (!state.activeSession) return;
   var exercise = state.activeSession.exercises[exerciseIdx];
   if (!exercise) return;
-  var working = exercise.sets.filter(function(s) { return !s.isWarmup; });
+  // 드롭·마이오렙은 마지막 워킹세트의 연장이라 이어받을 기준이 아니다 — 본 워킹세트에서 이어받는다.
+  var working = exercise.sets.filter(function(s) {
+    return !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+  });
   var lastSet = working.length ? working[working.length - 1] : exercise.sets[exercise.sets.length - 1];
+  // 탑세트 뒤에 세트를 더하면 그건 백오프다 — 역할과 함께 무게도 탑의 90%로 내려간다.
+  var addedRole = (lastSet && lastSet.role === 'top') ? 'backoff' : ((lastSet && lastSet.role) || 'work');
+  var addedWeight = lastSet ? lastSet.weight : null;
+  if (addedRole === 'backoff' && lastSet && lastSet.role === 'top') {
+    addedWeight = reduceWeight(lastSet.weight, BACKOFF_PCT, exercise.name);
+  }
   exercise.sets.push({
-    weight: lastSet ? lastSet.weight : null,
+    weight: addedWeight,
     reps: lastSet ? lastSet.reps : (clampRepsToClass(exercise.name, exercise.targetReps).low),
     isWarmup: false,
-    completed: false
+    completed: false,
+    role: addedRole,
+    rest: getExerciseRestSec(exercise.name)
   });
   saveActiveSession();
   render();
@@ -1936,7 +1937,9 @@ window.completeSet = function() {
 
   // 1RM 자동 갱신 (워밍업 세트 제외). 갱신 직전 값을 세트에 보관 — 완료취소/삭제 시 되돌리기용.
   // 재저장으로 또 갱신돼도 최초 기준값을 보존해야 완전한 롤백이 됨 (자기 자신이 올린 값으로 덮어쓰기 방지)
-  if (!set.isWarmup && set.weight && set.reps) {
+  // 드롭·마이오렙 세트는 제외 — 마지막 워킹세트의 연장이라 1RM 근거로 삼으면 로그 해석이 꼬인다
+  // (docs/research/set-schemes.md §5-D)
+  if (!set.isWarmup && set.role !== 'drop' && set.role !== 'myo' && set.weight && set.reps) {
     var prevRM = get1RM(exercise.name);
     var updated = update1RM(exercise.name, set.weight, set.reps);
     if (updated) {
@@ -1953,24 +1956,34 @@ window.completeSet = function() {
     return;
   }
 
-  // 휴식 시간 결정: AI가 지정한 rest(초) 우선, 없으면 복합/고립 기본값 (B안)
-  // 복합 판정은 종목표(compound 플래그)를 우선 — 이름 키워드 목록만 쓰면 표준명 '랫 풀 다운'처럼
-  // 띄어쓰기가 다른 이름을 놓쳐 복합 종목에 고립 휴식(90초)을 준다.
-  // 종목표에도 없는 이름(사용자 자유 입력·AI 신규 종목)은 옛 키워드 목록으로 폴백한다 —
-  // exercise.type은 '머신'·'덤벨'·'케이블'뿐이라 '복합'과 절대 같아지지 않아 폴백이 못 된다.
-  var restInfo = EXERCISE_BODY_PART_MAP[exercise.name] || getExercisePart(exercise.name);
-  var isCompound = restInfo ? !!restInfo.compound
-    : ['프레스', '풀업', '풀다운', '풀 다운', '로우', '스쿼트', '데드리프트', '딥스'].some(function(k) {
-        return exercise.name.indexOf(k) !== -1;
-      });
-  var aiRest = exercise.rest ? parseInt(String(exercise.rest), 10) : NaN; // 범위 "120-180"이면 하단 120초
-  var restDuration = set.isWarmup ? 60 : ((!isNaN(aiRest) && aiRest > 0) ? aiRest : (isCompound ? 150 : 90));
+  // 휴식 시간 결정 — 판정 원천을 종목 클래스 하나로 통합했다(resolveRestSec).
+  // 옛 로직은 키워드 배열로 복합/고립을 따로 판정해 getExerciseClass와 어긋날 수 있었고,
+  // 기본값도 근거보다 짧았다(고립 90초 → 120초, 고중량 복합 150초 → 180초).
+  // 세트가 지정한 rest(탑세트·백오프·드롭 사이 등) > AI 지정 rest > 클래스 기본값,
+  // 그 위에 §3-C 자가조절(직전 세트가 목표 하단 미달이면 +30초, 상한 240초).
+  var restDuration = resolveRestSec(exercise, set);
+  var nextExerciseIdx = null;
+
+  // 길항근 슈퍼세트: 페어의 앞 종목을 끝냈으면 짧게 쉬고 상대 종목으로 넘어간다.
+  // 벽시계 시간은 줄지만 각 근육이 실제로 쉬는 시간은 오히려 늘어난다 (Zhang 2025 −37%, 근비대 동등).
+  var partnerIdx = exercise.supersetWith;
+  if (!set.isWarmup && typeof partnerIdx === 'number' && state.activeSession.exercises[partnerIdx]) {
+    var partner = state.activeSession.exercises[partnerIdx];
+    var partnerHasPending = (partner.sets || []).some(function(ps) { return !ps.completed && !ps.isWarmup; });
+    var isFirstOfPair = s.exerciseIdx < partnerIdx;
+    if (partnerHasPending) {
+      restDuration = supersetRestSec(exercise, partner, isFirstOfPair);
+      if (isFirstOfPair) nextExerciseIdx = partnerIdx;
+    }
+  }
 
   state.restTimer = {
     startTime: Date.now(),
     duration: restDuration,
     exerciseIdx: s.exerciseIdx,
-    setIdx: s.setIdx
+    setIdx: s.setIdx,
+    nextExerciseIdx: nextExerciseIdx,
+    label: set.role && SET_ROLE_KR[set.role] ? SET_ROLE_KR[set.role] + ' 완료' : ''
   };
   state.editingSet = null;
   saveActiveSession();
@@ -2021,7 +2034,7 @@ function startRestTimerTick() {
       restTickerInterval = null;
       // 시트(편집/종목변경/채팅)가 열려 있으면 전체 렌더 대신 타이머 UI만 제거
       // (채팅 입력·스트리밍 중 전체 렌더는 키보드/포커스/말풍선을 끊는다)
-      if (state.editingSet || state.exerciseSwapOpen || state.sessionChatOpen || state.muscleMapZoom) {
+      if (state.editingSet || state.exerciseSwapOpen || state.setSchemeOpen || state.sessionChatOpen || state.muscleMapZoom) {
         var wrapEl = document.querySelector('.rest-timer-wrap');
         if (wrapEl && wrapEl.parentNode) wrapEl.parentNode.removeChild(wrapEl);
       } else {
@@ -2031,7 +2044,7 @@ function startRestTimerTick() {
     }
     // 시트(편집/종목변경/세트사이채팅)가 열려 있으면 시트가 깜빡이지 않도록 타이머만 부분 갱신
     // (채팅은 입력·스트리밍 중이라 전체 렌더가 매초 돌면 입력이 초기화된다)
-    if (state.editingSet || state.exerciseSwapOpen || state.sessionChatOpen || state.muscleMapZoom) {
+    if (state.editingSet || state.exerciseSwapOpen || state.setSchemeOpen || state.sessionChatOpen || state.muscleMapZoom) {
       var remaining = state.restTimer.duration - elapsed;
       var el = document.getElementById('rest-time-text');
       if (el) {
@@ -2074,6 +2087,93 @@ window.openExerciseSwap = function() {
 window.closeExerciseSwap = function() {
   state.exerciseSwapOpen = false;
   state._swapQuery = '';
+  render();
+};
+
+// ═══════════════════════════════════════════════
+// 세트법(세트 스킴) 변경 · 슈퍼세트 해제 · 강도기법 제안
+// ═══════════════════════════════════════════════
+
+// 진행 중인 종목의 **미완료 세트만** 현재 세트법 기준으로 다시 만든다 (완료한 기록은 그대로 보존).
+function rebuildPendingSets(ex) {
+  var doneSets = (ex.sets || []).filter(function(s) { return s.completed; });
+  var pendingWorking = (ex.sets || []).filter(function(s) {
+    return !s.completed && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+  }).length;
+  // pendingWorking이 0이면 본 세트를 이미 다 끝냈다는 뜻이다. 여기서 3으로 되돌리면
+  // "드롭만 남은 상태에서 스트레이트로 바꾸기"가 완료 3세트 뒤에 새 3세트를 덧붙인다.
+  var plan = getSessionSetPlan(ex.name, ex.lastWeight, ex.targetReps, {
+    sets: pendingWorking,
+    warmup: doneSets.length === 0   // 이미 시작한 종목에 워밍업을 새로 끼워 넣지 않는다
+  });
+  ex.targetReps = repRangeToStr(plan.repRange);
+  ex.scheme = plan.scheme;
+  ex.sets = doneSets.concat(plan.sets);
+  return plan;
+}
+
+// 슈퍼세트 페어 연결 해제 (양쪽 모두)
+function unlinkSuperset(exercises, idx) {
+  if (!Array.isArray(exercises) || !exercises[idx]) return;
+  var partnerIdx = exercises[idx].supersetWith;
+  if (typeof partnerIdx === 'number' && exercises[partnerIdx]) {
+    delete exercises[partnerIdx].supersetWith;
+    delete exercises[partnerIdx].supersetKr;
+  }
+  delete exercises[idx].supersetWith;
+  delete exercises[idx].supersetKr;
+}
+
+window.openSetSchemeSheet = function() {
+  state.setSchemeOpen = true;
+  state.exerciseSwapOpen = false;
+  render();
+};
+
+window.closeSetSchemeSheet = function() {
+  state.setSchemeOpen = false;
+  render();
+};
+
+// 사용자가 세트법을 고름 — 종목별 override로 저장되어 다음 세션에도 유지된다.
+window.applySetScheme = function(schemeId) {
+  var session = state.activeSession;
+  if (!session) return;
+  var ex = session.exercises[session.currentExerciseIdx];
+  if (!ex) return;
+  if (!setSetSchemeOverride(ex.name, schemeId)) {
+    showToast('재활 종목은 세트법을 바꿀 수 없어요');
+    return;
+  }
+  rebuildPendingSets(ex);
+  state.setSchemeOpen = false;
+  saveActiveSession();
+  render();
+  showToast(SET_SCHEMES[schemeId].kr + '로 바꿨어요');
+};
+
+// 슈퍼세트 제안 해제 (기구가 붐비거나 힘들 때 — 사용자 판단 존중)
+window.releaseSuperset = function() {
+  var session = state.activeSession;
+  if (!session) return;
+  unlinkSuperset(session.exercises, session.currentExerciseIdx);
+  state.setSchemeOpen = false;
+  saveActiveSession();
+  render();
+  showToast('슈퍼세트를 풀었어요 — 따로 진행합니다');
+};
+
+// 드롭세트·마이오렙 제안 수락/거절 (자동 적용 금지 — 반드시 사용자가 눌러야 반영)
+window.acceptTechniqueSuggestion = function(schemeId) {
+  window.applySetScheme(schemeId);
+};
+
+window.dismissTechniqueSuggestion = function() {
+  var session = state.activeSession;
+  if (!session) return;
+  if (!session.techDismissed) session.techDismissed = {};
+  session.techDismissed[session.currentExerciseIdx] = true;
+  saveActiveSession();
   render();
 };
 
@@ -2224,19 +2324,23 @@ function applyExerciseSwap(ex, newName) {
     ex.type = info.compound ? '복합' : '고립';
   }
 
-  // 목표 반복 교정 + 미완료 세트의 무게/횟수를 새 종목 기준으로 재추천 (추천 카드와 동일 계산)
-  var plan = getSessionSetPlan(newName, null, ex.targetReps);
+  // 새 종목의 세트법이 다를 수 있으므로(예: 고립 → 고중량 복합 = 탑세트+백오프)
+  // **완료된 세트는 그대로 두고 미완료 세트만** 새 종목 기준으로 다시 만든다.
+  var doneSets = (ex.sets || []).filter(function(s) { return s.completed; });
+  var pendingWorking = (ex.sets || []).filter(function(s) {
+    return !s.completed && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+  }).length;
+  var plan = getSessionSetPlan(newName, null, ex.targetReps, {
+    sets: pendingWorking,           // 0이면 새 워킹세트를 만들지 않는다 (완료 기록만 새 종목으로 이월)
+    warmup: doneSets.length === 0   // 이미 시작한 종목에 워밍업을 새로 끼워 넣지 않는다
+  });
   ex.targetReps = repRangeToStr(plan.repRange);
-  if (plan.weight) {
-    (ex.sets || []).forEach(function(s) {
-      if (s.completed) return;
-      s.weight = plan.weight;
-      if (!s.isWarmup) s.reps = plan.reps;
-    });
-    ex.lastWeight = (plan.prog && plan.prog.previousWeight !== undefined) ? plan.prog.previousWeight : null;
-  } else {
-    ex.lastWeight = null;
-  }
+  ex.scheme = plan.scheme;
+  ex.sets = doneSets.concat(plan.sets);
+  ex.lastWeight = (plan.weight && plan.prog && plan.prog.previousWeight !== undefined) ? plan.prog.previousWeight : null;
+
+  // 슈퍼세트 페어는 길항 관계 전제라 종목이 바뀌면 성립하지 않는다 → 양쪽 연결 해제
+  unlinkSuperset(state.activeSession.exercises, state.activeSession.currentExerciseIdx);
 
   state.exerciseSwapOpen = false;
   saveActiveSession();
@@ -2316,13 +2420,19 @@ function renderWorkoutSession() {
       if (!exercise.sets[j].isWarmup) setNum++;
     }
     labelText = set.isWarmup ? 'W' : String(setNum);
-    
-    setRows += 
+
+    // 세트 역할 뱃지 (탑세트 / 백오프 / 드롭 / 미니). 옛 세션 복원처럼 role이 없으면 아무것도 안 그린다.
+    var roleKr = set.role ? SET_ROLE_KR[set.role] : '';
+    var roleBadge = roleKr && !set.isWarmup
+      ? '<span class="set-role-badge set-role-' + set.role + '">' + roleKr + '</span>'
+      : '';
+
+    setRows +=
       '<div class="' + setClass + '" onclick="openSetEditor(' + session.currentExerciseIdx + ', ' + idx + ')">' +
         '<div class="' + labelClass + '">' + labelText + '</div>' +
         '<div class="set-info-grid">' +
           '<div>' +
-            '<p class="set-info-label">무게</p>' +
+            '<p class="set-info-label">무게' + roleBadge + '</p>' +
             '<p class="' + valueClass + '">' + (set.weight !== null ? set.weight : '—') + '<span class="text-xs text-stone-500">kg</span></p>' +
           '</div>' +
           '<div>' +
@@ -2353,6 +2463,11 @@ function renderWorkoutSession() {
     var restProgress = state.restTimer.duration > 0 ? (restRemaining / state.restTimer.duration) : 0;
     var ringOffset = (ringCirc * (1 - restProgress)).toFixed(1);
 
+    // 슈퍼세트 페어의 앞 종목을 끝냈으면 "다음 종목으로 이동"을 안내한다 (쉬지 않고 번갈아 하는 게 핵심)
+    var nextSupersetName = (typeof state.restTimer.nextExerciseIdx === 'number' &&
+        session.exercises[state.restTimer.nextExerciseIdx])
+      ? session.exercises[state.restTimer.nextExerciseIdx].name : '';
+
     restTimerHtml =
       '<div class="rest-timer-wrap">' +
         '<div class="rest-timer">' +
@@ -2365,12 +2480,16 @@ function renderWorkoutSession() {
               '<div class="rest-ring-icon">' + icon('clock', 16) + '</div>' +
             '</div>' +
             '<div>' +
-              '<p class="text-[10px] font-mono text-stone-500 uppercase">휴식 중</p>' +
+              '<p class="text-[10px] font-mono text-stone-500 uppercase">' +
+                (nextSupersetName ? '🔗 ' + escapeHtml(nextSupersetName) + '로 이동' : (state.restTimer.label || '휴식 중')) +
+              '</p>' +
               '<p id="rest-time-text" class="font-bebas text-2xl accent">' + restStr + '</p>' +
             '</div>' +
           '</div>' +
           '<div class="flex gap-2">' +
-            '<button class="rest-skip-btn" onclick="addRestTime()">+30s</button>' +
+            (nextSupersetName
+              ? '<button class="rest-done-btn" onclick="goToExercise(' + state.restTimer.nextExerciseIdx + ')">다음 →</button>'
+              : '<button class="rest-skip-btn" onclick="addRestTime()">+30s</button>') +
             '<button class="rest-done-btn" onclick="skipRest()">완료</button>' +
           '</div>' +
         '</div>' +
@@ -2524,6 +2643,7 @@ function renderWorkoutSession() {
         '</div>' +
         '<div class="flex gap-2">' +
           '<button class="session-header-btn" onclick="openSessionChat()" title="세트 사이 코치">' + icon('msg', 18) + '</button>' +
+          '<button class="session-header-btn" onclick="openSetSchemeSheet()" title="세트법 바꾸기" style="font-size:11px; font-weight:600;">세트법</button>' +
           '<button class="session-header-btn" onclick="openExerciseSwap()" title="종목 변경">' + icon('dots', 18) + '</button>' +
         '</div>' +
       '</div>' +
@@ -2541,8 +2661,18 @@ function renderWorkoutSession() {
       '<div class="exercise-info-card">' +
         '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">현재 종목</p>' +
         '<h2 class="font-bebas text-2xl mb-1">' + escapeHtml(exercise.name) + '</h2>' +
-        '<p class="text-xs font-mono text-stone-400">' + exercise.type + '</p>' +
+        '<p class="text-xs font-mono text-stone-400">' + exercise.type +
+          ' · ' + (SET_SCHEMES[getSetScheme(exercise.name)] || SET_SCHEMES.straight).short +
+          ' · 휴식 ' + getExerciseRestSec(exercise.name) + '초</p>' +
+        (typeof exercise.supersetWith === 'number' && session.exercises[exercise.supersetWith]
+          ? '<p class="text-[10px] font-mono mt-1" style="color: var(--accent);">🔗 슈퍼세트 ' +
+              (exercise.supersetKr || '') + ' — ' + escapeHtml(session.exercises[exercise.supersetWith].name) +
+              '와 번갈아 (시간 −37%, 근비대 동등)</p>'
+          : '') +
       '</div>' +
+
+      // 스트레이트 안내 · 강도기법 제안 카드
+      buildSetSchemeNoticeHtml(session, exercise) +
 
       // 자극 근육 인체도 (앞/뒤). 매핑 없는 종목이면 빈 문자열 → 아무것도 안 그림
       buildMuscleMapBlock(exercise.name) +
@@ -2588,13 +2718,20 @@ function renderWorkoutSession() {
             '</div>';
         } else if (prog && prog.source === 'rm_estimate') {
           // 첫 시도 - 1RM 기반
+          // ⚠️ 카드와 세트가 어긋나지 않게 **실제로 배정된 첫 워킹세트 무게**를 보여준다.
+          // getSessionSetPlan은 rm_estimate일 때 템플릿/AI가 준 무게(fallbackWeight)를 우선하는데,
+          // 여기서 prog.weight(1RM 추정값)를 그대로 찍으면 "75kg 추천" 옆 세트가 60kg으로 뜬다.
+          var firstWorking = (exercise.sets || []).filter(function(s) {
+            return !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+          })[0];
+          var shownWeight = (firstWorking && firstWorking.weight) ? firstWorking.weight : prog.weight;
           html +=
             '<div class="flex items-center justify-between">' +
               '<div>' +
                 '<p class="text-[10px] font-mono uppercase tracking-widest accent">첫 시도 추천</p>' +
                 '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + prog.note + '</p>' +
               '</div>' +
-              '<p class="font-bebas text-3xl accent">' + prog.weight + '<span class="text-xs text-stone-400">kg</span></p>' +
+              '<p class="font-bebas text-3xl accent">' + shownWeight + '<span class="text-xs text-stone-400">kg</span></p>' +
             '</div>';
         }
 
@@ -2631,8 +2768,92 @@ function renderWorkoutSession() {
     restTimerHtml +
     sheetHtml +
     swapSheetHtml +
+    buildSetSchemeSheetHtml(session, exercise) +
     buildSessionChatSheetHtml(session, exercise) +
     buildMuscleMapZoomHtml();
+}
+
+// 세트법 안내 한 줄 + 드롭세트·마이오렙 제안 카드.
+// 제안은 **자동 적용하지 않는다** — 근비대 이득은 동등할 뿐이고 이득은 오직 시간이므로,
+// 시간 압박이 실제로 있을 때만 값어치가 있다(§4-C). 사용자가 눌러야 반영된다.
+function buildSetSchemeNoticeHtml(session, exercise) {
+  var html = '';
+  var scheme = getSetScheme(exercise.name);
+
+  if (scheme === 'straight') {
+    html += '<p class="text-[10px] font-mono text-stone-500 px-1 mb-2">' +
+      '뒤 세트에서 반복이 1~2회 줄어드는 건 정상이에요. 무게를 낮추지 말고 그대로 하세요.</p>';
+  } else if (scheme === 'top_backoff') {
+    html += '<p class="text-[10px] font-mono text-stone-500 px-1 mb-2">' +
+      '탑세트 1개를 가장 무겁게, 백오프 2세트는 90% 무게로 <b>같은 횟수</b>를 노려요 (볼륨 보존).</p>';
+  }
+
+  var dismissed = session.techDismissed && session.techDismissed[session.currentExerciseIdx];
+  if (!dismissed) {
+    var suggested = suggestIntensityTechnique(exercise.name, session);
+    if (suggested) {
+      var kr = SET_SCHEMES[suggested].kr;
+      html +=
+        '<div class="rm-card mb-3">' +
+          '<p class="text-[10px] font-mono uppercase tracking-widest accent">⏱ ' + kr + ' 제안</p>' +
+          '<p class="text-xs text-stone-300 mt-1">남은 시간이 빠듯해요. 마지막 세트를 ' + kr +
+            '으로 바꾸면 시간을 절반 이하로 줄이면서 근비대는 동등해요.</p>' +
+          '<p class="text-[10px] font-mono text-stone-500 mt-1">근거: Sødal 2023 메타 — 드롭세트 vs 전통 근비대 차이 없음(p=0.392), 시간은 1/2~1/3. 대신 피로가 크니 이번 한 종목만.</p>' +
+          '<div class="flex gap-2 mt-2">' +
+            '<button class="adj-btn accent-btn" style="flex:1;" onclick="acceptTechniqueSuggestion(\'' + suggested + '\')">' + kr + '으로 바꾸기</button>' +
+            '<button class="adj-btn" style="flex:1;" onclick="dismissTechniqueSuggestion()">그냥 할게요</button>' +
+          '</div>' +
+        '</div>';
+    }
+  }
+  return html;
+}
+
+// 세트법 바꾸기 시트
+function buildSetSchemeSheetHtml(session, exercise) {
+  if (!state.setSchemeOpen) return '';
+  var options = getSetSchemeOptions(exercise.name);
+  var cls = getExerciseClass(exercise.name);
+  var clsKr = EXERCISE_CLASS_RULES[cls].kr;
+
+  var list = options.map(function(o) {
+    return '<button class="option-card" style="width:100%; margin-bottom:6px; text-align:left;' +
+        (o.current ? ' border-color: var(--accent);' : '') + '" onclick="applySetScheme(\'' + o.id + '\')">' +
+        '<div class="flex items-center justify-between gap-2">' +
+          '<div>' +
+            '<p class="font-display text-sm">' + o.kr +
+              (o.suggested ? ' <span class="text-[10px] accent">· 기본</span>' : '') + '</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + o.desc + '</p>' +
+            (o.warn ? '<p class="text-[10px] font-mono mt-0\\.5" style="color:#fbbf24;">⚠️ ' + o.warn + '</p>' : '') +
+          '</div>' +
+          '<span class="text-xs ' + (o.current ? 'accent' : 'text-stone-500') + '">' + (o.current ? '사용 중' : '선택 →') + '</span>' +
+        '</div>' +
+      '</button>';
+  }).join('');
+
+  var supersetRow = (typeof exercise.supersetWith === 'number' && session.exercises[exercise.supersetWith])
+    ? '<button class="option-card" style="width:100%; margin-top:8px; text-align:left;" onclick="releaseSuperset()">' +
+        '<p class="font-display text-sm">🔗 슈퍼세트 풀기</p>' +
+        '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' +
+          escapeHtml(session.exercises[exercise.supersetWith].name) + '와 번갈아 하는 구성을 해제하고 따로 진행해요</p>' +
+      '</button>'
+    : '';
+
+  return '<div class="sheet-overlay" onclick="closeSetSchemeSheet()">' +
+      '<div class="sheet" onclick="event.stopPropagation()">' +
+        '<div class="sheet-handle"></div>' +
+        '<div class="flex items-center justify-between mb-3">' +
+          '<div>' +
+            '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">세트법 · ' + clsKr + '</p>' +
+            '<p class="font-bebas text-2xl mt-1">' + escapeHtml(exercise.name) + '</p>' +
+          '</div>' +
+          '<button class="session-header-btn" onclick="closeSetSchemeSheet()">' + icon('close', 18) + '</button>' +
+        '</div>' +
+        '<p class="text-xs font-mono text-stone-400 mb-3">볼륨이 같으면 세트법 간 근비대 차이는 없어요(Angleri 2017). ' +
+          '앱이 종목에 맞게 자동으로 골라 두지만, 원하는 대로 바꿔도 됩니다. 아직 안 한 세트에만 적용돼요.</p>' +
+        '<div style="max-height: 48vh; overflow-y: auto; padding-right: 4px;">' + list + supersetRow + '</div>' +
+      '</div>' +
+    '</div>';
 }
 
 // 세트 사이 코치 시트 (운동 중 채팅 — 3단계)
@@ -6162,6 +6383,7 @@ function getTopLayer() {
   if (state.itemDetailSheet) return 'itemDetail';     // 기록 상세 (탭 위)
   if (state.editingSet) return 'setEditor';           // 세트 편집 (세션 위)
   if (state.exerciseSwapOpen) return 'exerciseSwap';  // 종목 교체 (세션 위)
+  if (state.setSchemeOpen) return 'setScheme';        // 세트법 변경 (세션 위)
   if (state.sessionChatOpen) return 'sessionChat';    // 세트 사이 채팅 (세션 위)
   if (state.apiKeyModalOpen) return 'apiKey';         // (더보기 위)
   if (state.profileEditModalOpen) return 'profileEdit';
@@ -6201,6 +6423,7 @@ function navBack() {
     case 'itemDetail': closeItemDetail(); break;
     case 'setEditor': closeSetEditor(); break;
     case 'exerciseSwap': closeExerciseSwap(); break;
+    case 'setScheme': closeSetSchemeSheet(); break;
     case 'sessionChat': closeSessionChat(); break;
     case 'apiKey': closeApiKeyModal(); break;
     case 'profileEdit': closeProfileEditModal(); break;
@@ -6339,6 +6562,7 @@ function ensureBackTrap() {
     if (!state.activeSession) return;
     if (state.editingSet) return;
     if (state.exerciseSwapOpen) return;
+    if (state.setSchemeOpen) return;
     if (state.completedSession) return;
     if (state.itemDetailSheet) return;
     if (state.resetConfirming) return;
