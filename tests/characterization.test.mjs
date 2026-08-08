@@ -2131,6 +2131,29 @@ test('XSS 회귀 — AI 루틴/주간리뷰의 숫자형 필드도 이스케이�
   app.state.apiKeyInput = snapModal.input;
   app.state.apiKey = snapKey;
 
+  // 운동 세션 화면 — AI 루틴의 type·lastWeight가 세션 종목으로 그대로 복사돼 들어온다
+  // (대화 수정 경로 approveRoutineChange는 exercises 배열을 통째로 갈아끼워 무게 스냅을 거치지 않는다)
+  const snapSession = { session: app.state.activeSession, log: app.state.data.workoutLog };
+  app.state.data.workoutLog = [];
+  app._lastSetsCache = null;
+  // 지난 기록 줄(prevText)은 1RM 추정 추천이 있을 때만 그려진다 → 1RM을 심어 그 경로를 태운다
+  const snapRM = app.storage.get(app.KEYS.ONE_RM_DATA, {});
+  app.storage.set(app.KEYS.ONE_RM_DATA, { '랫 풀 다운': 70 });
+  app.state.activeSession = {
+    sessionType: 'pull', sessionName: '테스트', startTime: Date.now(), currentExerciseIdx: 0,
+    exercises: [{
+      name: '랫 풀 다운', type: PAYLOAD, targetReps: '8-12',
+      lastWeight: PAYLOAD, lastReps: null, scheme: 'straight',
+      sets: [{ weight: 40, reps: 10, isWarmup: false, completed: false, role: 'work' }],
+    }],
+  };
+  const sessionHtml = app.renderWorkoutSession();
+  assert.ok(!sessionHtml.includes(PAYLOAD), '운동 세션 화면에 페이로드가 날것으로 남아 있다');
+  app.state.activeSession = snapSession.session;
+  app.state.data.workoutLog = snapSession.log;
+  app.storage.set(app.KEYS.ONE_RM_DATA, snapRM);
+  app._lastSetsCache = null;
+
   app.state.currentTab = snapshot.tab;
   app.state.generatedRoutine = snapshot.routine;
   app.state.selectedBodyPart = snapshot.part;

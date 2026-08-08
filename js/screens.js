@@ -2712,9 +2712,10 @@ function renderWorkoutSession() {
   });
   
   // 이전 기록
+  // lastWeight·lastReps는 AI 루틴에서 그대로 넘어올 수 있다(대화 수정 경로는 무게 스냅을 거치지 않는다) → 이스케이프
   var prevText = exercise.lastWeight !== null
-    ? (isReverseProgression(exercise.name) ? '보조 ' : '') + exercise.lastWeight + 'kg × ' + (parseInt(String(exercise.targetReps || '8').split('-')[0]) || 8) + ' · ' + (exercise.sets.filter(function(s) { return !s.isWarmup; }).length) + '세트'
-    : (exercise.lastReps ? exercise.lastReps + '회 × ' + (exercise.sets.filter(function(s) { return !s.isWarmup; }).length) + '세트' : '첫 시도');
+    ? (isReverseProgression(exercise.name) ? '보조 ' : '') + escapeHtml(exercise.lastWeight) + 'kg × ' + (parseInt(String(exercise.targetReps || '8').split('-')[0]) || 8) + ' · ' + (exercise.sets.filter(function(s) { return !s.isWarmup; }).length) + '세트'
+    : (exercise.lastReps ? escapeHtml(exercise.lastReps) + '회 × ' + (exercise.sets.filter(function(s) { return !s.isWarmup; }).length) + '세트' : '첫 시도');
   
   // 휴식 타이머
   var restTimerHtml = '';
@@ -2977,7 +2978,7 @@ function renderWorkoutSession() {
         '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">현재 종목' +
           (exercise.addedInSession ? ' · 운동 중 추가' : '') + (exercise.skipped ? ' · 건너뜀' : '') + '</p>' +
         '<h2 class="font-bebas text-2xl mb-1">' + escapeHtml(exercise.name) + '</h2>' +
-        '<p class="text-xs font-mono text-stone-400">' + exercise.type +
+        '<p class="text-xs font-mono text-stone-400">' + escapeHtml(exercise.type) +
           ' · ' + (SET_SCHEMES[getSetScheme(exercise.name)] || SET_SCHEMES.straight).short +
           ' · 휴식 ' + getExerciseRestSec(exercise.name) + '초</p>' +
         (typeof exercise.supersetWith === 'number' && session.exercises[exercise.supersetWith]
