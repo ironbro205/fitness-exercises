@@ -4189,7 +4189,7 @@ function renderProfileEditModal() {
       '<div class="input-label"><p>' + label + '</p>' + (unit ? '<p>' + unit + '</p>' : '') + '</div>' +
       '<input type="number" inputmode="decimal" class="api-key-input"' +
         (step ? ' step="' + step + '"' : '') +
-        ' value="' + (e[key] != null ? e[key] : '') + '"' +
+        ' value="' + escapeHtml(e[key] != null ? e[key] : '') + '"' +
         ' oninput="updateProfileEditField(\'' + key + '\', this.value)" />' +
     '</div>';
   }
@@ -6723,7 +6723,7 @@ function renderRunning() {
     '<div class="card mb-4">' +
       '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-2">운동 시간</p>' +
       '<div class="flex items-center gap-2">' +
-        '<input id="cardio-min-input" type="number" inputmode="numeric" min="5" max="120" step="1" value="' + (c.inputMin || '') + '" placeholder="예: 30"' + (c.loading ? ' disabled' : '') + ' style="flex:1;min-width:0;background:var(--bg-1);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px 14px;color:#fff;font-family:var(--font);font-weight:800;font-size:26px;" onkeydown="if(event.key===\'Enter\')buildCardioPlan()" />' +
+        '<input id="cardio-min-input" type="number" inputmode="numeric" min="5" max="120" step="1" value="' + escapeHtml(c.inputMin || '') + '" placeholder="예: 30"' + (c.loading ? ' disabled' : '') + ' style="flex:1;min-width:0;background:var(--bg-1);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px 14px;color:#fff;font-family:var(--font);font-weight:800;font-size:26px;" onkeydown="if(event.key===\'Enter\')buildCardioPlan()" />' +
         '<span class="text-sm font-mono text-stone-400">분</span>' +
         '<button class="sheet-submit" style="width:auto;padding:12px 20px;margin:0;flex-shrink:0;" onclick="buildCardioPlan()"' + (c.loading ? ' disabled' : '') + '>구성</button>' +
       '</div>' +

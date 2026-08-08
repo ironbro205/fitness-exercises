@@ -2131,6 +2131,15 @@ test('XSS 회귀 — AI 루틴/주간리뷰의 숫자형 필드도 이스케이�
   app.state.apiKeyInput = snapModal.input;
   app.state.apiKey = snapKey;
 
+  // 화면에 있는 모든 value="..." 입력칸이 같은 규칙을 따르는지 (프로필 편집 · 유산소 시간)
+  const snapProfileEdit = { open: app.state.profileEditModalOpen, edit: app.state.profileEdit };
+  app.state.profileEditModalOpen = true;
+  app.state.profileEdit = { age: ATTR_PAYLOAD, height: 170, weight: 77.5, workoutFreq: 4 };
+  const profileHtml = app.renderProfileEditModal();
+  assert.ok(!profileHtml.includes(ATTR_PAYLOAD), '프로필 편집 입력칸이 속성을 탈출당한다');
+  app.state.profileEditModalOpen = snapProfileEdit.open;
+  app.state.profileEdit = snapProfileEdit.edit;
+
   // 운동 세션 화면 — AI 루틴의 type·lastWeight가 세션 종목으로 그대로 복사돼 들어온다
   // (대화 수정 경로 approveRoutineChange는 exercises 배열을 통째로 갈아끼워 무게 스냅을 거치지 않는다)
   const snapSession = { session: app.state.activeSession, log: app.state.data.workoutLog };
