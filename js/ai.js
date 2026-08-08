@@ -98,6 +98,7 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
     '   - **메인 자격 (루틴 생성 규칙과 동일 기준)**: isMain:true(메인 복합)은 종목 풀에 [메인가능]으로 표시된 것 = 자유중량 대형 복합(바벨·덤벨·스미스)과 큰 하체 머신(레그프레스·핵스쿼트)만 해당한다. 머신·케이블 복합·고립은 절대 isMain:true로 두지 말 것(보조).\n' +
     '6. **무게 — 점진적 과부하 우선**\n' +
     '   - "최근 종목별 실제 수행" 표에 데이터 있으면 그 무게 기준 더블 프로그레션 (상단 횟수 2세션 연속 달성 시 +한 칸[덤벨 2kg·그 외 5kg], 미달 시 동일)\n' +
+    '   - ⚠️ 어시스트(보조) 종목은 weight가 **보조 무게**라 방향이 반대다: 증량 = 보조 −5kg, 감량 = 보조 +5kg, 하한 0kg(맨몸). 1RM 추정 금지.\n' +
     '   - 사용자가 무게를 낮춘 적이 있으면 그 낮춘 무게가 새 기준선 (1RM 표 무시)\n' +
     '   - 실제 수행 기록 없는 신규 종목만 1RM 추정 사용 (메인 70~80%, 보조 65~75%, 고립 60~70%)\n' +
     '   - 장비 단위로 반올림 (덤벨 2kg·그 외 5kg 배수)\n' +
@@ -318,6 +319,13 @@ function buildUserContext(options) {
     exList.forEach(function(ex) {
       if (!ex.name) return;
       var weight = ex.maxWeight !== undefined ? ex.maxWeight : (ex.weight !== undefined ? ex.weight : null);
+      // 어시스트 종목의 대표값은 '최대'가 아니라 **최소 보조**(가장 어려웠던 세트)다.
+      if (isReverseProgression(ex.name) && ex.setsDetail && Array.isArray(ex.setsDetail)) {
+        var av = ex.setsDetail.filter(function(s) {
+          return s && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo' && s.reps > 0 && s.weight >= 0;
+        }).map(function(s) { return s.weight; });
+        if (av.length) weight = Math.min.apply(null, av);
+      }
       if (weight === null || weight === undefined) return;
 
       // 본 세트(워밍업 제외) 반복수 수집
@@ -472,7 +480,10 @@ function buildUserContext(options) {
   if (recentPRs.length > 0) {
     ctx += '## 최근 PR\n';
     recentPRs.forEach(function(pr) {
-      if (pr.weight) {
+      if (pr.weight !== undefined && isReverseProgression(pr.exerciseName)) {
+        // 어시스트 종목: 숫자가 내려간 것이 신기록이다. 표기를 안 바꾸면 AI가 퇴보로 읽는다.
+        ctx += '- ' + pr.exerciseName + ': 보조 ' + pr.previousWeight + 'kg → 보조 ' + pr.weight + 'kg × ' + pr.reps + '회 (보조 감소 = 진행, ' + daysAgo(pr.date) + ')\n';
+      } else if (pr.weight) {
         ctx += '- ' + pr.exerciseName + ': ' + pr.previousWeight + 'kg → ' + pr.weight + 'kg × ' + pr.reps + '회 (' + daysAgo(pr.date) + ')\n';
       } else {
         ctx += '- ' + pr.exerciseName + ': ' + (pr.previousReps || 0) + ' → ' + pr.reps + '회 (' + daysAgo(pr.date) + ')\n';
@@ -503,7 +514,12 @@ function buildUserContext(options) {
       if (hasRecentPain(name, 14)) marker += ' ⚠️최근 통증 보고(증량 금지, 가볍게 또는 대체 고려)';
       else if (getRecentFeel(name, 14) === 'bad') marker += ' 😕자극 나쁨(종목·각도 교체 고려)';
       var repsStr = (info.lastReps && info.lastReps.length) ? ' × ' + info.lastReps.join(',') + '회' : '';
-      ctx += '- ' + name + ': ' + info.weight + 'kg' + repsStr + ' (' + daysAgo(info.date) + ')' + marker + '\n';
+      // 어시스트 종목은 '보조 40kg'으로 적고, 방향이 반대라는 것을 그 줄에서 못 박는다.
+      if (isReverseProgression(name)) {
+        ctx += '- ' + name + ': 보조 ' + info.weight + 'kg' + repsStr + ' (' + daysAgo(info.date) + ') ⇄보조 무게(낮출수록 증량 — 진행 시 보조를 −5kg)' + marker + '\n';
+      } else {
+        ctx += '- ' + name + ': ' + info.weight + 'kg' + repsStr + ' (' + daysAgo(info.date) + ')' + marker + '\n';
+      }
     });
     ctx += '\n';
   }
@@ -1048,6 +1064,7 @@ async function generateFullRoutine(bodyPart) {
 - 추천 weight는 실행 가능한 값이어야 한다: 덤벨 종목 = 2kg 배수, 그 외(머신·케이블·바벨·스미스) = 5kg 배수. 62.5·47.5kg처럼 못 맞추는 값 금지.
 - 실제 수행값이 장비 단위와 안 맞으면 가장 가까운 배수로 맞춘다.
 - 증량 폭도 장비 단위 한 칸: 덤벨 +2kg / 그 외 +5kg. (컨텍스트에 "+2.5kg"라고 적혀 있어도 장비 단위로 반올림한다.)
+- ⚠️ 어시스트(보조) 종목(어시스트 풀업·어시스트 딥스 등)의 weight는 **보조 무게**다. 증량 = 보조 −5kg(낮출수록 어려워짐), 감량 = 보조 +5kg. 0kg 미만은 없다(0 = 맨몸). 이 종목에는 1RM 추정을 쓰지 말고 "최근 종목별 실제 수행"의 보조 무게에서 출발하라. reason에 무게를 언급할 땐 "보조 35kg"처럼 적는다.
 - 머신 5kg는 한 칸이 큰 점프라, 그래서 7번 더블 프로그레션(반복부터 채우고 → 2세션 연속 상단일 때만 +5kg)이 정석이다.
 
 **9. 분할(간접) 세트 보정 + 필수 고립 슬롯**
@@ -1181,7 +1198,9 @@ async function generateFullRoutine(bodyPart) {
         isMain: !!ex.isMain,
         sets: ex.sets || 3,
         reps: ex.reps || '8-12',
-        weight: ex.weight ? snapWeightToEquipment(ex.weight, ex.name) : null,
+        // 어시스트 종목의 보조 0kg(맨몸)은 유효한 값이라 falsy로 버리면 안 된다.
+        weight: (ex.weight || (ex.weight === 0 && isReverseProgression(ex.name)))
+          ? snapWeightToEquipment(ex.weight, ex.name) : null,
         rir: ex.rir || 2,
         rest: ex.rest || null,
         note: ex.note || ''
@@ -1351,7 +1370,9 @@ async function generateWeeklyReview(forceRefresh) {
   if (weekData.prs.length > 0) {
     weekSummary += '\n### PR (' + weekData.prs.length + '개)\n';
     weekData.prs.forEach(function(p) {
-      if (p.weight) {
+      if (p.weight !== undefined && isReverseProgression(p.exerciseName)) {
+        weekSummary += '- ' + p.exerciseName + ': 보조 ' + p.previousWeight + 'kg → 보조 ' + p.weight + 'kg × ' + p.reps + '회 (보조 감소 = 진행)\n';
+      } else if (p.weight) {
         weekSummary += '- ' + p.exerciseName + ': ' + p.previousWeight + 'kg → ' + p.weight + 'kg × ' + p.reps + '회\n';
       } else {
         weekSummary += '- ' + p.exerciseName + ': ' + (p.previousReps || 0) + ' → ' + p.reps + '회\n';
@@ -1426,7 +1447,7 @@ async function generateWeeklyReview(forceRefresh) {
     '- **부위 볼륨**: 큰 근육(가슴·등·다리·둔근) 주 10~20세트 / 작은 근육(팔·어깨) 주 8~16세트 적정 (Pelland 2024, 간접세트 0.5 합산). 작은 근육은 복합운동 간접자극으로 목표가 낮다(종아리는 간접자극이 거의 없어 예외 — 직접 볼륨 필요). 하한 미만 = 부족, 상한 초과 = 수확 체감\n' +
     '- **부위 균형**: PUSH/PULL/LEGS 골고루. 한 부위에만 몰리지 않게.\n' +
     '- **체중 변화**: 리컴포지션 목표 시 ±0.3kg/주 적정\n' +
-    '- **PR 갱신**: 점진적 과부하 성과 지표\n\n' +
+    '- **PR 갱신**: 점진적 과부하 성과 지표. 어시스트(보조) 종목의 PR은 **보조 무게가 줄어든 것**이다(보조 40kg→35kg = 신기록). 숫자가 내려갔다고 퇴보로 쓰지 말 것\n\n' +
     
     '## 등급 기준\n' +
     '- S: 운동 빈도 달성 + 부위 균형 + PR 갱신 있음\n' +
@@ -1597,6 +1618,14 @@ function getStalledLifts() {
     }
     return b;
   }
+  // 역방향(어시스트) 전용 — 값이 **작을수록** 좋은 지표의 최솟값.
+  function leastOf(list, field) {
+    var m = null;
+    for (var n = 0; n < list.length; n++) {
+      if (m === null || list[n][field] < m) m = list[n][field];
+    }
+    return m === null ? Infinity : m;
+  }
 
   for (var i = 0; i < log.length; i++) {
     var w = log[i];
@@ -1607,6 +1636,20 @@ function getStalledLifts() {
       var ex = exList[j];
       if (!ex.name) continue;
       var weight = ex.maxWeight !== undefined ? ex.maxWeight : (ex.weight !== undefined ? ex.weight : null);
+      // 어시스트 종목은 '가장 무거운 세트'가 곧 '가장 많이 도움받은 세트'다. 진행을 나타내는 값은
+      // 세션 최소 보조 무게이므로 여기서 뒤집어 담는다 — 안 그러면 보조를 줄여도 정체로 잡힌다.
+      if (isReverseProgression(ex.name)) {
+        var assistVals = [];
+        if (ex.setsDetail && Array.isArray(ex.setsDetail)) {
+          for (var a = 0; a < ex.setsDetail.length; a++) {
+            var sd = ex.setsDetail[a];
+            if (sd && !sd.isWarmup && sd.role !== 'drop' && sd.role !== 'myo' && sd.reps > 0 && sd.weight >= 0) assistVals.push(sd.weight);
+          }
+        } else if (Array.isArray(ex.weights)) {
+          assistVals = ex.weights.filter(function(v) { return typeof v === 'number' && v >= 0; });
+        }
+        if (assistVals.length) weight = Math.min.apply(null, assistVals);
+      }
       if (weight === null || weight === undefined) continue;
 
       // 본 세트(워밍업 제외) 최고 반복
@@ -1647,7 +1690,10 @@ function getStalledLifts() {
     var half = Math.floor(hist.length / 2);
     var oldHalf = hist.slice(0, half);
     var newHalf = hist.slice(hist.length - half);
-    var weightRising = bestOf(newHalf, 'weight') > bestOf(oldHalf, 'weight');
+    // 어시스트 종목은 '진행 = 보조 감소'라 부등호가 반대다 (위에서 weight를 세션 최소 보조로 담았다).
+    var weightRising = isReverseProgression(name)
+      ? leastOf(newHalf, 'weight') < leastOf(oldHalf, 'weight')
+      : bestOf(newHalf, 'weight') > bestOf(oldHalf, 'weight');
     var repsRising = bestOf(newHalf, 'reps') > bestOf(oldHalf, 'reps');
     if (!weightRising && !repsRising) stalled.push(name); // 무게도 반복도 안 오름 = 진짜 정체
   });
@@ -1703,7 +1749,7 @@ async function analyzePlateauWithAI(signals) {
   var context = buildUserContext();
   
   var signalDescriptions = {
-    'lift_stalled': '4주 이상·4세션 이상 관찰했는데 무게도 반복도 안 오르는 종목이 2개 이상',
+    'lift_stalled': '4주 이상·4세션 이상 관찰했는데 무게도 반복도 안 오르는 종목이 2개 이상 (어시스트 종목은 "보조 무게가 안 줄어드는 것"이 정체다)',
     'pr_stalled': '최근 4주간 PR 갱신 없음 (수행 정체 종목과 동반 확인됨)',
     'frequency_drop': '이번 주 운동 빈도가 목표보다 적음'
   };
@@ -1735,7 +1781,7 @@ async function analyzePlateauWithAI(signals) {
     '  (b) 통증·장비 제약\n' +
     '  (c) 회복 점검·디로드를 이미 해봤는데도 정체가 계속될 때\n' +
     '  (d) 최근 4주 완수율 하락(동기 저하) — 이때만 새 종목을 권하되 이유를 "근성장"이 아니라 "재미·지속"으로 정직하게 설명 (Baz-Valle 2019)\n' +
-    '- 진행 중인 종목은 최소 8~12주 유지가 기본. 무게나 반복이 오르는 중이면 바꿀 이유가 없다.\n' +
+    '- 진행 중인 종목은 최소 8~12주 유지가 기본. 무게나 반복이 오르는 중이면 바꿀 이유가 없다. **어시스트(보조) 종목은 보조 무게가 내려가는 중이면 "오르는 중"이다** — 숫자가 줄었다고 정체로 판정하지 말 것.\n' +
     '- 개입 순서(종목 교체는 마지막): ① 회복 점검(수면·섭취·완수율) → ② 디로드 1주 → ③ 해당 부위 주간 세트 수 조정 → ④ 종목 변경\n\n' +
     (function() { var sb = buildSafetyPromptBlock(); return sb ? sb + '(조정안에 금기 종목을 제안하지 말 것)\n\n' : ''; })() +
     '## 사용자 데이터\n' + context;
@@ -2408,7 +2454,12 @@ function buildSessionChatContext() {
     '- 오늘 이 종목 완료 세트: ' + setsStr + ' (' + done.length + '/' + working.length + ')\n';
   var prog = getProgressiveRecommendation(ex.name, ex.targetReps);
   if (prog && prog.previousWeight !== undefined && prog.previousWeight !== null) {
-    ctx += '- 지난 세션 수행: ' + prog.previousWeight + 'kg × ' + (prog.previousReps || []).join(',') + '회\n';
+    var wPrefix = isReverseProgression(ex.name) ? '보조 ' : '';
+    ctx += '- 지난 세션 수행: ' + wPrefix + prog.previousWeight + 'kg × ' + (prog.previousReps || []).join(',') + '회\n';
+  }
+  // 세트 사이 코치가 "지난번보다 무겁게"라고 말하면 어시스트 종목에선 정반대 지시가 된다.
+  if (isReverseProgression(ex.name)) {
+    ctx += '- ⚠️ 이 종목은 어시스트(보조) 기구다: 화면의 kg은 **보조 무게**이며 낮출수록 어려워진다. 더 힘들게 = 보조 −5kg, 더 쉽게(통증·실패 시) = 보조 +5kg. 하한 0kg(맨몸).\n';
   }
   var safety = checkExerciseSafety(ex.name);
   if (safety.level === 'caution') {

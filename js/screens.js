@@ -94,8 +94,10 @@ function renderHome() {
         '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + daysAgo(pr.date) + (pr.weight ? ' · ' + pr.reps + '회' : '') + '</p>' +
       '</div>' +
       '<div class="text-right">' +
-        '<p class="font-bebas text-2xl accent">' + (pr.weight ? pr.weight : pr.reps) + '<span class="text-xs text-stone-500">' + (pr.weight ? 'kg' : '회') + '</span></p>' +
-        '<p class="text-[10px] font-mono text-stone-500">' + (pr.weight && pr.previousWeight ? '+' + (pr.weight - pr.previousWeight).toFixed(1) + 'kg' : (pr.previousReps ? '+' + (pr.reps - pr.previousReps) + '회' : '')) + '</p>' +
+        '<p class="font-bebas text-2xl accent">' +
+          (pr.weight !== undefined && isReverseProgression(pr.exerciseName) ? '<span class="text-xs text-stone-500">보조 </span>' : '') +
+          (pr.weight !== undefined ? pr.weight : pr.reps) + '<span class="text-xs text-stone-500">' + (pr.weight !== undefined ? 'kg' : '회') + '</span></p>' +
+        '<p class="text-[10px] font-mono text-stone-500">' + escapeHtml(formatPRDelta(pr)) + '</p>' +
       '</div>' +
     '</div>';
   });
@@ -762,7 +764,7 @@ function renderWorkoutStep3() {
   var previewExHtml = '';
   if (state.routinePreviewExpanded) {
     routine.exercises.forEach(function(ex, idx) {
-      var weight = ex.weight ? ex.weight + 'kg × ' : '';
+      var weight = ex.weight ? (isReverseProgression(ex.name) ? '보조 ' : '') + ex.weight + 'kg × ' : '';
       // 종목 줄을 누르면 그 종목의 자극 근육 인체도를 펼친다 (한 번에 한 종목만).
       // index + 종목명이 둘 다 맞아야 펼친다 — 루틴이 바뀌면 저절로 닫힌다.
       var mapOpen = isRoutineExerciseMapOpen(idx, ex.name);
@@ -1102,9 +1104,9 @@ function renderWorkoutStep2() {
           '</div>' +
         '</div>' +
         '<div class="routine-ex-prescription">' +
-          (ex.weight !== null && ex.weight !== undefined ? 
+          (ex.weight !== null && ex.weight !== undefined ?
             '<div class="routine-ex-stat">' +
-              '<p class="routine-ex-stat-label">무게</p>' +
+              '<p class="routine-ex-stat-label">' + (isReverseProgression(ex.name) ? '보조' : '무게') + '</p>' +
               '<p class="routine-ex-stat-value">' + ex.weight + '<span class="text-[10px] text-stone-500">kg</span></p>' +
             '</div>' : '') +
           '<div class="routine-ex-stat">' +
@@ -1330,10 +1332,11 @@ function renderItemDetailSheet() {
           });
           if (completedSets.length > 0) {
             var lastSet = completedSets[completedSets.length - 1];
-            setSummary = (lastSet.weight ? escapeHtml(lastSet.weight) + 'kg × ' : '') + escapeHtml(lastSet.reps) + ' · ' + completedSets.length + '세트';
+            var wPre = isReverseProgression(exName) ? '보조 ' : '';
+            setSummary = (lastSet.weight ? wPre + escapeHtml(lastSet.weight) + 'kg × ' : '') + escapeHtml(lastSet.reps) + ' · ' + completedSets.length + '세트';
           }
         } else if (ex.weight) {
-          setSummary = escapeHtml(ex.weight) + 'kg × ' + escapeHtml(ex.reps || '?') + ' · ' + escapeHtml(ex.completedSets || ex.setsCount || '?') + '세트';
+          setSummary = (isReverseProgression(exName) ? '보조 ' : '') + escapeHtml(ex.weight) + 'kg × ' + escapeHtml(ex.reps || '?') + ' · ' + escapeHtml(ex.completedSets || ex.setsCount || '?') + '세트';
         }
         return '<div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--bg-3); font-size: 12px;">' +
           '<span><strong>' + (idx + 1) + '.</strong> ' + escapeHtml(exName) + '</span>' +
@@ -1578,7 +1581,22 @@ function finalizeSession() {
       exercisesDone.push(doneEntry);
 
       // PR 감지
-      if (ex.lastWeight !== null && maxWeight > ex.lastWeight) {
+      // 어시스트 종목은 방향이 반대다 — **보조 무게가 줄어든 날**이 신기록이다.
+      // (그대로 두면 보조를 더 받은 날이 PR로 잡히고, 진짜 진행한 날은 영원히 PR을 못 받는다.)
+      if (isReverseProgression(ex.name)) {
+        var minAssist = Math.min.apply(null, weights);
+        if (ex.lastWeight !== null && ex.lastWeight !== undefined && minAssist < ex.lastWeight) {
+          newPRs.push({
+            id: 'pr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+            exerciseName: ex.name,
+            weight: minAssist,
+            reps: reps[weights.indexOf(minAssist)],
+            previousWeight: ex.lastWeight,
+            reverse: true,
+            date: getTodayStr()
+          });
+        }
+      } else if (ex.lastWeight !== null && maxWeight > ex.lastWeight) {
         newPRs.push({
           id: 'pr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
           exerciseName: ex.name,
@@ -2307,9 +2325,10 @@ function buildSwapListHtml(query) {
     var tag = info && info.compound ? '복합' : '고립';
     var part = partKr(name);
     var prog = getProgressiveRecommendation(name, exercise.targetReps);
+    var swapPre = isReverseProgression(name) ? '보조 ' : '';
     var hint = prog && prog.previousWeight !== undefined
-      ? '지난 ' + prog.previousWeight + 'kg → ' + prog.weight + 'kg'
-      : (prog ? prog.weight + 'kg (1RM 추정)' : '무게 미정');
+      ? '지난 ' + swapPre + prog.previousWeight + 'kg → ' + swapPre + prog.weight + 'kg'
+      : (prog ? swapPre + prog.weight + 'kg' + (swapPre ? ' (첫 시도)' : ' (1RM 추정)') : '무게 미정');
     if (addMode && inSession[canonicalExerciseName(name)]) hint = '오늘 이미 있음 · ' + hint;
     return '<button class="option-card" style="width: 100%; margin-bottom: 6px; text-align: left;" onclick="' + actionFn + '(\'' + name.replace(/'/g, "\\'") + '\')">' +
       '<div class="flex items-center justify-between gap-2">' +
@@ -2679,7 +2698,8 @@ function renderWorkoutSession() {
         '<div class="' + labelClass + '">' + labelText + '</div>' +
         '<div class="set-info-grid">' +
           '<div>' +
-            '<p class="set-info-label">무게' + roleBadge + '</p>' +
+            // 어시스트 종목은 '무게'가 아니라 '보조'다 — 라벨을 바꾸지 않으면 사용자가 정반대로 세팅한다.
+            '<p class="set-info-label">' + (isReverseProgression(exercise.name) ? '보조' : '무게') + roleBadge + '</p>' +
             '<p class="' + valueClass + '">' + (set.weight !== null ? set.weight : '—') + '<span class="text-xs text-stone-500">kg</span></p>' +
           '</div>' +
           '<div>' +
@@ -2692,8 +2712,8 @@ function renderWorkoutSession() {
   });
   
   // 이전 기록
-  var prevText = exercise.lastWeight !== null 
-    ? exercise.lastWeight + 'kg × ' + (parseInt(String(exercise.targetReps || '8').split('-')[0]) || 8) + ' · ' + (exercise.sets.filter(function(s) { return !s.isWarmup; }).length) + '세트'
+  var prevText = exercise.lastWeight !== null
+    ? (isReverseProgression(exercise.name) ? '보조 ' : '') + exercise.lastWeight + 'kg × ' + (parseInt(String(exercise.targetReps || '8').split('-')[0]) || 8) + ' · ' + (exercise.sets.filter(function(s) { return !s.isWarmup; }).length) + '세트'
     : (exercise.lastReps ? exercise.lastReps + '회 × ' + (exercise.sets.filter(function(s) { return !s.isWarmup; }).length) + '세트' : '첫 시도');
   
   // 휴식 타이머
@@ -2848,22 +2868,24 @@ function renderWorkoutSession() {
           // 무게 입력
           '<div class="input-group">' +
             '<div class="input-label">' +
-              '<p>무게</p>' +
-              '<p>kg</p>' +
+              // 어시스트 종목은 스택에 거는 값이 '보조 무게'다 (낮출수록 어려워진다).
+              '<p>' + (isReverseProgression(ex.name) ? '보조 무게' : '무게') + '</p>' +
+              '<p>' + (isReverseProgression(ex.name) ? '낮출수록 ↑난이도' : 'kg') + '</p>' +
             '</div>' +
             '<div class="number-display" onclick="enterEditMode(\'weight\')">' +
               '<p id="sheet-weight-value">' + (set.weight !== null ? set.weight : 0) + '</p>' +
               '<input id="sheet-weight-input" class="number-input" type="number" inputmode="decimal" step="' + getWeightIncrement(ex.name) + '" min="0" style="display:none;" onclick="event.stopPropagation()" onblur="commitEdit(\'weight\')" onkeydown="if(event.key===\'Enter\')this.blur()" />' +
             '</div>' +
             // 조절 버튼 = 종목 장비 단위 (덤벨 ±2/±4, 그 외 ±5/±10). 1칸 = getWeightIncrement
-            (function(inc) {
+            // 강조(accent) 버튼은 "진행 방향" — 어시스트 종목은 보조를 **줄이는** 쪽이 증량이다.
+            (function(inc, rev) {
               return '<div class="adj-grid">' +
-                '<button class="adj-btn" onclick="adjustWeight(' + (-2 * inc) + ')">−' + (2 * inc) + '</button>' +
+                '<button class="adj-btn' + (rev ? ' accent-btn' : '') + '" onclick="adjustWeight(' + (-2 * inc) + ')">−' + (2 * inc) + '</button>' +
                 '<button class="adj-btn" onclick="adjustWeight(' + (-inc) + ')">−' + inc + '</button>' +
                 '<button class="adj-btn" onclick="adjustWeight(' + inc + ')">+' + inc + '</button>' +
-                '<button class="adj-btn accent-btn" onclick="adjustWeight(' + (2 * inc) + ')">+' + (2 * inc) + '</button>' +
+                '<button class="adj-btn' + (rev ? '' : ' accent-btn') + '" onclick="adjustWeight(' + (2 * inc) + ')">+' + (2 * inc) + '</button>' +
               '</div>';
-            })(getWeightIncrement(ex.name)) +
+            })(getWeightIncrement(ex.name), isReverseProgression(ex.name)) +
           '</div>' +
 
           // 횟수 입력
@@ -2990,25 +3012,32 @@ function renderWorkoutSession() {
 
         var html = '<div class="rm-card">';
 
+        var isReverse = isReverseProgression(exercise.name);
+        // 어시스트 종목은 숫자 앞에 '보조'를 붙여야 뜻이 통한다 (40kg = 40kg만큼 도와준다).
+        var unitPrefix = isReverse ? '보조 ' : '';
+
         if (prog && prog.source !== 'rm_estimate' && prog.previousWeight !== undefined) {
           // 실제 수행 기록이 있는 경우
           var prevRepsStr = (prog.previousReps || []).join(', ') + '회';
           var color = prog.source === 'progress' ? '#10b981' : 'var(--accent)';
-          var label = prog.source === 'progress' ? '🎯 도전 권장'
+          var label = prog.source === 'progress' ? (isReverse ? '🎯 보조 낮추기 (증량)' : '🎯 도전 권장')
+            : prog.graduated ? '🏅 맨몸 졸업!'
             : prog.source === 'rehab' ? '🩹 재활 — 무게 유지'
-            : prog.painGated ? '⚠️ 통증 기록 — 증량 보류'
-            : '🔁 동일 무게';
+            : prog.painGated ? (isReverse ? '⚠️ 통증 기록 — 보조 유지' : '⚠️ 통증 기록 — 증량 보류')
+            : (isReverse ? '🔁 동일 보조' : '🔁 동일 무게');
           html +=
             '<div class="flex items-center justify-between mb-2">' +
               '<p class="text-[10px] font-mono uppercase tracking-widest text-stone-400">지난 기록</p>' +
-              '<p class="font-mono text-xs text-stone-300">' + prog.previousWeight + 'kg × ' + prevRepsStr + '</p>' +
+              '<p class="font-mono text-xs text-stone-300">' + unitPrefix + prog.previousWeight + 'kg × ' + prevRepsStr + '</p>' +
             '</div>' +
             '<div class="flex items-center justify-between pt-3 border-t" style="border-color: rgba(var(--accent-rgb), 0.15);">' +
               '<div>' +
                 '<p class="text-[10px] font-mono uppercase tracking-widest" style="color: ' + color + ';">' + label + '</p>' +
                 '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + prog.note + '</p>' +
               '</div>' +
-              '<p class="font-bebas text-3xl" style="color: ' + color + ';">' + prog.weight + '<span class="text-xs text-stone-400">kg</span></p>' +
+              '<p class="font-bebas text-3xl" style="color: ' + color + ';">' +
+                (isReverse ? '<span class="text-xs text-stone-400">보조 </span>' : '') +
+                prog.weight + '<span class="text-xs text-stone-400">kg</span></p>' +
             '</div>';
         } else if (prog && prog.source === 'rm_estimate') {
           // 첫 시도 - 1RM 기반
@@ -3025,13 +3054,30 @@ function renderWorkoutSession() {
                 '<p class="text-[10px] font-mono uppercase tracking-widest accent">첫 시도 추천</p>' +
                 '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + prog.note + '</p>' +
               '</div>' +
-              '<p class="font-bebas text-3xl accent">' + shownWeight + '<span class="text-xs text-stone-400">kg</span></p>' +
+              '<p class="font-bebas text-3xl accent">' +
+                (isReverse ? '<span class="text-xs text-stone-400">보조 </span>' : '') +
+                shownWeight + '<span class="text-xs text-stone-400">kg</span></p>' +
             '</div>';
         }
 
         if (rm) {
           html +=
             '<p class="text-[10px] font-mono text-stone-500 mt-3 text-right">추정 1RM ' + rm + 'kg</p>';
+        } else if (isReverse) {
+          // 어시스트 종목의 진행 지표는 e1RM이 아니라 **보조 무게 감소 추이**다.
+          // (보조로 계산한 e1RM은 강해질수록 내려가는 뒤집힌 값이라 아예 추적하지 않는다.)
+          var trend = getAssistProgressTrend(exercise.name, 4);
+          var netNow = assistNetLoad(exercise.name, prog ? prog.weight : null);
+          var trendStr = '';
+          if (trend && trend.sessions > 1) {
+            trendStr = '보조 추이 ' + trend.values.slice().reverse().join(' → ') + 'kg' +
+              (trend.delta > 0 ? ' (−' + trend.delta + 'kg 진행 🔻)' : '');
+          } else {
+            trendStr = '진행 지표 = 보조 무게가 줄어드는 것';
+          }
+          if (netNow !== null && netNow > 0) trendStr += ' · 실질 약 ' + netNow + 'kg';
+          html +=
+            '<p class="text-[10px] font-mono text-stone-500 mt-3 text-right">' + escapeHtml(trendStr) + '</p>';
         }
 
         html += '</div>';
@@ -3087,12 +3133,19 @@ function buildSetSchemeNoticeHtml(session, exercise) {
   var html = '';
   var scheme = getSetScheme(exercise.name);
 
+  // 어시스트 종목은 "가볍게 = 보조를 더" 라서 안내 문구를 그대로 두면 정반대로 읽힌다.
+  var rev = isReverseProgression(exercise.name);
+
   if (scheme === 'straight') {
     html += '<p class="text-[10px] font-mono text-stone-500 px-1 mb-2">' +
-      '뒤 세트에서 반복이 1~2회 줄어드는 건 정상이에요. 무게를 낮추지 말고 그대로 하세요.</p>';
+      (rev
+        ? '뒤 세트에서 반복이 1~2회 줄어드는 건 정상이에요. 보조를 늘리지 말고 그대로 하세요.'
+        : '뒤 세트에서 반복이 1~2회 줄어드는 건 정상이에요. 무게를 낮추지 말고 그대로 하세요.') + '</p>';
   } else if (scheme === 'top_backoff') {
     html += '<p class="text-[10px] font-mono text-stone-500 px-1 mb-2">' +
-      '탑세트 1개를 가장 무겁게, 백오프 2세트는 90% 무게로 <b>같은 횟수</b>를 노려요 (볼륨 보존).</p>';
+      (rev
+        ? '탑세트 1개를 <b>가장 낮은 보조</b>로, 백오프 2세트는 보조를 한 칸 올려 <b>같은 횟수</b>를 노려요 (볼륨 보존).'
+        : '탑세트 1개를 가장 무겁게, 백오프 2세트는 90% 무게로 <b>같은 횟수</b>를 노려요 (볼륨 보존).') + '</p>';
   }
 
   var dismissed = session.techDismissed && session.techDismissed[session.currentExerciseIdx];
@@ -3377,15 +3430,10 @@ function renderWorkoutComplete() {
   var prAlertsHtml = '';
   if (cs.newPRs.length > 0) {
     cs.newPRs.forEach(function(pr) {
-      var prValue, prChange;
-      if (pr.weight !== undefined && pr.previousWeight !== undefined) {
-        prValue = pr.weight + 'kg × ' + pr.reps + '회';
-        prChange = pr.previousWeight + 'kg → ' + pr.weight + 'kg (+' + (pr.weight - pr.previousWeight).toFixed(1) + 'kg)';
-      } else {
-        prValue = pr.reps + '회';
-        prChange = pr.previousReps + '회 → ' + pr.reps + '회 (+' + (pr.reps - pr.previousReps) + ')';
-      }
-      
+      // 어시스트 종목은 '보조 40kg → 보조 35kg (보조 −5kg)'. 옛/가져온 기록의 값이 숫자가
+      // 아닐 수 있어 PR 히스토리 화면과 같은 규칙으로 escape한다.
+      var prChange = escapeHtml(formatPRChange(pr));
+
       prAlertsHtml += 
         '<div class="card-accent mb-4">' +
           '<div class="relative flex items-center gap-3">' +
@@ -3407,7 +3455,11 @@ function renderWorkoutComplete() {
     var ex = cs.exercises[i];
     var hasPR = cs.newPRs.some(function(pr) { return pr.exerciseName === ex.name; });
     var repsStr = ex.reps.join(', ');
-    var weightStr = ex.maxWeight !== null ? (ex.maxWeight + 'kg') : '';
+    // 어시스트 종목의 대표값은 최대가 아니라 **최소 보조**(가장 어려웠던 세트)다.
+    var summaryWeight = (isReverseProgression(ex.name) && Array.isArray(ex.weights) && ex.weights.length)
+      ? Math.min.apply(null, ex.weights) : ex.maxWeight;
+    var weightStr = (summaryWeight !== null && summaryWeight !== undefined)
+      ? ((isReverseProgression(ex.name) ? '보조 ' : '') + summaryWeight + 'kg') : '';
     var detail = weightStr ? (weightStr + ' × ' + repsStr) : (repsStr + '회');
     
     exerciseSummary += 
@@ -5606,15 +5658,10 @@ function renderStats() {
     prListHtml = '<p class="text-xs text-stone-500 font-mono text-center" style="padding: 20px 0;">기간 내 PR 기록이 없습니다</p>';
   } else {
     personalRecords.slice(0, 5).forEach(function(pr) {
-      var prValue, prChange;
-      if (pr.weight !== undefined && pr.previousWeight !== undefined) {
-        prValue = pr.weight;
-        prChange = pr.previousWeight + ' → ' + pr.weight + ' <span class="accent">(+' + (pr.weight - pr.previousWeight).toFixed(1) + 'kg)</span>';
-      } else {
-        prValue = pr.reps;
-        prChange = (pr.previousReps || 0) + ' → ' + pr.reps + ' <span class="accent">(+' + (pr.reps - (pr.previousReps || 0)) + ')</span>';
-      }
-      var unit = pr.weight ? 'kg' : '회';
+      var prValue = (pr.weight !== undefined) ? pr.weight : pr.reps;
+      // 어시스트 종목은 감소가 신기록 — formatPRChange가 방향에 맞는 문구를 만든다.
+      var prChange = escapeHtml(formatPRChange(pr)).replace(/\(([^)]*)\)$/, '<span class="accent">($1)</span>');
+      var unit = (pr.weight !== undefined) ? 'kg' : '회';
       
       prListHtml += 
         '<div class="pr-history-item" style="margin-bottom: 8px;">' +
@@ -5627,8 +5674,10 @@ function renderStats() {
           '</div>' +
           '<div class="flex items-baseline justify-between">' +
             '<div class="flex items-baseline gap-2">' +
-              '<p class="font-bebas text-2xl accent">' + prValue + '<span class="text-sm text-stone-400">' + unit + '</span></p>' +
-              (pr.weight ? '<p class="text-[10px] font-mono text-stone-500">× ' + pr.reps + '회</p>' : '') +
+              '<p class="font-bebas text-2xl accent">' +
+                (pr.weight !== undefined && isReverseProgression(pr.exerciseName) ? '<span class="text-sm text-stone-400">보조 </span>' : '') +
+                prValue + '<span class="text-sm text-stone-400">' + unit + '</span></p>' +
+              (pr.weight !== undefined ? '<p class="text-[10px] font-mono text-stone-500">× ' + pr.reps + '회</p>' : '') +
             '</div>' +
             '<p class="text-[10px] font-mono text-stone-400">' + prChange + '</p>' +
           '</div>' +
