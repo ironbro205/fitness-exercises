@@ -128,7 +128,7 @@ var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v48';
+var APP_VERSION = 'v49';
 // 백업에 담지 않는 키. 두 부류:
 // (1) 로컬 전용·민감 → 복원해도 그대로 보존 (API 키·코치 대화)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
@@ -517,6 +517,14 @@ function getDateStr(d) {
   return kst.toISOString().split('T')[0];
 }
 
+// KST(UTC+9) 기준 시(0~23). 원시 new Date().getHours()는 기기 시간대를 따라가므로 쓰지 않는다.
+// 용도: 이른 아침 경고(웜업 가이드) — 자는 동안 디스크가 물을 먹어 기상 직후 굽힘 응력이 약 300% 높다
+// (Adams·Dolan·Hutton 1990). docs/research/warmup-stretching.md §4-E.
+function getKstHour(d) {
+  if (!d) d = new Date();
+  return new Date(d.getTime() + 9 * 60 * 60 * 1000).getUTCHours();
+}
+
 function fmtDate(d) {
   if (!d) d = new Date();
   var dt = new Date(d);
@@ -558,6 +566,9 @@ var state = {
   setSchemeOpen: false,
   restTimer: null,
   completedSession: null,
+  // 정리 스트레칭 가이드 (완료 화면 위 오버레이). 진행상태는 완료 화면과 같은 수명 — 저장하지 않는다.
+  // 세션 시작 웜업은 activeSession.warmup 에 들어가 세션과 함께 저장된다.
+  stretchGuide: null,
   // 더보기 화면 - 모달
   apiKeyModalOpen: false,
   apiKeyInput: '',

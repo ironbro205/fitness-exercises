@@ -1925,3 +1925,186 @@ function buildWalkRawSegments(totalSec, targetIncline) {
   segs.push({ type: 'cooldown', sec: cd, speed: WALK_PRESCRIPTION.cooldownSpeed, incline: 0, label: '정리' });
   return segs;
 }
+
+// ═══════════════════════════════════════════════
+// 웜업 · 스트레칭 계획 조립 (순수 함수)
+// 근거: docs/research/warmup-stretching.md §6-C(조립 규칙) · §3-H(발췌 규칙) · §4-D(요추 보호 순서)
+//
+// 역할 분담(§1-B) — 이 파일은 "본운동 앞단"만 만든다:
+//   [웜업 화면] 일반 웜업 3분 + 부위별 동적 드릴 2~3분   ← 여기
+//   [본운동]    첫 종목 카드의 램프업 세트 → 워킹세트     ← set-schemes.md §2 규칙①(buildSchemeSets)
+//   램프업 세트는 웜업 시간 수지에 넣지 않는다. 이미 본운동 시간에 포함돼 있다(§1-B · §5-A).
+// ═══════════════════════════════════════════════
+
+// 드릴 상한 — §5-A 시간 수지(웜업 일반 3분 + 드릴 2~3분, 스트레칭 4~5분)에서 나온 값
+var MOBILITY_WARMUP_LIMIT = 5;   // 일반 웜업 제외한 부위 드릴 수
+var MOBILITY_STRETCH_LIMIT = 4;
+// 요추 보호 순서(§4-D): 캣-카멜(무부하 가동) → McGill 계열(척추 강성) → 나머지(고관절·어깨 패턴).
+// "먼저 척추를 굳히고, 그 다음에 팔·다리를 움직인다."
+var MOBILITY_LUMBAR_LEAD = 'cat_camel';
+var MOBILITY_MCGILL_KEYS = ['bird_dog', 'mcgill_curlup', 'side_bridge'];
+
+// 세션 종목 목록에서 웜업 대분류를 유도한다 (§6-B 유도 로직).
+// 각 종목의 primary 부위 → PART_TO_WARMUP_GROUP → 등장 횟수 많은 순 상위 2개.
+// 동률이면 먼저 나온 종목(= 그날의 첫 종목·메인)의 부위를 앞에 둔다 — §3-H 규칙3.
+function deriveWarmupGroups(exercises) {
+  var order = [];
+  var count = {};
+  (exercises || []).forEach(function(ex) {
+    var name = ex && (ex.name || ex);
+    if (!name) return;
+    var map = EXERCISE_BODY_PART_MAP[name];
+    if (!map && EXERCISE_ALIASES_1RM[name]) map = EXERCISE_BODY_PART_MAP[EXERCISE_ALIASES_1RM[name]];
+    var group = map && PART_TO_WARMUP_GROUP[map.primary];
+    if (!group) return;
+    if (count[group] === undefined) { count[group] = 0; order.push(group); }
+    count[group]++;
+  });
+  // 동률 판정에 쓸 "첫 등장 순서"는 정렬 전에 찍어 둔다.
+  // order 를 정렬하면서 order.indexOf 를 부르면 반쯤 정렬된 배열을 읽어 비교가 뒤집힌다.
+  var firstSeen = {};
+  order.forEach(function(g, i) { firstSeen[g] = i; });
+  order.sort(function(a, b) {
+    if (count[b] !== count[a]) return count[b] - count[a];
+    return firstSeen[a] - firstSeen[b];           // 동률 → 첫 등장 순서 유지
+  });
+  return order.slice(0, 2);
+}
+
+// 세션 타입(빠른 경로) 또는 종목 목록(유도)으로 웜업 대분류를 정한다.
+function resolveWarmupGroups(sessionType, exercises) {
+  var mapped = SESSION_WARMUP_MAP[sessionType];
+  if (mapped && mapped.length) return mapped.slice();
+  var derived = deriveWarmupGroups(exercises);
+  return derived.length ? derived : ['core'];   // 아무것도 못 찾으면 척추 보호 기본 세트
+}
+
+// 여러 부위의 목록을 라운드로빈으로 섞어 중복 없이 합친다.
+// 단순 연결(concat)이면 첫 부위 목록만 상한을 다 먹어버려 UPPER 날에 등 드릴이 하나도 안 남는다.
+// 부위마다 한 개씩 번갈아 뽑으면 §3-H "각 부위 1~2개 발췌"가 자연스럽게 나온다.
+function mobilityMergeRoundRobin(groups, table) {
+  var lists = (groups || []).map(function(g) { return (table[g] || []).slice(); });
+  var out = [];
+  var seen = {};
+  var maxLen = 0;
+  lists.forEach(function(l) { if (l.length > maxLen) maxLen = l.length; });
+  for (var i = 0; i < maxLen; i++) {
+    for (var j = 0; j < lists.length; j++) {
+      var key = lists[j][i];
+      if (!key || seen[key]) continue;
+      seen[key] = true;
+      out.push(key);
+    }
+  }
+  return out;
+}
+
+// 요추 굴곡 동작(discSafe:false)을 안전한 대체 동작으로 치환한다 (§6-C 규칙4).
+// 이 앱은 1인용이고 사용자가 허리디스크 보유자라 조건 분기 없이 **항상** 적용한다
+// (§6-C 설계 판단: "기본 목록에 애초에 넣지 않는 것이 가장 단순 · 런타임 분기는 최소화").
+// 대체 동작이 없으면 조용히 빼지 않고 목록에서 제거한 사실이 omitted 수에 반영된다.
+function mobilitySubstituteUnsafe(keys) {
+  var out = [];
+  var seen = {};
+  (keys || []).forEach(function(key) {
+    var d = MOBILITY_DRILLS[key];
+    if (!d) return;
+    var finalKey = key;
+    if (d.discSafe === false) {
+      finalKey = d.discAlt && MOBILITY_DRILLS[d.discAlt] ? d.discAlt : null;
+    }
+    if (!finalKey || seen[finalKey]) return;
+    seen[finalKey] = true;
+    out.push(finalKey);
+  });
+  return out;
+}
+
+// 요추 보호 정렬 (§4-D): 캣-카멜을 맨 앞으로, McGill 계열을 그 바로 뒤로, 나머지는 원래 순서 유지.
+function mobilityOrderForLumbar(keys) {
+  var lead = [];
+  var mcgill = [];
+  var rest = [];
+  (keys || []).forEach(function(key) {
+    if (key === MOBILITY_LUMBAR_LEAD) lead.push(key);
+    else if (MOBILITY_MCGILL_KEYS.indexOf(key) !== -1) mcgill.push(key);
+    else rest.push(key);
+  });
+  return lead.concat(mcgill, rest);
+}
+
+// 공통 조립기. 반환 { keys, groups, omitted } — omitted 는 상한에 걸려 잘라낸 개수다.
+// 잘라낸 게 있으면 화면에 "생략된 동작 N개"로 표시한다. 말없이 자르지 않는다(§6-C 규칙7).
+function buildMobilityPlan(table, sessionType, exercises, limit, leadKeys) {
+  var groups = resolveWarmupGroups(sessionType, exercises);
+  var merged = mobilityOrderForLumbar(mobilitySubstituteUnsafe(mobilityMergeRoundRobin(groups, table)));
+  var kept = merged.slice(0, limit);
+  return {
+    keys: (leadKeys || []).concat(kept),
+    groups: groups,
+    omitted: Math.max(0, merged.length - kept.length)
+  };
+}
+
+// 세션 시작 웜업: 일반 웜업(고정 1개) + 부위별 동적 드릴 최대 5개.
+// short=true 면 §5-C "압축 모드" — 일반 웜업 3분만. 근거상 손실이 거의 없는 바쁜 날용 선택지다.
+function buildWarmupPlan(sessionType, exercises, opts) {
+  var short = !!(opts && opts.short);
+  if (short) return { keys: WARMUP_GENERAL.slice(), groups: resolveWarmupGroups(sessionType, exercises), omitted: 0 };
+  return buildMobilityPlan(WARMUP_BY_PART, sessionType, exercises, MOBILITY_WARMUP_LIMIT, WARMUP_GENERAL);
+}
+
+// 세션 종료 스트레칭: 부위별 3~4동작. 일반 웜업 같은 고정 항목은 없다.
+function buildStretchPlan(sessionType, exercises) {
+  return buildMobilityPlan(STRETCH_BY_PART, sessionType, exercises, MOBILITY_STRETCH_LIMIT, []);
+}
+
+// 드릴 키 목록 → 화면이 한 칸씩 진행할 구간 목록.
+// 좌우 동작(timePerSide/repsPerSide)은 왼쪽·오른쪽 두 구간으로 쪼갠다 — 전환 시점에 예고·소리를 줄 수 있어야 하기 때문(§6-D).
+// mode 는 'time'(자동 카운트다운) 또는 'reps'(사용자가 "완료"를 눌러 진행) 둘 중 하나로 정규화된다.
+function expandMobilitySegments(keys) {
+  var out = [];
+  (keys || []).forEach(function(key) {
+    var d = MOBILITY_DRILLS[key];
+    if (!d) return;
+    var perSide = (d.mode === 'timePerSide' || d.mode === 'repsPerSide');
+    var isTime = (d.mode === 'time' || d.mode === 'timePerSide');
+    var sides = perSide ? ['left', 'right'] : [null];
+    sides.forEach(function(side) {
+      out.push({
+        key: key,
+        kr: d.kr,
+        side: side,
+        mode: isTime ? 'time' : 'reps',
+        // time: 실제로 세는 초 / reps: 총시간 추정에만 쓰는 참고값(타이머 아님)
+        sec: isTime ? (d.sec || 30) : Math.round((d.reps || 10) * (d.secPerRep || 3)),
+        reps: isTime ? null : (d.reps || 10),
+        cue: d.cue || '',
+        why: d.why || '',
+        warn: d.warn || '',
+        gear: d.gear || 'none',
+        optional: !!d.optional
+      });
+    });
+  });
+  return out;
+}
+
+// 구간 목록의 예상 총 소요(초). 횟수 구간은 추정값이라 화면에서 "약 N분"으로만 쓴다.
+function mobilitySegmentsTotalSec(segs) {
+  return (segs || []).reduce(function(sum, s) { return sum + (Number(s && s.sec) || 0); }, 0);
+}
+
+// 구간 이름 — 좌우가 있으면 붙여 준다.
+function mobilitySegmentLabel(seg) {
+  if (!seg) return '';
+  if (seg.side === 'left') return seg.kr + ' · 왼쪽';
+  if (seg.side === 'right') return seg.kr + ' · 오른쪽';
+  return seg.kr;
+}
+
+// 구간의 분량 표시 — 시간 모드는 "30초", 횟수 모드는 "12회".
+function mobilitySegmentAmount(seg) {
+  if (!seg) return '';
+  return (seg.mode === 'time') ? (seg.sec + '초') : (seg.reps + '회');
+}

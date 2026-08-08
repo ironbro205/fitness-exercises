@@ -1011,6 +1011,8 @@ window.startGeneratedRoutine = function() {
       reason: r.reason
     }
   };
+  // FREE·AI 루틴은 세션 타입이 없을 수 있어, 종목 목록에서 웜업 부위를 유도한다(buildWarmupPlan 내부).
+  attachWarmupToSession(state.activeSession);
   saveActiveSession();
 
   // 마법사 상태 리셋 (운동이 시작됐으니 마법사는 비움)
@@ -1446,6 +1448,8 @@ window.startSession = function(sessionType) {
     currentExerciseIdx: 0,
     exercises: exercises
   };
+  // 그날 부위 맞춤 웜업(일반 유산소 3분 + 동적 드릴)을 본운동 앞에 붙인다 — 건너뛰기 가능.
+  attachWarmupToSession(state.activeSession);
   saveActiveSession();
 
   render();
@@ -1649,6 +1653,7 @@ function finalizeSession() {
   state.completedSession = {
     workoutId: newWorkout.id,
     sessionName: session.sessionName,
+    sessionType: session.sessionType,   // 정리 스트레칭 부위를 정하는 데 쓴다(buildStretchPlan)
     duration: durationMin,
     exerciseCount: exercisesDone.length,
     setCount: completedSets,
@@ -3514,12 +3519,499 @@ function renderWorkoutComplete() {
         '</div>' +
       '</div>' +
       
+      // 정리 스트레칭 (선택) — 본운동이 이미 끝난 자리라 건너뛰어도 세트를 잃지 않는다(§5-B).
+      // 약속하는 효과는 "유연성 유지" 하나뿐이다. 근육통·부상 예방·근성장은 쓰지 않는다(§2 델파이 합의).
+      '<button class="card mobility-cta" onclick="openStretchGuide()">' +
+        '<div class="flex items-center justify-between">' +
+          '<div style="text-align:left;">' +
+            '<p class="text-sm font-display font-bold">정리 스트레칭 · 약 4분</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">오늘 쓴 부위 3~4동작 · 유연성 유지용 (선택)</p>' +
+          '</div>' +
+          '<p class="text-sm font-mono accent">시작 ▸</p>' +
+        '</div>' +
+      '</button>' +
+
       // 액션 버튼
       '<div style="display: flex; flex-direction: column; gap: 8px; padding-top: 8px;">' +
         '<button class="complete-action-btn complete-primary" onclick="goHome()">홈으로</button>' +
         '<button class="complete-action-btn complete-secondary" onclick="goToWorkout()">기록 자세히 보기</button>' +
       '</div>' +
       
+    '</div>';
+}
+
+// ═══════════════════════════════════════════════
+// 웜업 · 스트레칭 타이머 가이드 (부위별)
+// 근거: docs/research/warmup-stretching.md §6-A(화면 흐름) · §6-D(타이머 UI) · §5-C(건너뛰기)
+//
+// 흐름:
+//   운동 시작 → renderWarmupGuide()  → (완료·건너뛰기) → renderWorkoutSession()
+//   운동 완료 → renderWorkoutComplete() → (선택) renderStretchGuide()
+//
+// ★카디오(러닝) 화면과 코드를 공유하지 않는다 (§6-D 권고).
+//   카디오는 속력·거리·RPE가 얽혀 있어 일반화하면 양쪽 다 복잡해지고, 여기엔 카디오에 없는
+//   "횟수 기반 구간"(타이머 대신 사용자 탭)과 "좌/우 분할 구간"이 있다. 패턴만 베끼고 구현은 따로 둔다.
+//   유일한 예외는 순수 포맷 함수 cardioFmtClock — 전역이라 그냥 부른다(§6-D "공유해도 되는 것").
+//
+// ★강제하지 않는다 (§5-C): 건너뛰기를 항상 노출하고, "짧게(3분) / 표준" 토글을 둔다.
+//   시간이 없는 날은 일반 웜업 3분 + 램프업 세트만 해도 근거상 손해가 거의 없다.
+// ═══════════════════════════════════════════════
+
+// 런타임 핸들(직렬화 대상 아님) — 타이머·오디오·웨이크락. state 밖 모듈 변수.
+var mobilityRuntime = { intervalId: null, audioCtx: null, wakeLock: null, wakeLockPending: false, lastCueSec: null };
+
+// 지금 떠 있는 가이드를 돌려준다. { kind:'warmup'|'stretch', g:<진행상태> } | null
+// render() 라우팅과 같은 우선순위(스트레칭이 위)를 쓴다.
+function mobilityCurrent() {
+  if (state.stretchGuide) return { kind: 'stretch', g: state.stretchGuide };
+  var s = state.activeSession;
+  if (s && s.warmup && !s.warmup.done) return { kind: 'warmup', g: s.warmup };
+  return null;
+}
+
+// 진행상태의 구간 목록. keys 만 저장해 두고 화면에서 펼친다(저장 용량↓, 데이터 중복 없음).
+function mobilitySegsOf(g) {
+  return expandMobilitySegments((g && g.keys) || []);
+}
+
+// 진행상태 저장 — 웜업은 activeSession 안에 있으므로 세션과 함께 저장된다(§6-E: 백그라운드 복귀 시 유지).
+// 스트레칭은 완료 화면과 같은 수명(메모리)이라 별도 저장하지 않는다 — completedSession 도 저장하지 않는다.
+function mobilityPersist(kind) {
+  if (kind === 'warmup') saveActiveSession();
+}
+
+// 세션 시작 시 웜업 계획을 붙인다. 기존 저장 세션에 warmup 이 없으면 웜업 화면을 띄우지 않는다(하위 호환).
+function attachWarmupToSession(session) {
+  if (!session) return;
+  var plan = buildWarmupPlan(session.sessionType, session.exercises, { short: false });
+  session.warmup = {
+    keys: plan.keys,
+    groups: plan.groups,
+    omitted: plan.omitted,
+    mode: 'standard',
+    idx: 0,
+    done: false,
+    segEndsAt: null,
+    soundOn: true
+  };
+}
+
+// ── 타이머 ─────────────────────────────
+// 기준 시계는 벽시계(Date.now)다. 카디오처럼 performance.now 를 쓰지 않는 이유:
+// 구간이 20~180초로 짧아 드리프트가 무의미한 반면, 백그라운드 회수·새로고침 뒤에도 남는 값이어야
+// 저장·복원이 한 줄로 끝나기 때문이다(segEndsAt 하나만 직렬화하면 된다).
+function mobilityEnsureTicker() {
+  var cur = mobilityCurrent();
+  if (!cur) { mobilityStopRuntime(); return; }
+  var segs = mobilitySegsOf(cur.g);
+  var seg = segs[cur.g.idx];
+  if (!seg) { mobilityStopRuntime(); return; }
+  mobilityRequestWakeLock();
+  // 횟수 구간은 사용자가 "완료"를 눌러야 넘어간다 — 셀 게 없으니 타이머를 돌리지 않는다(배터리).
+  if (seg.mode !== 'time') { mobilityClearTicker(); return; }
+  if (!cur.g.segEndsAt) {
+    cur.g.segEndsAt = Date.now() + seg.sec * 1000;
+    mobilityPersist(cur.kind);
+  }
+  if (mobilityRuntime.intervalId) return;
+  if (typeof setInterval === 'undefined') return;
+  mobilityRuntime.intervalId = setInterval(mobilityTick, 250);
+}
+
+function mobilityClearTicker() {
+  if (mobilityRuntime.intervalId) { try { clearInterval(mobilityRuntime.intervalId); } catch (e) {} mobilityRuntime.intervalId = null; }
+  mobilityRuntime.lastCueSec = null;
+}
+
+function mobilityStopRuntime() {
+  mobilityClearTicker();
+  mobilityReleaseWakeLock();
+  if (mobilityRuntime.audioCtx) { try { mobilityRuntime.audioCtx.close(); } catch (e) {} mobilityRuntime.audioCtx = null; }
+}
+
+// 250ms 마다: 남은 시간을 벽시계 절대차로 다시 계산(드리프트 0) → 화면은 부분 갱신(전체 render 아님).
+// 자리를 비운 사이 구간이 끝났으면 다음 구간을 처음부터 시작한다 — 안 하는 동안 시간이 흐른 걸
+// "했다"고 치지 않기 위해서다.
+function mobilityTick() {
+  var cur = mobilityCurrent();
+  if (!cur) { mobilityStopRuntime(); return; }
+  var segs = mobilitySegsOf(cur.g);
+  var seg = segs[cur.g.idx];
+  if (!seg) { mobilityStopRuntime(); return; }
+  if (seg.mode !== 'time') { mobilityPaintDynamic(seg, null); return; }
+  if (!cur.g.segEndsAt) cur.g.segEndsAt = Date.now() + seg.sec * 1000;
+  var remain = (cur.g.segEndsAt - Date.now()) / 1000;
+  if (remain <= 0) { mobilityAdvance(true); return; }
+  // 전환 3초 전 예고음(매초 1회) — 좌→우 전환처럼 "지금 바꿔야 하는" 순간을 놓치지 않게.
+  var whole = Math.ceil(remain);
+  if (whole <= 3 && mobilityRuntime.lastCueSec !== whole) {
+    mobilityRuntime.lastCueSec = whole;
+    if (cur.g.soundOn !== false) mobilityBeep('tick');
+  }
+  mobilityPaintDynamic(seg, remain);
+}
+
+// 동적 요소만 id 로 직접 갱신 (전체 재렌더 없이 → 깜빡임 방지)
+function mobilityPaintDynamic(seg, remain) {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var amountEl = document.getElementById('mob-amount');
+  var fillEl = document.getElementById('mob-seg-fill');
+  var cueEl = document.getElementById('mob-precue');
+  if (remain === null) {
+    if (cueEl) { cueEl.style.display = 'none'; cueEl.textContent = ''; }
+    return;
+  }
+  if (amountEl) amountEl.textContent = cardioFmtClock(Math.max(0, Math.ceil(remain)));
+  if (fillEl) {
+    var doneRatio = seg.sec > 0 ? Math.min(1, Math.max(0, (seg.sec - remain) / seg.sec)) : 1;
+    fillEl.style.width = (doneRatio * 100).toFixed(1) + '%';
+  }
+  if (cueEl) {
+    if (remain <= 3) {
+      cueEl.style.display = '';
+      cueEl.textContent = '⚠️ ' + Math.ceil(remain) + '초 뒤 다음 동작';
+    } else { cueEl.style.display = 'none'; cueEl.textContent = ''; }
+  }
+}
+
+// 한 구간 진행. auto=true 면 타이머 만료(자동), false 면 사용자가 "완료"를 누른 것.
+// expectedIdx: 그 버튼이 그려질 때의 구간 번호. 타이머가 자동으로 넘긴 직후 도착한 "늦은 탭"이
+//   한 구간을 더 건너뛰지 않도록, 지금 구간과 다르면 무시한다(버튼 HTML에 번호를 박아 둔다).
+// wholeDrill=true 면 같은 동작(좌·우 두 구간)을 통째로 넘긴다 — "건너뛰기"는 한쪽만 빼는 게 아니다.
+function mobilityAdvance(auto, expectedIdx, wholeDrill) {
+  var cur = mobilityCurrent();
+  if (!cur) return;
+  if (expectedIdx !== undefined && expectedIdx !== null && Number(expectedIdx) !== cur.g.idx) return;
+  var segs = mobilitySegsOf(cur.g);
+  var curKey = segs[cur.g.idx] && segs[cur.g.idx].key;
+  var nextIdx = (cur.g.idx || 0) + 1;
+  if (wholeDrill && curKey) {
+    while (segs[nextIdx] && segs[nextIdx].key === curKey) nextIdx++;
+  }
+  cur.g.idx = nextIdx;
+  cur.g.segEndsAt = null;
+  mobilityRuntime.lastCueSec = null;
+  if (cur.g.idx >= segs.length) { mobilityFinish(cur.kind); return; }
+  var next = segs[cur.g.idx];
+  if (next.mode === 'time') cur.g.segEndsAt = Date.now() + next.sec * 1000;
+  if (cur.g.soundOn !== false) mobilityBeep(auto ? 'next' : 'tap');
+  if (typeof navigator !== 'undefined' && navigator.vibrate) { try { navigator.vibrate(90); } catch (e) {} }
+  mobilityPersist(cur.kind);
+  render();
+}
+
+// 복원된 진행상태가 깨져 있으면(idx 가 범위 밖 · 사전에서 사라진 키) 조용히 정리한다.
+// 안 하면 "가이드 없음"만 뜨고 본운동으로 나갈 버튼이 없어 사용자가 갇힌다.
+// render() 맨 앞에서 부른다 — 여기서 render()를 다시 부르지 않으므로 재귀가 없다.
+function mobilityRepairState() {
+  var s = state.activeSession;
+  if (s && s.warmup && !s.warmup.done) {
+    if (!(s.warmup.idx >= 0)) s.warmup.idx = 0;
+    var wsegs = expandMobilitySegments(s.warmup.keys);
+    if (!wsegs.length || s.warmup.idx >= wsegs.length) {
+      s.warmup.done = true;
+      s.warmup.segEndsAt = null;
+      saveActiveSession();
+    }
+  }
+  var g = state.stretchGuide;
+  if (g) {
+    if (!(g.idx >= 0)) g.idx = 0;
+    var ssegs = expandMobilitySegments(g.keys);
+    if (!ssegs.length || g.idx >= ssegs.length) state.stretchGuide = null;
+  }
+}
+
+// 가이드 종료 — 웜업은 본운동으로, 스트레칭은 완료 화면으로 돌아간다.
+function mobilityFinish(kind) {
+  mobilityStopRuntime();
+  if (kind === 'warmup') {
+    if (state.activeSession && state.activeSession.warmup) {
+      state.activeSession.warmup.done = true;
+      state.activeSession.warmup.segEndsAt = null;
+      saveActiveSession();
+    }
+    render();
+    showToast('웜업 완료 · 본운동 시작');
+    return;
+  }
+  state.stretchGuide = null;
+  render();
+  showToast('정리 스트레칭 완료');
+}
+
+// ── 소리 (Web Audio, 파일 없이) ─────────────────────────────
+// 카디오처럼 미리 예약하지 않고 필요한 순간에 바로 울린다 — 총 5~6분짜리 가이드라 사용자가
+// 화면을 보고 있고, 예약 스케줄러까지 둘 만큼의 이득이 없다.
+function mobilityBeep(kind) {
+  if (typeof window === 'undefined') return;
+  var AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  try {
+    if (!mobilityRuntime.audioCtx) mobilityRuntime.audioCtx = new AC();
+    var ctx = mobilityRuntime.audioCtx;
+    if (ctx.resume) { try { ctx.resume(); } catch (e) {} }
+    var spec = kind === 'next' ? { freq: 1046, dur: 0.22, gain: 0.28, type: 'square' }
+             : kind === 'tap'  ? { freq: 784,  dur: 0.10, gain: 0.18, type: 'sine' }
+             :                   { freq: 660,  dur: 0.12, gain: 0.18, type: 'sine' };
+    var osc = ctx.createOscillator();
+    var g = ctx.createGain();
+    osc.type = spec.type;
+    osc.frequency.value = spec.freq;
+    g.gain.value = spec.gain;
+    osc.connect(g); g.connect(ctx.destination);
+    var t0 = ctx.currentTime;
+    osc.start(t0);
+    g.gain.setValueAtTime(spec.gain, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + spec.dur);
+    osc.stop(t0 + spec.dur + 0.02);
+  } catch (e) {}
+}
+
+// ── 화면 꺼짐 방지 (베스트에포트) ─────────────────────────────
+// 30초 유지 동작 중 화면이 자면 남은 시간이 안 보인다. 실패해도 타이머는 벽시계 기준이라 문제없다.
+function mobilityRequestWakeLock() {
+  // render 마다 불리므로 이미 잡았거나 요청이 떠 있으면 겹쳐 부르지 않는다.
+  if (mobilityRuntime.wakeLock || mobilityRuntime.wakeLockPending) return;
+  if (typeof navigator === 'undefined' || !navigator.wakeLock || !navigator.wakeLock.request) return;
+  try {
+    mobilityRuntime.wakeLockPending = true;
+    navigator.wakeLock.request('screen').then(function(lock) {
+      mobilityRuntime.wakeLockPending = false;
+      // 요청이 도는 사이 가이드를 나갔으면 바로 반납한다.
+      if (!mobilityCurrent()) { if (lock && lock.release) { try { lock.release(); } catch (e) {} } return; }
+      mobilityRuntime.wakeLock = lock;
+      if (lock && lock.addEventListener) {
+        lock.addEventListener('release', function() { mobilityRuntime.wakeLock = null; });
+      }
+    }).catch(function() { mobilityRuntime.wakeLockPending = false; });
+  } catch (e) { mobilityRuntime.wakeLockPending = false; }
+}
+function mobilityReleaseWakeLock() {
+  var lock = mobilityRuntime.wakeLock;
+  mobilityRuntime.wakeLock = null;
+  if (lock && lock.release) { try { lock.release(); } catch (e) {} }
+}
+
+// ── 핸들러 ─────────────────────────────
+
+// "완료 ✓" — 횟수 구간을 사용자가 끝냈을 때, 또는 시간 구간을 먼저 끝내고 싶을 때. 한 구간만 넘어간다.
+window.mobilityNext = function(expectedIdx) { mobilityAdvance(false, expectedIdx, false); };
+
+// "건너뛰기" — 이 동작을 통째로 넘긴다(좌우로 쪼개진 동작이면 두 구간 모두).
+window.mobilitySkipStep = function(expectedIdx) { mobilityAdvance(false, expectedIdx, true); };
+
+// 가이드 전체 건너뛰기. 웜업은 본운동으로, 스트레칭은 완료 화면으로.
+window.mobilitySkipAll = function() {
+  var cur = mobilityCurrent();
+  if (!cur) return;
+  mobilityStopRuntime();
+  if (cur.kind === 'warmup') {
+    state.activeSession.warmup.done = true;
+    state.activeSession.warmup.segEndsAt = null;
+    saveActiveSession();
+    render();
+    return;
+  }
+  state.stretchGuide = null;
+  render();
+};
+
+window.toggleMobilitySound = function() {
+  var cur = mobilityCurrent();
+  if (!cur) return;
+  cur.g.soundOn = (cur.g.soundOn === false);
+  mobilityPersist(cur.kind);
+  render();
+};
+
+// 짧게(3분 · 일반 웜업만) / 표준(6분 · 일반 + 부위별 드릴) 토글 — §5-C 시간 압박 모드.
+window.setWarmupMode = function(mode) {
+  var s = state.activeSession;
+  if (!s || !s.warmup || s.warmup.done) return;
+  if (s.warmup.mode === mode) return;
+  var before = expandMobilitySegments(s.warmup.keys)[s.warmup.idx] || null;
+  var plan = buildWarmupPlan(s.sessionType, s.exercises, { short: mode === 'short' });
+  var segs = expandMobilitySegments(plan.keys);
+  s.warmup.mode = mode;
+  s.warmup.keys = plan.keys;
+  s.warmup.omitted = plan.omitted;
+  // 지금 하고 있는 동작이 그대로면 카운트다운을 이어간다. 안 그러면 3분 유산소 중에 "짧게"를 눌렀을 때
+  // 타이머가 3분으로 되감겨 "짧게"가 표준보다 길어지는 역전이 생긴다.
+  var after = segs[s.warmup.idx] || null;
+  var sameSeg = !!(before && after && before.key === after.key && before.side === after.side);
+  if (!sameSeg) {
+    s.warmup.segEndsAt = null;
+    mobilityRuntime.lastCueSec = null;
+  }
+  // 짧게로 바꿨는데 이미 그 지점을 지났으면(일반 웜업을 마친 뒤) 웜업을 끝낸 것으로 본다.
+  if (s.warmup.idx >= segs.length) { mobilityFinish('warmup'); return; }
+  saveActiveSession();
+  render();
+};
+
+// 완료 화면 → 정리 스트레칭 시작
+window.openStretchGuide = function() {
+  var cs = state.completedSession;
+  if (!cs) return;
+  var plan = buildStretchPlan(cs.sessionType || null, cs.exercises);
+  state.stretchGuide = {
+    keys: plan.keys,
+    groups: plan.groups,
+    omitted: plan.omitted,
+    idx: 0,
+    segEndsAt: null,
+    soundOn: true
+  };
+  render();
+};
+
+// 스트레칭 화면 닫기(완료 화면으로 돌아감) — 기록은 그대로다.
+window.closeStretchGuide = function() {
+  mobilityStopRuntime();
+  state.stretchGuide = null;
+  render();
+};
+
+// ── 화면 ─────────────────────────────
+
+function renderWarmupGuide() { return buildMobilityGuideHtml('warmup'); }
+function renderStretchGuide() { return buildMobilityGuideHtml('stretch'); }
+
+// 두 화면은 같은 골격을 쓰고 문구·푸터만 다르다. (카디오와는 공유하지 않는다 — 위 주석 참조)
+function buildMobilityGuideHtml(kind) {
+  var cur = mobilityCurrent();
+  if (!cur || cur.kind !== kind) return '<div class="px-5 pt-12">가이드 없음</div>';
+  var g = cur.g;
+  var segs = mobilitySegsOf(g);
+  var seg = segs[g.idx];
+  if (!seg) return '<div class="px-5 pt-12">가이드 없음</div>';
+  var isWarmup = (kind === 'warmup');
+  var next = segs[g.idx + 1] || null;
+  var totalMin = Math.max(1, Math.round(mobilitySegmentsTotalSec(segs) / 60));
+  var progPct = segs.length > 0 ? (g.idx / segs.length) * 100 : 0;
+
+  // 시간 구간이면 남은 시간, 횟수 구간이면 횟수. 남은 시간은 타이머가 매 250ms 덮어쓴다.
+  var isTime = (seg.mode === 'time');
+  var remain = isTime ? Math.max(0, Math.ceil(((g.segEndsAt || (Date.now() + seg.sec * 1000)) - Date.now()) / 1000)) : 0;
+  var amountText = isTime ? cardioFmtClock(remain) : (seg.reps + '회');
+  var segFillPct = isTime && seg.sec > 0 ? Math.min(100, Math.max(0, ((seg.sec - remain) / seg.sec) * 100)) : 0;
+
+  // 이른 아침 경고 (§4-E) — 자는 동안 디스크가 물을 먹어 기상 직후 굽힘 응력이 약 300% 높다.
+  var morningWarn = '';
+  if (isWarmup) {
+    var kstHour = getKstHour();
+    if (kstHour >= 4 && kstHour < 9) {
+      morningWarn =
+        '<div class="mobility-note mobility-note-warn">' +
+          '아침엔 디스크에 물이 차 있어서 허리를 숙이는 동작이 하루 중 가장 위험해요. ' +
+          '캣-카멜은 아주 살살, 하체 웜업은 조금 더 천천히 하세요.' +
+        '</div>';
+    }
+  }
+
+  // 등록된 부상이 있으면 "통증 없는 범위" 한 줄 (§3-D 주의)
+  var injuryNote = '';
+  var injuries = (typeof getUserInjuryAreas === 'function') ? getUserInjuryAreas() : [];
+  if (injuries && injuries.length) {
+    var injuryKr = injuries.map(function(a) {
+      return (typeof INJURY_AREAS !== 'undefined' && INJURY_AREAS[a] && INJURY_AREAS[a].kr) ? INJURY_AREAS[a].kr : a;
+    }).join(' · ');
+    // "어깨 이 등록돼" 같은 조사 오류를 피하려고 부위 이름 뒤에 '부상이'를 붙인다(받침 유무와 무관).
+    injuryNote =
+      '<div class="mobility-note">' +
+        '기억 노트에 <b>' + escapeHtml(injuryKr) + '</b> 부상이 등록돼 있어요. 전부 <b>통증 없는 범위</b>까지만 하세요.' +
+      '</div>';
+  }
+
+  var warnLine = seg.warn ? '<p class="mobility-warn">⚠️ ' + escapeHtml(seg.warn) + '</p>' : '';
+  var optionalTag = seg.optional ? '<span class="mobility-tag">선택</span>' : '';
+  var omittedLine = (g.omitted > 0)
+    ? '<p class="mobility-omitted">시간 수지에 맞춰 ' + g.omitted + '개 동작을 뺐어요 (' + (isWarmup ? '웜업 ' + MOBILITY_WARMUP_LIMIT : '스트레칭 ' + MOBILITY_STRETCH_LIMIT) + '동작 상한)</p>'
+    : '';
+
+  // 두 화면의 정직성 문구 — 근거가 말하는 것 이상을 약속하지 않는다.
+  var honesty = isWarmup
+    ? '길게 늘이는 정적 스트레칭은 <b>운동이 끝난 뒤</b> 하세요. 본세트 전에 한 근육을 60초 넘게 늘이면 그날 최대근력이 약 5% 떨어집니다 (Simic 2013).'
+    : '이 스트레칭이 근거로 해주는 건 <b>유연성 유지</b> 하나예요. 근육통·부상 예방·근성장 효과는 기대하지 마세요 (2025 국제 전문가 합의).';
+
+  var modeToggle = '';
+  if (isWarmup) {
+    var isShort = (g.mode === 'short');
+    modeToggle =
+      '<div class="mobility-modes">' +
+        '<button class="mobility-mode-btn' + (isShort ? '' : ' active') + '" onclick="setWarmupMode(\'standard\')">표준 6분</button>' +
+        '<button class="mobility-mode-btn' + (isShort ? ' active' : '') + '" onclick="setWarmupMode(\'short\')">짧게 3분</button>' +
+      '</div>';
+  }
+
+  return '' +
+    // 헤더
+    '<div class="px-5 pt-12" style="padding-bottom:14px;">' +
+      '<div class="flex items-center justify-between mb-3">' +
+        '<button class="session-header-btn" onclick="' + (isWarmup ? 'endSession(false)' : 'closeStretchGuide()') + '">' + icon('close', 18) + '</button>' +
+        '<div class="text-center">' +
+          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">' + (isWarmup ? '오늘의 웜업' : '정리 스트레칭') + '</p>' +
+          '<p class="text-xs font-mono accent mt-0\\.5">약 ' + totalMin + '분 · ' + (g.idx + 1) + ' / ' + segs.length + '</p>' +
+        '</div>' +
+        '<button class="session-header-btn" onclick="toggleMobilitySound()" title="소리">' + (g.soundOn === false ? '🔇' : '🔊') + '</button>' +
+      '</div>' +
+      '<div class="session-progress"><div class="session-progress-fill" style="width:' + progPct.toFixed(1) + '%"></div></div>' +
+    '</div>' +
+
+    '<div class="px-5" style="padding-bottom:150px;">' +
+
+      morningWarn +
+      injuryNote +
+
+      // 동작 이름
+      '<div class="text-center" style="margin-top:14px;">' +
+        '<p class="mobility-name">' + escapeHtml(mobilitySegmentLabel(seg)) + optionalTag + '</p>' +
+      '</div>' +
+
+      // 분량 (시간 = 카운트다운 / 횟수 = 사용자가 완료를 누름)
+      '<div class="text-center" style="margin-top:6px;">' +
+        '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">' + (isTime ? '남은 시간' : '목표 횟수') + '</p>' +
+        '<p id="mob-amount" class="font-bebas" style="font-size:72px;line-height:1;letter-spacing:1px;">' + amountText + '</p>' +
+        (isTime
+          ? '<div class="mobility-segbar"><div id="mob-seg-fill" class="mobility-segbar-fill" style="width:' + segFillPct.toFixed(1) + '%"></div></div>'
+          : '<p class="text-[10px] font-mono text-stone-600 mt-1">천천히 · 반동 없이 · 다 하면 완료를 누르세요 (약 ' + seg.sec + '초)</p>') +
+      '</div>' +
+
+      // 전환 예고 배너 (3초 전)
+      '<div id="mob-precue" class="mobility-precue" style="display:none;"></div>' +
+
+      // 자세 지시(cue) + 왜 하는지(why)
+      '<div class="card" style="margin-top:16px;">' +
+        '<p class="mobility-cue">' + escapeHtml(seg.cue) + '</p>' +
+        warnLine +
+        (seg.why ? '<p class="mobility-why">ⓘ ' + escapeHtml(seg.why) + '</p>' : '') +
+      '</div>' +
+
+      // 진행 버튼
+      // 버튼에 지금 구간 번호를 박아 둔다 — 타이머가 자동으로 넘긴 직후 도착한 늦은 탭을 무시하기 위해서다.
+      '<div class="flex gap-2" style="margin-top:14px;">' +
+        '<button class="option-card mobility-btn" onclick="mobilitySkipStep(' + g.idx + ')"><p class="text-sm font-mono text-stone-400">건너뛰기</p></button>' +
+        '<button class="option-card mobility-btn mobility-btn-primary" onclick="mobilityNext(' + g.idx + ')"><p class="text-sm font-mono accent">완료 ✓</p></button>' +
+      '</div>' +
+
+      // 다음 구간 예고
+      '<div class="mobility-next">' +
+        '<p class="text-[10px] text-stone-500">다음</p>' +
+        '<p class="text-sm font-display" style="color:#fff;">' +
+          (next ? escapeHtml(mobilitySegmentLabel(next) + ' · ' + mobilitySegmentAmount(next)) : (isWarmup ? '본운동 시작' : '마지막 동작')) +
+        '</p>' +
+      '</div>' +
+
+      omittedLine +
+      modeToggle +
+
+      '<p class="mobility-honesty">' + honesty + '</p>' +
+
+      '<button class="option-card" style="width:100%;margin-top:14px;text-align:center;padding:14px 0;" onclick="mobilitySkipAll()">' +
+        '<p class="text-sm font-mono accent">' + (isWarmup ? '웜업 건너뛰고 바로 시작 →' : '스트레칭 그만하기') + '</p>' +
+      '</button>' +
+
     '</div>';
 }
 
@@ -6520,6 +7012,11 @@ function renderTabbar() {
 // 메인 렌더
 // ═══════════════════════════════════════════════
 function render() {
+  // 복원된 웜업/스트레칭 진행상태가 깨져 있으면 먼저 정리한다(갇힘 방지).
+  mobilityRepairState();
+  // 웜업/스트레칭 가이드가 떠 있지 않으면 그 타이머·오디오·웨이크락은 확실히 정리한다.
+  if (!mobilityCurrent()) mobilityStopRuntime();
+
   // 1RM 리스트 (최우선)
   if (state.oneRMListOpen) {
     document.getElementById('app').innerHTML = renderOneRMList();
@@ -6550,13 +7047,27 @@ function render() {
     return;
   }
   
+  // 정리 스트레칭 가이드 — 완료 화면 위에 뜬다 (스트레칭 중엔 이 화면이 보여야 한다)
+  if (state.stretchGuide) {
+    document.getElementById('app').innerHTML = renderStretchGuide();
+    mobilityEnsureTicker();
+    return;
+  }
+
   // 완료 화면
   if (state.completedSession) {
     document.getElementById('app').innerHTML = renderWorkoutComplete();
     window.scrollTo(0, 0);
     return;
   }
-  
+
+  // 세션 시작 웜업 가이드 — 본운동 화면보다 먼저. warmup 이 없는 옛 저장 세션은 그냥 통과한다(하위 호환).
+  if (state.activeSession && state.activeSession.warmup && !state.activeSession.warmup.done) {
+    document.getElementById('app').innerHTML = renderWarmupGuide();
+    mobilityEnsureTicker();
+    return;
+  }
+
   // 활성 세션이 있으면 세션 화면
   if (state.activeSession) {
     document.getElementById('app').innerHTML = renderWorkoutSession();
@@ -6697,8 +7208,10 @@ function getTopLayer() {
   if (state.weeklyReviewOpen) return 'weeklyReview';
   if (state.plateauOpen) return 'plateau';
   if (state.coachChatOpen) return 'coachChat';
-  // 완료 화면 / 진행 중 세션
+  // 웜업/스트레칭 가이드 · 완료 화면 / 진행 중 세션 (render 우선순위와 동일한 순서)
+  if (state.stretchGuide) return 'stretchGuide';
   if (state.completedSession) return 'completed';
+  if (state.activeSession && state.activeSession.warmup && !state.activeSession.warmup.done) return 'warmupGuide';
   if (state.activeSession) return 'session';
   // 유산소(러닝) 세션 — RPE 입력 / 진행 중
   if (state.cardio && state.cardio.phase === 'rpe') return 'cardioRpe';
@@ -6738,6 +7251,9 @@ function navBack() {
     case 'weeklyReview': closeWeeklyReview(); break;
     case 'plateau': closePlateauDetail(); break;
     case 'coachChat': closeCoachChat(); break;
+    // 웜업/스트레칭 가이드 — 스트레칭 뒤로 = 완료 화면으로 / 웜업 뒤로 = 세션과 동일하게 종료 확인
+    case 'stretchGuide': window.closeStretchGuide(); break;
+    case 'warmupGuide': endSession(true); break;
     // 완료 화면 / 진행 세션
     case 'completed': goHome(); break;
     case 'session': endSession(true); break;        // 운동 중 뒤로 = 항상 "종료할까요?" 팝업
@@ -6872,6 +7388,8 @@ function ensureBackTrap() {
     if (state.itemDetailSheet) return;
     if (state.resetConfirming) return;
     if (state.muscleMapZoom) return;   // 자극 근육 확대 중엔 스와이프로 종목이 넘어가면 안 된다
+    if (state.stretchGuide) return;    // 웜업/스트레칭 가이드 위에서는 종목이 조용히 넘어가면 안 된다
+    if (state.activeSession.warmup && !state.activeSession.warmup.done) return;
 
     var touch = e.changedTouches[0];
     if (!touch) return;
