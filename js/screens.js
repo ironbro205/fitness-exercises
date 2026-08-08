@@ -3941,6 +3941,15 @@ window.closeStretchGuide = function() {
 function renderWarmupGuide() { return buildMobilityGuideHtml('warmup'); }
 function renderStretchGuide() { return buildMobilityGuideHtml('stretch'); }
 
+// 설명 한 줄 — 왼쪽에 짧은 라벨(준비/동작/기준), 오른쪽에 문장. 값이 없으면 줄 자체를 그리지 않는다.
+function mobilityStepLine(label, text) {
+  if (!text) return '';
+  return '<p class="mobility-step">' +
+      '<span class="mobility-step-label">' + label + '</span>' +
+      '<span class="mobility-step-text">' + escapeHtml(text) + '</span>' +
+    '</p>';
+}
+
 // 두 화면은 같은 골격을 쓰고 문구·푸터만 다르다. (카디오와는 공유하지 않는다 — 위 주석 참조)
 function buildMobilityGuideHtml(kind) {
   var cur = mobilityCurrent();
@@ -4044,16 +4053,20 @@ function buildMobilityGuideHtml(kind) {
       // 전환 예고 배너 (3초 전)
       '<div id="mob-precue" class="mobility-precue" style="display:none;"></div>' +
 
-      // 자세 지시(cue) + 왜 하는지(why)
+      // 자세 지시(준비 → 동작 → 기준) + 왜 하는지(why)
       '<div class="card" style="margin-top:16px;">' +
-        '<p class="mobility-cue">' + escapeHtml(seg.cue) + '</p>' +
+        mobilityStepLine('준비', seg.prep) +
+        mobilityStepLine('동작', seg.cue) +
+        mobilityStepLine('기준', seg.std) +
         warnLine +
         (seg.why ? '<p class="mobility-why">ⓘ ' + escapeHtml(seg.why) + '</p>' : '') +
       '</div>' +
 
       // 진행 버튼
       // 버튼에 지금 구간 번호를 박아 둔다 — 타이머가 자동으로 넘긴 직후 도착한 늦은 탭을 무시하기 위해서다.
-      '<div class="flex gap-2" style="margin-top:14px;">' +
+      // 설명이 준비·동작·기준 세 줄로 길어져서, 320px 폭 · 세로 640px 화면에선 이 줄이 접힘선 아래로 내려간다.
+      // 횟수 구간은 사용자가 "완료"를 눌러야 넘어가므로 화면 아래에 고정해 항상 손이 닿게 한다(sticky).
+      '<div class="flex gap-2 mobility-actions">' +
         '<button class="option-card mobility-btn" onclick="mobilitySkipStep(' + g.idx + ')"><p class="text-sm font-mono text-stone-400">건너뛰기</p></button>' +
         '<button class="option-card mobility-btn mobility-btn-primary" onclick="mobilityNext(' + g.idx + ')"><p class="text-sm font-mono accent">완료</p></button>' +
       '</div>' +
