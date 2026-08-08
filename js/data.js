@@ -203,12 +203,17 @@ var SESSIONS = {
     name: 'UPPER',
     description: '상체 전체 · 가슴·등·어깨·팔',
     duration: 55,
-    exerciseCount: 7,
-    setCount: 21,
+    exerciseCount: 6,
+    setCount: 18,
+    // 7종목 21세트 → 6종목 18세트로 축소.
+    // 이유: 새 휴식 권장값(중강도복합 150초·고립 120초·경량고립 90초)을 적용하면 7종목은
+    // 실측 기준 약 66분이 걸려 60분 예산을 넘긴다(docs/research/training-splits.md §2-C 조합 E·F).
+    // 뺀 종목 = '머신 시티드 숄더 프레스'. 프레스 계열 중복도가 가장 높고(체스트 프레스와 겹침),
+    // 같은 문서 §4-A의 부위별 주간 목표표에 **전면삼각 항목 자체가 없다**(측면 6·후면 5세트만 목표).
+    // 측면삼각은 아래 사이드 레터럴로 직접 커버된다.
     exercises: [
       { name: '머신 체스트 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 60 },
       { name: '랫 풀 다운', type: '머신', sets: 3, reps: '8-12', lastWeight: 50 },
-      { name: '머신 시티드 숄더 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 40 },
       { name: '머신 시티드 로우', type: '머신', sets: 3, reps: '8-12', lastWeight: 55 },
       { name: '덤벨 사이드 레터럴 레이즈', type: '덤벨', sets: 3, reps: '12-15', lastWeight: 8 },
       { name: '인클라인 덤벨 컬', type: '덤벨', sets: 3, reps: '10-12', lastWeight: 10 },
@@ -466,12 +471,87 @@ var EXERCISES_BY_PRIMARY = (function() {
 // 근거: 근비대는 넓은 반복범위에서 가능하나(Schoenfeld 2017 메타), 실무 처방은
 // 대형 프리웨이트=저반복 고중량, 고립=중고반복, 소근육(측면삼각근·종아리 등)=고반복이
 // 관절 부담·자극 효율에서 유리(RP/Helms). 재활 종목은 부하 진행 금지, 지표=통증 감소.
+// scheme  = 기본 세트법 (docs/research/set-schemes.md §2-A). 사용자가 종목별로 바꿀 수 있다(KEYS.SET_SCHEMES).
+// restSec = 세트 간 기본 휴식 (같은 문서 §3-B). 훈련자에서 3분 > 1분(Schoenfeld 2016 JSCR),
+//           고립 ≥1.5분(Helms), 재활은 비피로 목적이라 길게 쉴 이유가 없다.
 var EXERCISE_CLASS_RULES = {
-  compound_heavy:    { repMin: 5,  repMax: 8,  doubleSessions: 2, kr: '고중량 복합' },
-  compound_moderate: { repMin: 8,  repMax: 12, doubleSessions: 1, kr: '중강도 복합' },
-  isolation:         { repMin: 12, repMax: 15, doubleSessions: 1, kr: '고립' },
-  light_isolation:   { repMin: 15, repMax: 25, doubleSessions: 2, kr: '경량 고립' },
-  rehab:             { repMin: 15, repMax: 20, doubleSessions: 0, kr: '재활' }
+  compound_heavy:    { repMin: 5,  repMax: 8,  doubleSessions: 2, kr: '고중량 복합', scheme: 'top_backoff', restSec: 180 },
+  compound_moderate: { repMin: 8,  repMax: 12, doubleSessions: 1, kr: '중강도 복합', scheme: 'straight',    restSec: 150 },
+  isolation:         { repMin: 12, repMax: 15, doubleSessions: 1, kr: '고립',        scheme: 'straight',    restSec: 120 },
+  light_isolation:   { repMin: 15, repMax: 25, doubleSessions: 2, kr: '경량 고립',   scheme: 'straight',    restSec: 90  },
+  rehab:             { repMin: 15, repMax: 20, doubleSessions: 0, kr: '재활',        scheme: 'straight',    restSec: 60, lockScheme: true }
+};
+
+// ─── 세트법(세트 스킴) ────────────────────────────────────────
+// 근거 요약(docs/research/set-schemes.md §0·§1-G): 볼륨을 맞추면 세트법 간 근비대 차이는 없다
+// (Angleri 2017 CSA +7.6/+7.5/+7.8%, Sødal 2023 메타 SMD 0.155 p=0.392).
+// 그래서 "더 좋은 세트법"이 아니라 "문제에 맞는 세트법"을 배정한다:
+//  · top_backoff = 고중량에서 뒤 세트 반복 붕괴로 잃는 볼륨 로드를 감량으로 보존 (근거 낮음 — 실무 합의)
+//  · drop / myo  = 근비대는 동등하고 이득은 오직 시간(1/2~1/3). 그래서 조건부 "제안"으로만 쓴다.
+var SET_SCHEMES = {
+  straight:    { kr: '스트레이트',    short: '스트레이트', desc: '모든 세트를 같은 무게·횟수로' },
+  top_backoff: { kr: '탑세트 + 백오프', short: '탑+백오프',  desc: '가장 무거운 1세트 → 90% 무게로 2세트' },
+  drop:        { kr: '드롭세트',      short: '드롭',      desc: '마지막 세트에서 무게를 25%씩 낮춰 이어서' },
+  myo_reps:    { kr: '마이오렙',      short: '마이오렙',   desc: '마지막 세트 후 20초 쉬고 미니세트 반복' }
+};
+
+// 세트 역할 → 화면 뱃지. 값이 없으면(옛 세션 복원 등) 뱃지를 그리지 않는다.
+var SET_ROLE_KR = {
+  warmup:  '워밍업',
+  top:     '탑세트',
+  backoff: '백오프',
+  work:    '',
+  drop:    '드롭',
+  myo:     '미니'
+};
+
+// 백오프·드롭 감량 비율, 자가조절 규칙 상수 (§2-B 규칙②④ / §3-B / §3-C)
+var BACKOFF_PCT = 0.90;         // 탑세트의 90% — 실무 권장 −5~15%의 중앙값이자 5kg 격자에 깔끔히 떨어짐
+var DROP_PCT = 0.75;            // 드롭마다 −25% — Angleri 2017 DS 프로토콜(~50~75% 1RM 구간)을 2회 드롭으로 재현
+var REST_WARMUP_SEC = 45;       // 워밍업은 피로를 유발하지 않는 세트
+var REST_DROP_SEC = 10;         // 드롭 사이 = 무게 바꾸는 시간뿐(정의상 무휴식)
+var REST_MYO_SEC = 20;          // 마이오렙 미니세트 사이(원 프로토콜 = 깊은 호흡 3~5회)
+var REST_AUTOREG_BONUS_SEC = 30;// §3-C 자가조절: 직전 세트가 목표 하단 미달이면 +30초
+var REST_MAX_SEC = 240;         // 자가조절 상한
+
+// ─── 길항근 슈퍼세트 ──────────────────────────────────────────
+// 근거: Zhang 2025(Sports Med 55(4):953-975, 19연구 313명) — 세션 시간 약 −37%인데
+// 총 볼륨 로드(SMD 0.05)·근비대(SMD −0.05)·최대근력(SMD 0.10) 모두 동등. Burke 2024도 −36% 동등.
+// 단 젖산·주관적 힘듦(RPE)이 유의하게 높아 세션당 2페어까지만 자동 제안한다.
+// 페어는 반드시 **길항(서로 반대로 움직이는) 관계**여야 한다 — 같은 근육을 연달아 쓰면 볼륨 로드가 떨어진다.
+var SUPERSET_ANTAGONISTS = {
+  chest: ['lats', 'upper_back'],
+  chest_upper: ['lats', 'upper_back'],
+  chest_lower: ['lats', 'upper_back'],
+  lats: ['chest', 'chest_upper', 'chest_lower'],
+  upper_back: ['chest', 'chest_upper', 'chest_lower'],
+  biceps: ['triceps'],
+  triceps: ['biceps'],
+  quads: ['hamstrings'],
+  hamstrings: ['quads'],
+  shoulders_side: ['shoulders_rear'],
+  shoulders_rear: ['shoulders_side']
+};
+
+var SUPERSET_SWITCH_SEC = 45;      // 페어의 앞 종목을 끝내고 뒤 종목으로 이동하는 시간
+var SUPERSET_CYCLE_REST_RATIO = 0.6; // 페어 1바퀴를 돈 뒤 휴식 = 클래스 휴식 × 0.6 (최소 60초)
+var SUPERSET_MAX_PAIRS = 2;        // 세션당 자동 제안 상한 (Zhang 2025의 높은 RPE·대사 스트레스 때문)
+var SUPERSET_MIN_CYCLE_REST_SEC = 60;
+
+// 요추 축성(세로) 압박이 큰 종목. 슈퍼세트 페어에서 제외하는 데만 쓴다 —
+// 사용자가 허리디스크 보유라, 요추에 부하가 걸리는 두 종목을 쉬지 않고 번갈아 하면 안 된다
+// (docs/research/training-splits.md §2-E 주의 3 · §5-C). 목록에 없으면 'low'.
+var EXERCISE_AXIAL_LOAD = {
+  '핵 스쿼트': 'high',
+  '스미스 머신 스쿼트': 'high',
+  '바벨 스쿼트': 'high',
+  '프론트 스쿼트': 'high',
+  '데드리프트': 'high',
+  '루마니안 데드리프트': 'high',
+  '바벨 루마니안 데드리프트': 'high',
+  '스탠딩 카프 레이즈': 'high',
+  '레그 프레스': 'mid',
+  '머신 힙 쓰러스트': 'mid'
 };
 
 // 클래스 명시 지정 (휴리스틱보다 우선). 페이스 풀은 사용자 어깨 재활 목적 → rehab.
@@ -513,7 +593,7 @@ var INJURY_AREAS = {
 var EXERCISE_SAFETY = {
   '덤벨 로우': {
     caution: ['lower_back'],
-    sub: { lower_back: '랫풀다운' },
+    sub: { lower_back: '랫 풀 다운' },
     mod: { lower_back: '벤치에 손과 무릎을 확실히 지지하고 중립 척추로 반동 없이 수행하면 가능하다.' },
     why: { lower_back: '한 손·한 무릎을 벤치에 지지하면 요추 부하가 적지만, 지지 없이 하거나 반동을 쓰면 굴곡·회전 스트레스가 생긴다.' }
   },
@@ -542,7 +622,7 @@ var EXERCISE_SAFETY = {
   },
   '덤벨 숄더 프레스': {
     caution: ['lower_back', 'shoulder', 'wrist'],
-    sub: { lower_back: '머신 시티드 숄더 프레스', shoulder: '사이드 레터럴 레이즈', wrist: '숄더 프레스 머신' },
+    sub: { lower_back: '머신 시티드 숄더 프레스', shoulder: '덤벨 사이드 레터럴 레이즈', wrist: '머신 시티드 숄더 프레스' },
     mod: { lower_back: '등받이 있는 벤치에 앉아 허리를 등받이에 붙이고 수행하면 가능하다.', shoulder: '중립 그립으로 귀 높이까지만 내리는 부분 가동범위와 가벼운 무게로 수행한다.', wrist: '중립 그립(손바닥 마주보기)으로 바꾸고 무게를 낮춘다.' },
     why: { lower_back: '서거나 등받이 없이 머리 위로 밀면 요추가 과신전되며 축성 부하가 집중된다.', shoulder: '머리 위로 미는 동작은 견봉하 공간이 좁아지는 각도를 통과해 충돌·회전근개 자극 위험이 있다.', wrist: '머리 위 프레스에서 손목이 신전된 채 부하를 지지한다.' }
   },
@@ -566,7 +646,7 @@ var EXERCISE_SAFETY = {
   },
   '덤벨 인클라인 벤치 프레스': {
     caution: ['shoulder', 'wrist'],
-    sub: { shoulder: '머신 체스트 프레스', wrist: '체스트 프레스 머신' },
+    sub: { shoulder: '머신 체스트 프레스', wrist: '머신 체스트 프레스' },
     mod: { shoulder: '중립 그립과 팔꿈치가 몸통 아래로 내려가지 않는 부분 가동범위로 수행한다.', wrist: '중립에 가까운 그립으로 손목을 전완 위에 수직으로 쌓고 무게를 줄인다.' },
     why: { shoulder: '인클라인 각도에서 어깨 굴곡이 커져 견봉하 공간 부하가 평벤치보다 늘어난다.', wrist: '인클라인 각도에서도 손목 신전 상태로 축성 부하가 걸린다.' }
   },
@@ -578,7 +658,7 @@ var EXERCISE_SAFETY = {
   },
   '덤벨 프리처 컬': {
     caution: ['elbow'],
-    sub: { elbow: '해머 컬' },
+    sub: { elbow: '덤벨 해머 컬' },
     mod: { elbow: '하단에서 완전 신전 전에 멈추는 부분 가동범위로 가벼운 무게만 사용한다.' },
     why: { elbow: '패드가 상완을 고정한 채 팔꿈치 완전 신전 부근에서 굴곡근 힘줄에 최대 인장 스트레스가 걸리는 구간이 생긴다.' }
   },
@@ -627,7 +707,7 @@ var EXERCISE_SAFETY = {
   },
   '레그 프레스': {
     caution: ['lower_back', 'knee'],
-    sub: { lower_back: '레그 익스텐션' },
+    sub: { lower_back: '머신 레그 익스텐션' },
     mod: { lower_back: '엉덩이가 시트에서 뜨지 않는 범위로 가동범위를 제한하고 무게를 낮추면 가능하다.', knee: '무릎 굴곡을 90도 이내로 제한하고 발판 위쪽에 발을 두어 통증 없는 중량으로 수행한다.' },
     why: { lower_back: '깊은 굴곡 구간에서 골반이 시트에서 말려 올라가며 요추 굴곡에 큰 압박이 실릴 수 있다.', knee: '깊은 굴곡과 고중량에서 슬개대퇴·반월판 압박이 크게 증가한다.' }
   },
@@ -639,13 +719,13 @@ var EXERCISE_SAFETY = {
   },
   '리버스 그립 랫 풀 다운': {
     caution: ['elbow'],
-    sub: { elbow: '랫풀다운' },
+    sub: { elbow: '랫 풀 다운' },
     mod: { elbow: '무게를 낮추고 통증이 없으면 유지하되 불편하면 중립·회내 그립으로 바꾼다.' },
     why: { elbow: '고정된 회외 그립이 내측 상과 굴곡근 기시부에 스트레스를 주지만 부하 조절이 가능해 관리 여지가 있다.' }
   },
   '리버스 브이 스쿼트': {
     caution: ['lower_back', 'knee'],
-    sub: { lower_back: '레그 익스텐션', knee: '레그 프레스' },
+    sub: { lower_back: '머신 레그 익스텐션', knee: '레그 프레스' },
     mod: { lower_back: '가동범위를 줄이고 무게를 낮춰 골반 후방경사 없이 수행하면 가능하다.', knee: '가동범위를 얕게 제한하고 가벼운 중량으로 수행한다.' },
     why: { lower_back: '등 지지가 있으나 머신 축을 따라 요추에 압박 부하가 전달된다.', knee: '머신 각도 특성상 무릎 굴곡이 깊어지면 슬개대퇴 압박이 커진다.' }
   },
@@ -665,7 +745,7 @@ var EXERCISE_SAFETY = {
   },
   '머신 시티드 숄더 프레스': {
     caution: ['shoulder'],
-    sub: { shoulder: '사이드 레터럴 레이즈' },
+    sub: { shoulder: '덤벨 사이드 레터럴 레이즈' },
     mod: { shoulder: '시트를 낮춰 시작점을 귀 높이 이상으로 올리고 통증 없는 부분 가동범위·가벼운 무게로 한다.' },
     why: { shoulder: '오버헤드 프레스 궤적이 견봉하 충돌 각도를 통과하고 머신 고정 궤적이 견갑 움직임을 제한한다.' }
   },
@@ -721,7 +801,7 @@ var EXERCISE_SAFETY = {
   },
   '바벨 컬': {
     contra: ['wrist', 'elbow'],
-    sub: { wrist: '해머 컬', elbow: '해머 컬' },
+    sub: { wrist: '덤벨 해머 컬', elbow: '덤벨 해머 컬' },
     why: { wrist: '일자 바가 손목을 완전 회외 위치에 고정해 굴곡건과 손목 관절에 비틀림 스트레스를 피할 수 없게 강제한다.', elbow: '곧은 바의 고정된 완전 회외 그립이 내측 상과의 굴곡근·회내근 기시부에 비틀림 스트레스를 강제해 골프 엘보를 직접 자극한다.' }
   },
   '바벨 힙 쓰러스트': {
@@ -743,7 +823,7 @@ var EXERCISE_SAFETY = {
   },
   '브이 스쿼트': {
     caution: ['lower_back', 'knee'],
-    sub: { lower_back: '레그 익스텐션', knee: '레그 프레스' },
+    sub: { lower_back: '머신 레그 익스텐션', knee: '레그 프레스' },
     mod: { lower_back: '골반이 말리지 않는 깊이까지만, 중간 무게로 수행하면 가능하다.', knee: '발을 발판 위쪽에 두고 얕은 깊이·가벼운 중량으로 수행한다.' },
     why: { lower_back: '패드가 상체를 지지해 몸통 굴곡 모멘트는 작지만, 깊은 하강에서 골반이 말리면 요추 굴곡+압박이 생긴다.', knee: '머신 축이 무릎의 전방 이동을 키워 슬개대퇴 압박이 커진다.' }
   },
@@ -754,13 +834,13 @@ var EXERCISE_SAFETY = {
   },
   '숄더 프레스 머신': {
     caution: ['shoulder'],
-    sub: { shoulder: '사이드 레터럴 레이즈' },
+    sub: { shoulder: '덤벨 사이드 레터럴 레이즈' },
     mod: { shoulder: '시트를 낮춰 시작점을 귀 높이 이상으로 올리고 통증 없는 부분 가동범위·가벼운 무게로 한다.' },
     why: { shoulder: '오버헤드 프레스 궤적이 견봉하 충돌 각도를 통과하고 머신 고정 궤적이 견갑 움직임을 제한한다.' }
   },
   '스미스 머신 스쿼트': {
     caution: ['lower_back', 'shoulder', 'knee'],
-    sub: { lower_back: '레그 익스텐션', shoulder: '레그 프레스', knee: '레그 프레스' },
+    sub: { lower_back: '머신 레그 익스텐션', shoulder: '레그 프레스', knee: '레그 프레스' },
     mod: { lower_back: '발을 앞에 두고 얕은 깊이·가벼운 무게로 몸통을 세워 수행하면 요추 부하를 크게 줄일 수 있다.', shoulder: '그립 폭을 넓게 잡아 어깨 외회전 요구를 줄이고 통증이 있으면 레그 프레스로 바꾼다.', knee: '발을 약간 앞쪽에 두어 무릎 전방 이동을 줄이고 깊이를 파라렐 이내로 제한한다.' },
     why: { lower_back: '궤도가 고정돼 있어도 어깨에 얹은 중량이 요추 축성 압박을 만든다.', shoulder: '바벨 스쿼트와 동일하게 바를 받치는 랙 자세가 어깨 끝범위 외회전·외전을 강제해 손상된 회전근개에 통증을 유발한다.', knee: '고정 궤도에서 무릎 굴곡이 깊어지면 슬개대퇴 압박·전단 부하가 커진다.' }
   },
@@ -778,7 +858,7 @@ var EXERCISE_SAFETY = {
   },
   '스미스 머신 오버헤드 프레스': {
     caution: ['lower_back', 'shoulder', 'wrist'],
-    sub: { lower_back: '머신 시티드 숄더 프레스', shoulder: '사이드 레터럴 레이즈', wrist: '머신 시티드 숄더 프레스' },
+    sub: { lower_back: '머신 시티드 숄더 프레스', shoulder: '덤벨 사이드 레터럴 레이즈', wrist: '머신 시티드 숄더 프레스' },
     mod: { lower_back: '등받이 있는 벤치에 앉아 허리를 등받이에 붙이고 수행하면 가능하다.', shoulder: '고정 궤적을 이용해 통증 없는 구간까지만 내리는 부분 가동범위로 제한하고 무게를 낮춘다.', wrist: '무게를 낮추고 손목을 전완 바로 위에 수직으로 세워 손목 보호대를 착용한다.' },
     why: { lower_back: '서서 하면 갈비뼈가 들리며 요추가 과신전되기 쉽다. 다만 궤도가 고정돼 있어 등받이에 앉으면 부하를 통제하기 쉽다.', shoulder: '오버헤드 궤적이 견봉하 충돌 각도를 통과한다. 대신 궤적이 고정돼 통증 없는 구간에서 정확히 끊기는 프리웨이트보다 쉽다.', wrist: '고정 바를 쥔 채 머리 위로 미는 구조라 손목이 신전 위치에서 축성 부하를 받는다.' }
   },
@@ -819,7 +899,7 @@ var EXERCISE_SAFETY = {
   },
   '어시스트 풀업': {
     caution: ['shoulder', 'wrist', 'elbow'],
-    sub: { shoulder: '랫풀다운', wrist: '랫풀다운', elbow: '랫풀다운' },
+    sub: { shoulder: '랫 풀 다운', wrist: '랫 풀 다운', elbow: '랫 풀 다운' },
     mod: { shoulder: '보조 중량을 충분히 높여 부하를 크게 줄이고 통증 없는 가동범위에서만 당긴다.', wrist: '보조 중량을 높여 매달리는 부하를 줄이고 스트랩으로 악력 의존을 낮춘다.', elbow: '보조 중량을 높여 팔꿈치 굴곡 부하를 줄이고 통증 없는 범위에서만 수행한다.' },
     why: { shoulder: '맨몸 풀업과 같은 오버헤드 자세지만 보조 중량으로 부하를 정량 조절할 수 있어 통증 없는 구간을 찾기 쉽다 — 풀업의 권장 수정법 그 자체다.', wrist: '매달린 손목에 걸리는 견인 부하가 남지만 보조 중량만큼 줄어든다.', elbow: '팔꿈치 굴곡 부하와 악력 요구가 남지만 보조 중량으로 상과 기시부 부담을 낮출 수 있다.' }
   },
@@ -841,7 +921,7 @@ var EXERCISE_SAFETY = {
   },
   '이지 바 프리처 컬': {
     caution: ['elbow'],
-    sub: { elbow: '해머 컬' },
+    sub: { elbow: '덤벨 해머 컬' },
     mod: { elbow: '하단에서 완전 신전 전에 멈추는 부분 가동범위로 가벼운 무게만 사용한다.' },
     why: { elbow: '패드가 상완을 고정한 채 팔꿈치 완전 신전 부근에서 굴곡근 힘줄에 최대 인장 스트레스가 걸리는 구간이 생긴다.' }
   },
@@ -851,13 +931,13 @@ var EXERCISE_SAFETY = {
   },
   '인클라인 덤벨 컬': {
     caution: ['shoulder', 'elbow'],
-    sub: { shoulder: '덤벨 얼터네이트 컬', elbow: '해머 컬' },
+    sub: { shoulder: '덤벨 얼터네이트 컬', elbow: '덤벨 해머 컬' },
     mod: { shoulder: '벤치 등받이를 더 세워 어깨가 뒤로 젖혀지는 각도를 줄인다.', elbow: '하단 완전 신전 구간을 제한하고 손목을 중립에 가깝게 유지하며 가볍게 수행한다.' },
     why: { shoulder: '어깨 신전 상태의 스트레치가 견관절을 지나는 이두 장두 힘줄과 전방 어깨에 부담을 준다.', elbow: '팔이 몸 뒤로 신장된 위치에서 원위 이두·팔꿈치 굴곡근에 긴 근길이 인장 스트레스가 커진다.' }
   },
   '인클라인 덤벨 프레스': {
     caution: ['shoulder', 'wrist'],
-    sub: { shoulder: '머신 체스트 프레스', wrist: '체스트 프레스 머신' },
+    sub: { shoulder: '머신 체스트 프레스', wrist: '머신 체스트 프레스' },
     mod: { shoulder: '중립 그립과 팔꿈치가 몸통 아래로 내려가지 않는 부분 가동범위로 수행한다.', wrist: '중립에 가까운 그립으로 손목을 전완 위에 수직으로 쌓고 무게를 줄인다.' },
     why: { shoulder: '인클라인 각도에서 어깨 굴곡이 커져 견봉하 공간 부하가 평벤치보다 늘어난다.', wrist: '인클라인 각도에서도 손목 신전 상태로 축성 부하가 걸린다.' }
   },
@@ -869,7 +949,7 @@ var EXERCISE_SAFETY = {
   '친업': {
     contra: ['elbow'],
     caution: ['shoulder', 'wrist'],
-    sub: { shoulder: '리버스 그립 랫 풀 다운', wrist: '랫 풀 다운', elbow: '랫풀다운' },
+    sub: { shoulder: '리버스 그립 랫 풀 다운', wrist: '랫 풀 다운', elbow: '랫 풀 다운' },
     mod: { shoulder: '밴드나 어시스트로 부하를 줄이고 통증 없는 가동범위에서만 당긴다.', wrist: '어시스트 머신이나 밴드로 부하를 줄여 수행한다.' },
     why: { shoulder: '회외 그립이라 부담이 덜하지만 여전히 체중 전체가 오버헤드 자세에 걸려 부하 조절이 어렵다.', wrist: '체중 매달리기로 손목과 굴곡건에 큰 견인 부하가 걸리며 회외 그립이 부담을 더한다.', elbow: '회외 고정 그립으로 체중 전체를 당기며 강한 악력이 동반되어 내측 상과 굴곡근 기시부에 고부하가 걸린다.' }
   },
@@ -888,7 +968,7 @@ var EXERCISE_SAFETY = {
   '케이블 오버헤드 트라이셉스 익스텐션': {
     contra: ['elbow'],
     caution: ['shoulder'],
-    sub: { shoulder: '트라이셉스 푸시다운', elbow: '케이블 푸시 다운' },
+    sub: { shoulder: '케이블 푸시 다운', elbow: '케이블 푸시 다운' },
     mod: { shoulder: '가벼운 무게로 통증 없는 범위에서 하고, 아프면 팔을 몸 옆에 두는 푸시다운으로 바꾼다.' },
     why: { shoulder: '팔을 머리 위로 고정한 자세 자체가 어깨 최대 굴곡이라 충돌증후군에서 통증을 유발하기 쉽다.', elbow: '팔꿈치가 최대 굴곡·삼두가 최대 신장된 위치에서 저항을 받아 팔꿈치 힘줄에 인장 스트레스가 가장 큰 삼두 변형이다.' }
   },
@@ -899,7 +979,7 @@ var EXERCISE_SAFETY = {
   },
   '케이블 컬': {
     caution: ['wrist', 'elbow'],
-    sub: { wrist: '해머 컬', elbow: '해머 컬' },
+    sub: { wrist: '덤벨 해머 컬', elbow: '덤벨 해머 컬' },
     mod: { wrist: '로프나 개별 손잡이로 바꿔 손목이 자유롭게 회전할 수 있게 한다.', elbow: '로프나 싱글 핸들로 바꿔 중립에 가까운 그립으로 가벼운 무게만 사용한다.' },
     why: { wrist: '일자 바 사용 시 바벨 컬처럼 손목이 회외 위치에 고정된다.', elbow: '스트레이트 바 어태치먼트 사용 시 바벨 컬과 같은 고정 회외 그립이 내측 상과 굴곡근 기시부를 자극하지만 어태치먼트와 부하를 바꿀 수 있어 관리 가능하다.' }
   },
@@ -970,13 +1050,13 @@ var EXERCISE_SAFETY = {
   },
   '풀업': {
     caution: ['shoulder', 'wrist', 'elbow'],
-    sub: { shoulder: '랫풀다운', wrist: '랫풀다운', elbow: '랫풀다운' },
+    sub: { shoulder: '랫 풀 다운', wrist: '랫 풀 다운', elbow: '랫 풀 다운' },
     mod: { shoulder: '밴드나 어시스트로 부하를 줄이고 통증 없는 가동범위에서만 당긴다.', wrist: '어시스트 머신이나 밴드로 부하를 크게 줄이고 통증 없는 범위에서 수행한다.', elbow: '밴드 보조로 부하를 줄이고 통증 없는 범위에서만 수행한다.' },
     why: { shoulder: '체중 전체가 어깨 최대 굴곡(오버헤드) 자세에 걸려 손상된 회전근개에 부하 조절이 불가능하다.', wrist: '체중 전체가 매달린 손목과 악력에 실려 손상 부위에 큰 견인·압박 부하가 간다.', elbow: '체중 부하의 팔꿈치 굴곡과 강한 악력 요구가 상과 기시부 힘줄을 자극할 수 있다.' }
   },
   '풀오버': {
     caution: ['shoulder'],
-    sub: { shoulder: '랫풀다운' },
+    sub: { shoulder: '랫 풀 다운' },
     mod: { shoulder: '팔꿈치를 살짝 굽히고 머리 위 끝범위 전에 멈추는 짧은 가동범위로 수행한다.' },
     why: { shoulder: '머리 뒤 끝범위까지 어깨를 굴곡시키며 부하를 거는 동작이라 관절낭과 회전근개가 과신장된다.' }
   },
@@ -1009,7 +1089,7 @@ var EXERCISE_SAFETY = {
   },
   '핵 스쿼트': {
     caution: ['lower_back', 'knee'],
-    sub: { lower_back: '레그 익스텐션', knee: '레그 프레스' },
+    sub: { lower_back: '머신 레그 익스텐션', knee: '레그 프레스' },
     mod: { lower_back: '골반이 말리지 않는 깊이까지만, 중간 무게로 수행하면 가능하다.', knee: '발을 발판 위쪽에 두고 얕은 깊이·가벼운 중량으로 수행한다.' },
     why: { lower_back: '등 패드가 척추를 지지하지만 깊은 하강에서 골반이 말리면 요추 굴곡+압박이 발생한다.', knee: '등판 고정 구조가 무릎의 전방 이동을 키워 슬개대퇴 압박 스트레스가 높다.' }
   },
@@ -1025,7 +1105,7 @@ var EXERCISE_SAFETY = {
   },
   '이지 바 리버스 컬': {
     caution: ['wrist', 'elbow'],
-    sub: { wrist: '해머 컬', elbow: '해머 컬' },
+    sub: { wrist: '덤벨 해머 컬', elbow: '덤벨 해머 컬' },
     mod: { wrist: 'EZ 바의 기울어진 그립을 써서 손목 각도 부담을 줄이고 무게를 크게 낮춘다.', elbow: '가벼운 무게로 반동 없이 수행하고, 통증이 있으면 중립 그립(해머 컬)으로 바꾼다.' },
     why: { wrist: '회내 그립으로 바를 들어 올려 손목 신전근에 지속적인 등척성 부하가 걸린다.', elbow: '전완 신전근 기시부(외측 상과)를 직접 겨냥하는 종목이라 테니스 엘보 증상에서 통증을 유발하기 쉽다. 반대로 통증이 없다면 같은 이유로 재활 강화 종목이 되기도 한다.' }
   },
@@ -1039,7 +1119,7 @@ var EXERCISE_SAFETY = {
   },
   'T 바 로우': {
     caution: ['lower_back', 'wrist'],
-    sub: { lower_back: '머신 시티드 로우', wrist: '시티드 로우 머신' },
+    sub: { lower_back: '머신 시티드 로우', wrist: '머신 시티드 로우' },
     mod: { lower_back: '가슴 패드가 있는 T바 머신(체스트 서포티드)을 쓰고, 없으면 상체를 덜 숙인 각도에서 중립 척추를 유지한 채 중량을 낮춰 수행하면 가능하다.', wrist: '중립 그립 손잡이와 스트랩을 사용하고 중량을 낮춘다.' },
     why: { lower_back: '벤트오버 자세에서 고중량을 당기는 구조라 바벨 로우와 같은 계열의 등척성 요추 부하가 걸린다. 랜드마인 방식이라고 허리 부담이 저절로 줄지는 않으므로(전통 RDL과 랜드마인 RDL은 요추 가동범위·근활성에 차이 없음), 부담을 실제로 줄이는 건 가슴 패드 지지뿐이다.', wrist: '고중량을 손으로 지지하는 로우로 손목·악력에 지속적 부하가 걸린다.' }
   }
@@ -1115,7 +1195,9 @@ var COACH_KNOWLEDGE =
   '- 반복 범위: 약 5~30회 모두 실패에 근접하면 근비대 효과는 동등 (IUSCA 2021). 저반복=근력에 유리, 고반복=관절 부담↓·펌프.\n' +
   '- 신장 강조(스트레치): 근육이 늘어난 위치에서 부하가 큰 종목/가동범위가 근비대에 유리. 긴 근육 길이가 핵심이며 신장 부분반복은 전가동과 같거나 우월 (Maeo 2023, 2024~25 메타 재확인).\n' +
   '- 머신=프리웨이트: 근비대 효과는 동등. 환경/안전/안정성에 맞춰 고르면 됨 (Schwanbeck 2020).\n' +
-  '- 휴식: 복합 2~3분, 고립 1~2분. 너무 짧으면 다음 세트 수행 볼륨이 떨어져 손해 (Schoenfeld 2016).\n' +
+  '- 휴식: 앱 기본값은 고중량복합 180초 · 중강도복합 150초 · 고립 120초 · 경량고립 90초 · 재활 60초. 훈련 경험자에서 3분 > 1분 (Schoenfeld 2016 JSCR). 단 90초 초과의 추가 이득은 불확실하다 (Frontiers 2024 베이지안 메타) — 긴 휴식이 작동하는 메커니즘은 "다음 세트 반복 수를 지켜주는 것"이라, 직전 세트가 목표 하단을 못 채웠을 때만 +30초를 더한다.\n' +
+  '- 세트법: 볼륨이 같으면 스트레이트·피라미드·드롭세트의 근비대는 동등 (Angleri 2017 / Sødal 2023 메타 SMD 0.155 p=0.392). 그래서 앱은 "더 좋은 세트법"을 찾지 않고 문제에 맞춰 배정한다 — 고중량 복합만 탑세트+백오프(뒤 세트 반복 붕괴로 잃는 볼륨 로드를 보존), 나머지는 스트레이트. 드롭세트·마이오렙의 이득은 오직 시간(1/2~1/3)이라 시간 압박이 있을 때만 제안한다.\n' +
+  '- 길항근 슈퍼세트: 세션 시간 약 −37%인데 볼륨 로드·근비대·근력 모두 동등 (Zhang 2025 메타 19연구, Burke 2024). 주 5일 × 60분 제약에서 볼륨을 늘릴 수 있는 가장 큰 지렛대. 단 체감 힘듦·대사 스트레스가 높아 세션당 2페어까지.\n' +
   '- 점진적 과부하: 더블 프로그레션이 기본. 목표 횟수 상단을 2세션 연속 달성하면 무게 +한 칸(장비 단위: 덤벨 2kg·머신·케이블·바벨·스미스 5kg), 횟수는 하단으로 리셋.\n' +
   '- 주기화: 5주 사이클(빌드 4주 + 디로드 1주) 같은 구조. 주차는 날짜가 아니라 그 주 목표 운동 완료로 넘어감.\n\n' +
 

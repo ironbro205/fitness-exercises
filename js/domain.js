@@ -218,7 +218,11 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
   }
 
   // 재활: 무게 0(밴드)도 유효 — reps만 있으면 인정
+  // 드롭·마이오렙 세트는 **마지막 워킹세트의 연장**이지 독립 세트가 아니다. 진행 판정에서 뺀다 —
+  // 특히 마이오렙 미니세트는 본 세트와 무게가 같고 반복이 5회라, 그대로 두면 아래 reachedTopAt이
+  // "모든 세트가 상단 반복"을 영원히 만족하지 못해 증량이 통째로 막힌다.
   var workingSets = last.sets.filter(function(s) {
+    if (s.role === 'drop' || s.role === 'myo') return false;
     return (cls === 'rehab' ? s.weight >= 0 : s.weight > 0) && s.reps > 0;
   });
   if (!workingSets.length) return null;
@@ -255,8 +259,15 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
     };
   }
 
+  // 탑세트+백오프 스킴에서 백오프(탑의 90%)는 무게가 달라 여기서 자동으로 빠진다 →
+  // 증량 기준이 "3세트 전부 상단" 에서 "탑세트가 상단" 으로 느슨해진다. 이는 탑세트 방식의
+  // 통상 관행과 일치하며, compound_heavy는 doubleSessions:2(2세션 연속 요구)가 완충한다.
+  // (docs/research/set-schemes.md §2-B ⚠️ · §5-D — 의도된 변경)
   function reachedTopAt(perf, weight) {
-    var ws = perf.sets.filter(function(s) { return s.weight === weight && s.reps > 0 && !s.isWarmup; });
+    var ws = perf.sets.filter(function(s) {
+      if (s.role === 'drop' || s.role === 'myo') return false;
+      return s.weight === weight && s.reps > 0 && !s.isWarmup;
+    });
     return ws.length > 0 && ws.every(function(s) { return s.reps >= topReps; });
   }
 
@@ -393,7 +404,8 @@ function calculateRollingMax1RM(exerciseName, windowSessions) {
 // · 수행 기록 있음: 추천 무게 그대로 (유지=지난 실제 무게, 증량=스냅된 새 무게 — 5kg처럼 격자 밖 무게도 보존)
 // · 기록 없음: AI/템플릿 제안 무게를 장비 단위로 스냅
 // · 횟수: 유지/재활이면 지난 세션 최고 반복(범위로 클램프) = "지난 기록에 도전", 증량이면 범위 하단부터 다시
-function getSessionSetPlan(exerciseName, fallbackWeight, targetReps) {
+// · sets: 세트법(스킴)에 따라 만들어진 세트 배열 — opts = { sets: 워킹세트 수, warmup: bool }
+function getSessionSetPlan(exerciseName, fallbackWeight, targetReps, opts) {
   var range = clampRepsToClass(exerciseName, targetReps);
   var prog = getProgressiveRecommendation(exerciseName, targetReps);
 
@@ -412,7 +424,338 @@ function getSessionSetPlan(exerciseName, fallbackWeight, targetReps) {
     reps = Math.min(Math.max(lastMax, range.low), range.high);
   }
 
-  return { weight: weight, reps: reps, repRange: range, prog: prog };
+  var scheme = effectiveSetScheme(exerciseName, weight);
+  return {
+    weight: weight, reps: reps, repRange: range, prog: prog,
+    scheme: scheme,
+    // 세트 배열. 기존 4개 필드는 그대로 둔다(하위호환) — 호출부가 sets를 쓰지 않아도 깨지지 않는다.
+    sets: buildSchemeSets(exerciseName, weight, reps, range, scheme, opts)
+  };
+}
+
+// 실제로 적용되는 세트법. 무게를 모르는 종목(맨몸·미측정)은 감량 자체가 불가능하므로
+// 탑+백오프·드롭이 성립하지 않는다 → 스트레이트로 접어서 **화면 표기와 실제 세트를 일치시킨다**.
+function effectiveSetScheme(exerciseName, weight) {
+  var scheme = getSetScheme(exerciseName);
+  if ((!weight || weight <= 0) && (scheme === 'top_backoff' || scheme === 'drop')) return 'straight';
+  return scheme;
+}
+
+// ═══════════════════════════════════════════════
+// 세트 스킴 (세트 구성) — docs/research/set-schemes.md
+// ═══════════════════════════════════════════════
+// 핵심 사실: 볼륨을 맞추면 세트법 간 근비대 차이는 **없다**(Angleri 2017 / Sødal 2023 메타).
+// 그래서 여기 로직의 목적은 "더 좋은 세트법 찾기"가 아니라 **문제에 맞는 세트법 배정**이다.
+//  · 고중량 복합 = 탑세트+백오프 → 뒤 세트 반복 붕괴로 잃는 볼륨 로드를 감량으로 보존
+//  · 그 외        = 스트레이트 유지 → 근거가 뒷받침하는 가장 단순한 안
+//  · 드롭·마이오렙 = 근비대 동등, 이득은 오직 시간 → 조건부 "제안"으로만(§4)
+
+// 이 종목에 적용할 세트법. 사용자 지정(종목별 override) > 클래스 기본값.
+// 재활은 lockScheme — 무게 진행 금지 원칙이라 드롭·마이오렙을 절대 허용하지 않는다.
+function getSetScheme(exerciseName) {
+  var rules = EXERCISE_CLASS_RULES[getExerciseClass(exerciseName)];
+  if (rules.lockScheme) return rules.scheme;
+  var overrides = storage.get(KEYS.SET_SCHEMES, {}) || {};
+  var picked = overrides[canonicalExerciseName(exerciseName)] || overrides[exerciseName];
+  return (picked && SET_SCHEMES[picked]) ? picked : rules.scheme;
+}
+
+// 사용자가 종목별 세트법을 바꾼다. 클래스 기본값과 같으면 override를 지운다(기본값 변경을 따라가도록).
+function setSetSchemeOverride(exerciseName, scheme) {
+  var rules = EXERCISE_CLASS_RULES[getExerciseClass(exerciseName)];
+  if (rules.lockScheme || !SET_SCHEMES[scheme]) return false;
+  var overrides = storage.get(KEYS.SET_SCHEMES, {}) || {};
+  var key = canonicalExerciseName(exerciseName);
+  if (scheme === rules.scheme) delete overrides[key];
+  else overrides[key] = scheme;
+  storage.set(KEYS.SET_SCHEMES, overrides);
+  return true;
+}
+
+// 세트법 선택지 (세션 화면 "세트법 바꾸기" 시트용).
+// 재활은 스트레이트 하나뿐. 나머지는 4개를 모두 고를 수 있되, 근거상 권장 여부를 warn으로 알려준다
+// — 자동 배정은 앱이 하지만 최종 선택은 사용자 몫이라는 게 이 기능의 요구사항이다.
+function getSetSchemeOptions(exerciseName) {
+  var cls = getExerciseClass(exerciseName);
+  var rules = EXERCISE_CLASS_RULES[cls];
+  var current = getSetScheme(exerciseName);
+  if (rules.lockScheme) {
+    return [{ id: 'straight', kr: SET_SCHEMES.straight.kr, desc: '재활 종목은 스트레이트 고정이에요 (무게 진행 금지)',
+              current: true, suggested: true, warn: '' }];
+  }
+  var machineOrCable = isMachineOrCableExercise(exerciseName);
+  return ['straight', 'top_backoff', 'drop', 'myo_reps'].map(function(id) {
+    var warn = '';
+    if (id === 'top_backoff' && cls !== 'compound_heavy') warn = '고중량 복합에 맞춘 방식이에요';
+    if (id === 'drop' && !machineOrCable) warn = '프리웨이트에선 위험해요 — 마이오렙을 권해요';
+    if (id === 'drop' && cls === 'compound_heavy') warn = '고중량 복합에는 권하지 않아요 (피로 대비 이득 없음)';
+    if (id === 'myo_reps' && cls === 'compound_heavy') warn = '고중량 복합에는 권하지 않아요';
+    return {
+      id: id, kr: SET_SCHEMES[id].kr, desc: SET_SCHEMES[id].desc,
+      current: id === current, suggested: id === rules.scheme, warn: warn
+    };
+  });
+}
+
+// 장비가 머신·케이블인가 (드롭세트 조건 §4-A②: 안정성이 높아 실패 지점에서도 부상 위험이 낮다 — Sødal 2023)
+function isMachineOrCableExercise(exerciseName) {
+  var eq = getExerciseEquipment(exerciseName);
+  if (!eq) return false;
+  if (eq === 'cable') return true;
+  if (eq === 'barbell' || eq === 'dumbbell' || eq === 'bodyweight' || eq === 'smith') return false;
+  return true; // 나머지 GYM_EQUIPMENT id는 전부 머신
+}
+
+// 클래스별 기본 휴식(초). 옛 로직은 종목 이름 키워드 배열로 복합/고립을 따로 판정해
+// getExerciseClass와 어긋날 수 있었다 — 판정 원천을 클래스 하나로 통합한다.
+function getExerciseRestSec(exerciseName) {
+  return EXERCISE_CLASS_RULES[getExerciseClass(exerciseName)].restSec;
+}
+
+// 세트 배열 생성. opts = { sets: 워킹세트 수, warmup: 워밍업 포함 여부 }
+// 무게를 모르는 종목(맨몸·미측정)은 감량 자체가 불가능하므로 탑+백오프·드롭을 스트레이트로 접는다.
+function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
+  var workingCount = Math.max(1, (opts && opts.sets) || 3);
+  var wantWarmup = !opts || opts.warmup !== false;
+  var classRest = getExerciseRestSec(exerciseName);
+  var cls = getExerciseClass(exerciseName);
+  var rows = [];
+
+  if (!weight || weight <= 0) {
+    if (scheme === 'top_backoff' || scheme === 'drop') scheme = 'straight';
+  }
+
+  // ── 워밍업 (§2-B 규칙①) — 자극이 아니라 준비이므로 저부하 고반복은 피로만 준다.
+  //    고립 이하는 첫 워킹세트가 자체 워밍업 역할을 하므로 넣지 않는다.
+  //    맨몸 복합(풀업 등)은 무게를 낮출 수 없으니 램프 대신 1세트만 (기존 동작 유지).
+  if (wantWarmup) {
+    if (weight > 0 && cls === 'compound_heavy') {
+      rows.push(warmupRow(snapWeightToEquipment(weight * 0.50, exerciseName), 8));
+      rows.push(warmupRow(snapWeightToEquipment(weight * 0.75, exerciseName), 4));
+    } else if (weight > 0 && cls === 'compound_moderate') {
+      rows.push(warmupRow(snapWeightToEquipment(weight * 0.55, exerciseName), 8));
+    } else if (!weight && (cls === 'compound_heavy' || cls === 'compound_moderate')) {
+      rows.push(warmupRow(null, 8));
+    }
+  }
+
+  // ── 워킹세트
+  if (scheme === 'top_backoff') {
+    // 탑세트 1 + 백오프 (탑의 90%). 백오프도 **같은 반복 목표**를 쓰는 것이 이 방식의 핵심 —
+    // 탑에서 못 채운 반복을 백오프에서 채우는 것이 곧 볼륨 로드 보존 메커니즘이다.
+    var backoffW = reduceWeight(weight, BACKOFF_PCT, exerciseName);
+    rows.push(workRow('top', weight, reps, classRest, '1-2'));
+    for (var b = 1; b < workingCount; b++) rows.push(workRow('backoff', backoffW, reps, classRest, '2-3'));
+  } else {
+    var rir = (cls === 'compound_heavy' || cls === 'compound_moderate') ? '2-3' : '0-2';
+    for (var i = 0; i < workingCount; i++) rows.push(workRow('work', weight, reps, classRest, rir));
+  }
+
+  // ── 마지막 워킹세트에만 붙는 확장 (§2-B 규칙④⑤)
+  var lastIdx = rows.length - 1;
+  if (scheme === 'drop' && lastIdx >= 0) {
+    rows[lastIdx].rest = REST_DROP_SEC;                     // 드롭 사이는 무게 바꾸는 시간뿐
+    var d1 = reduceWeight(weight, DROP_PCT, exerciseName);
+    var d2 = reduceWeight(d1, DROP_PCT, exerciseName);
+    rows.push(workRow('drop', d1, range.high, REST_DROP_SEC, '0'));
+    rows.push(workRow('drop', d2, range.high, classRest, '0'));
+  } else if (scheme === 'myo_reps' && lastIdx >= 0) {
+    rows[lastIdx].rest = REST_MYO_SEC;                      // 활성화 세트 후 20초
+    for (var m = 0; m < 3; m++) {
+      rows.push(workRow('myo', weight, 5, m === 2 ? classRest : REST_MYO_SEC, '0'));
+    }
+  }
+
+  return rows;
+
+  function warmupRow(w, r) {
+    return { weight: w, reps: r, completed: false, isWarmup: true, role: 'warmup', rest: REST_WARMUP_SEC };
+  }
+  function workRow(role, w, r, rest, rirBand) {
+    return { weight: w, reps: r, completed: false, isWarmup: false, role: role, rest: rest, rir: rirBand };
+  }
+}
+
+// 실제 휴식 시간 결정 (세트 완료 시 호출).
+// 우선순위: 세트가 지정한 rest > AI가 지정한 exercise.rest > 클래스 기본값
+// 그 위에 §3-C 자가조절: **직전 세트가 목표 반복 하단을 못 채웠으면 +30초(상한 240초)**.
+// 90초를 넘는 휴식의 직접 이득은 근거가 약하지만(Frontiers 2024), 긴 휴식이 작동하는
+// 메커니즘은 일관되게 "반복 수를 지켜주는 것"이다 → 고정 시간을 늘리기보다 반복이 실제로
+// 떨어졌을 때만 늘리는 쪽이 더 정확하고 시간도 아낀다 (Israetel/JTS 원칙의 코드화).
+function resolveRestSec(exercise, set) {
+  if (!set) return getExerciseRestSec(exercise ? exercise.name : '');
+  if (set.isWarmup) return (typeof set.rest === 'number' && set.rest > 0) ? set.rest : REST_WARMUP_SEC;
+
+  var base;
+  if (typeof set.rest === 'number' && set.rest > 0) {
+    base = set.rest;
+  } else {
+    var aiRest = exercise && exercise.rest ? parseInt(String(exercise.rest), 10) : NaN; // "120-180" → 120
+    base = (!isNaN(aiRest) && aiRest > 0) ? aiRest : getExerciseRestSec(exercise ? exercise.name : '');
+  }
+
+  // 드롭·마이오렙 사이의 짧은 휴식은 그 스킴의 정의 그 자체라 자가조절 대상이 아니다.
+  if (set.role === 'drop' || set.role === 'myo') return base;
+
+  var range = clampRepsToClass(exercise ? exercise.name : '', exercise ? exercise.targetReps : null);
+  if (set.reps > 0 && set.reps < range.low) base += REST_AUTOREG_BONUS_SEC;
+  return Math.min(REST_MAX_SEC, base);
+}
+
+// ═══════════════════════════════════════════════
+// 길항근 슈퍼세트 (docs/research/training-splits.md §2-E)
+// ═══════════════════════════════════════════════
+// Zhang 2025 메타(19연구): 세션 시간 −37%, 볼륨 로드·근비대·근력은 전부 동등.
+// 주 5일 × 60분이라는 예산에서 이게 사용자에게 열린 **가장 큰 지렛대**다
+// (분할법을 바꿔서 얻는 이득은 메타 3건이 모두 "차이 없음"이라고 말한다).
+
+function getExercisePrimaryPart(exerciseName) {
+  var info = EXERCISE_BODY_PART_MAP[exerciseName] || getExercisePart(exerciseName);
+  return info ? info.primary : null;
+}
+
+function getExerciseAxialLoad(exerciseName) {
+  return EXERCISE_AXIAL_LOAD[canonicalExerciseName(exerciseName)] || EXERCISE_AXIAL_LOAD[exerciseName] || 'low';
+}
+
+// 슈퍼세트 페어에 들어갈 수 있는 종목인가.
+// 고중량 복합은 제외 — 3분 휴식이 필요한 종목을 45초 만에 다음 종목으로 넘기면 그 휴식의 목적이 사라진다.
+function canSupersetExercise(exerciseName) {
+  var cls = getExerciseClass(exerciseName);
+  if (cls === 'compound_heavy' || cls === 'rehab') return false;
+  if (getExerciseAxialLoad(exerciseName) === 'high') return false; // 허리 보호
+  if (!isMachineOrCableExercise(exerciseName)) return false;       // 한 자리에서 번갈아 되는 조합만
+  if (hasRecentPain(exerciseName, 14)) return false;
+  return true;
+}
+
+function isAntagonistPair(nameA, nameB) {
+  var a = getExercisePrimaryPart(nameA);
+  var b = getExercisePrimaryPart(nameB);
+  if (!a || !b) return false;
+  var list = SUPERSET_ANTAGONISTS[a];
+  return !!list && list.indexOf(b) !== -1;
+}
+
+// 세션 종목 배열에서 길항근 페어를 찾는다. 반환: [{ a: idx, b: idx, kr: '가슴 ↔ 광배' }]
+// **붙어 있는 종목끼리 먼저** 묶는다 — 루틴 순서상 이웃한 두 종목이 기구도 가까울 확률이 높고,
+// 번갈아 오가는 이동이 짧아야 슈퍼세트의 시간 이득이 실제로 남는다.
+// 그다음에야 떨어진 조합을 본다. 세션당 SUPERSET_MAX_PAIRS까지만 제안한다.
+function buildSupersetSuggestions(exercises) {
+  if (!Array.isArray(exercises)) return [];
+  var pairs = [];
+  var taken = {};
+
+  function tryPair(i, j) {
+    if (pairs.length >= SUPERSET_MAX_PAIRS) return false;
+    if (taken[i] || taken[j] || !exercises[i] || !exercises[j]) return false;
+    if (!canSupersetExercise(exercises[i].name) || !canSupersetExercise(exercises[j].name)) return false;
+    if (!isAntagonistPair(exercises[i].name, exercises[j].name)) return false;
+    taken[i] = taken[j] = true;
+    pairs.push({
+      a: i, b: j,
+      kr: (BODY_PART_KR[getExercisePrimaryPart(exercises[i].name)] || '') + ' ↔ ' +
+          (BODY_PART_KR[getExercisePrimaryPart(exercises[j].name)] || '')
+    });
+    return true;
+  }
+
+  for (var gap = 1; gap < exercises.length && pairs.length < SUPERSET_MAX_PAIRS; gap++) {
+    for (var i = 0; i + gap < exercises.length && pairs.length < SUPERSET_MAX_PAIRS; i++) {
+      tryPair(i, i + gap);
+    }
+  }
+  return pairs.sort(function(x, y) { return x.a - y.a; });
+}
+
+// 세션 종목 배열에 페어 정보를 얹는다 (기존 세션 구조를 깨지 않는 추가 필드).
+function applySupersetSuggestions(exercises) {
+  buildSupersetSuggestions(exercises).forEach(function(p) {
+    exercises[p.a].supersetWith = p.b;
+    exercises[p.b].supersetWith = p.a;
+    exercises[p.a].supersetKr = exercises[p.b].supersetKr = p.kr;
+  });
+  return exercises;
+}
+
+// 슈퍼세트 휴식.
+// 페어 앞 종목 → 45초(이동) / 뒤 종목 → 클래스 휴식 × 0.6 (최소 60초).
+// 이렇게 하면 **각 근육이 실제로 쉬는 시간**은 45초 + 상대 종목 세트(약 50초) + 사이클 휴식이라
+// 클래스 권장 휴식보다 오히려 길다. 줄어드는 건 벽시계 시간뿐 — 그게 슈퍼세트의 원리다.
+function supersetRestSec(exercise, partner, isFirstOfPair) {
+  if (isFirstOfPair) return SUPERSET_SWITCH_SEC;
+  var classRest = Math.max(
+    getExerciseRestSec(exercise ? exercise.name : ''),
+    getExerciseRestSec(partner ? partner.name : '')
+  );
+  return Math.max(SUPERSET_MIN_CYCLE_REST_SEC, Math.round(classRest * SUPERSET_CYCLE_REST_RATIO));
+}
+
+// ═══════════════════════════════════════════════
+// 세션 시간 예산 · 드롭세트/마이오렙 제안 조건 (§4)
+// ═══════════════════════════════════════════════
+// 원칙: 자동 적용 금지. 드롭·마이오렙의 근비대 이득은 **동등할 뿐 더 크지 않다**(Sødal 2023).
+// 이득은 오직 시간이다. 시간이 충분한데 쓰면 피로만 더 지고 이득은 0이다.
+
+var SET_TEMPO_SEC_PER_REP = 3.5;   // 실측 기준 템포 (training-splits.md §2-A)
+var SET_SETUP_SEC = 10;            // 세트 준비·정리
+var EXERCISE_TRANSITION_SEC = 90;  // 종목 이동·세팅·대기
+
+function estimateRemainingMinutes(session) {
+  if (!session || !Array.isArray(session.exercises)) return 0;
+  var total = 0;
+  session.exercises.forEach(function(ex) {
+    var pending = (ex.sets || []).filter(function(s) { return !s.completed; });
+    if (!pending.length) return;
+    total += EXERCISE_TRANSITION_SEC;
+    pending.forEach(function(s, k) {
+      total += (s.reps || 10) * SET_TEMPO_SEC_PER_REP + SET_SETUP_SEC;
+      if (k < pending.length - 1) total += resolveRestSec(ex, s);
+    });
+  });
+  return Math.round(total / 60);
+}
+
+// 남은 시간이 예산을 넘는가 (드롭·마이오렙 제안의 필수 조건 §4-A④)
+function isSessionTimePressured(session) {
+  if (!session) return false;
+  var budget = (SESSIONS[session.sessionType] && SESSIONS[session.sessionType].duration) || 60;
+  var elapsedMin = Math.floor((Date.now() - session.startTime) / 60000);
+  return estimateRemainingMinutes(session) > (budget - elapsedMin);
+}
+
+// 이번 주(최근 7일) 이 부위에 드롭·마이오렙을 몇 번 썼나 — 빈도 상한 §4-A⑤
+function intensityTechniqueCountThisWeek(exerciseName) {
+  var part = getExercisePrimaryPart(exerciseName);
+  var cutoff = getDateStr(new Date(Date.now() - 6 * 86400000)); // KST 기준 최근 7일(오늘 포함)
+  var log = state.data.workoutLog || [];
+  var count = 0;
+  for (var i = 0; i < log.length; i++) {
+    if (!log[i].date || log[i].date < cutoff) continue;
+    var exList = log[i].exercises || log[i].exercisesData;
+    if (!Array.isArray(exList)) continue;
+    for (var j = 0; j < exList.length; j++) {
+      var ex = exList[j];
+      if (part && getExercisePrimaryPart(ex.name) !== part) continue;
+      var sets = ex.setsDetail;
+      if (Array.isArray(sets) && sets.some(function(s) { return s && (s.role === 'drop' || s.role === 'myo'); })) count++;
+    }
+  }
+  return count;
+}
+
+// §4-A / §4-B — 어느 쪽을 제안할지 (없으면 null).
+// 드롭세트는 머신·케이블에만(실패 지점에서 무게판을 바꾸는 위험이 없다),
+// 프리웨이트에는 무게를 바꿀 필요가 없는 마이오렙을 제안한다.
+function suggestIntensityTechnique(exerciseName, session) {
+  var cls = getExerciseClass(exerciseName);
+  if (EXERCISE_CLASS_RULES[cls].lockScheme) return null;                 // 재활 절대 금지
+  if (cls !== 'isolation' && cls !== 'light_isolation') return null;     // 복합은 대상 아님
+  if (getSetScheme(exerciseName) !== 'straight') return null;            // 이미 다른 스킴이면 제안 안 함
+  if (hasRecentPain(exerciseName, 14)) return null;
+  if (!isSessionTimePressured(session)) return null;                     // 시간 압박이 없으면 이득 0
+  if (intensityTechniqueCountThisWeek(exerciseName) > 1) return null;    // 부위당 주 1회까지
+  return isMachineOrCableExercise(exerciseName) ? 'drop' : 'myo_reps';
 }
 
 // 세트 완료취소/삭제 후 1RM 되돌리기.
@@ -484,6 +827,19 @@ function snapWeightToEquipment(weight, exerciseName) {
   if (!weight || weight <= 0) return weight;
   var step = getWeightIncrement(exerciseName);
   return Math.max(step, Math.round(weight / step) * step); // 양수는 최소 1스텝 보장 (0kg 방지)
+}
+
+// 백오프·드롭 전용 감량 계산 — **최소 한 스텝은 반드시 내려간다**.
+// snapWeightToEquipment는 반올림(Math.round)이라 감량이 통째로 사라지는 구간이 있다:
+//   25kg × 0.90 = 22.5 → round(4.5)*5 = 25kg (감량 0%!),  덤벨 8kg × 0.90 = 7.2 → 8kg (감량 0%)
+// 백오프의 존재 이유가 "무게를 낮춰 반복을 지킨다"이므로 감량 0은 스킴 자체를 무효로 만든다.
+// (docs/research/set-schemes.md §2-B 반올림 함정 · §5-D 리스크표)
+function reduceWeight(top, pct, exerciseName) {
+  if (!top || top <= 0) return top;              // 맨몸·무게 미정 종목은 그대로 (호출부가 스킴을 접는다)
+  var step = getWeightIncrement(exerciseName);
+  var w = Math.round(top * pct / step) * step;
+  if (w >= top) w = top - step;                  // 반올림으로 감량이 사라졌을 때 방어
+  return Math.max(step, w);                      // 0kg 이하 방지
 }
 
 // 작업 무게 추천 (1RM의 N%) — 신규 종목 또는 기록 없는 종목용 백업

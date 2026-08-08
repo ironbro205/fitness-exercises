@@ -30,7 +30,9 @@ var KEYS = {
   AI_RECOMMENDATION_HISTORY: 'fitness_ai_recommendation_history',
   AI_REC_FAILED_DATE: 'fitness_ai_rec_failed_date',
   CHAT_SIGNALS: 'fitness_chat_signals',
-  LAST_BACKUP: 'fitness_last_backup'
+  LAST_BACKUP: 'fitness_last_backup',
+  // 종목별 사용자 지정 세트법 { "핵 스쿼트": "straight", ... }. 없으면 클래스 기본값(EXERCISE_CLASS_RULES.scheme).
+  SET_SCHEMES: 'fitness_set_schemes'
 };
 
 var storage = {
@@ -551,6 +553,7 @@ var state = {
   activeSession: null,
   editingSet: null,
   exerciseSwapOpen: false,
+  setSchemeOpen: false,
   restTimer: null,
   completedSession: null,
   // 더보기 화면 - 모달
