@@ -120,7 +120,7 @@ var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v43';
+var APP_VERSION = 'v44';
 // 백업에 담지 않는 키. 두 부류:
 // (1) 로컬 전용·민감 → 복원해도 그대로 보존 (API 키·코치 대화)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
@@ -595,6 +595,10 @@ var state = {
   routineChatInput: '',
   routineChatThinking: false,
   routinePreviewExpanded: false,
+  routineExMapIdx: null,      // 루틴 미리보기에서 자극 근육 인체도를 펼친 종목 index (null=없음)
+  routineExMapKey: null,      // 그 index 에 있던 종목명 — 루틴이 바뀌면 안 맞아서 저절로 닫힌다
+  // 자극 근육 인체도 (js/bodymap.js)
+  muscleMapZoom: null,        // 확대해서 보는 중인 종목명 (null=닫힘)
   // 기록 항목 상세 시트 (삭제용)
   itemDetailSheet: null,
   itemDeleteConfirming: false,  // 2단계 삭제 확인

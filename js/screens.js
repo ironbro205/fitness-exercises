@@ -527,6 +527,8 @@ window.backToStep2 = function() {
 
 window.toggleRoutinePreview = function() {
   state.routinePreviewExpanded = !state.routinePreviewExpanded;
+  state.routineExMapIdx = null;   // 접었다 펴면 인체도도 초기화
+  state.routineExMapKey = null;
   saveWizard();
   render();
 };
@@ -672,11 +674,16 @@ function renderWorkoutStep3() {
   if (state.routinePreviewExpanded) {
     routine.exercises.forEach(function(ex, idx) {
       var weight = ex.weight ? ex.weight + 'kg × ' : '';
-      previewExHtml += 
-        '<div class="routine-preview-ex">' +
+      // 종목 줄을 누르면 그 종목의 자극 근육 인체도를 펼친다 (한 번에 한 종목만).
+      // index + 종목명이 둘 다 맞아야 펼친다 — 루틴이 바뀌면 저절로 닫힌다.
+      var mapOpen = isRoutineExerciseMapOpen(idx, ex.name);
+      var mapHtml = mapOpen ? buildMuscleMapBlock(ex.name, { compact: true }) : '';
+      previewExHtml +=
+        '<div class="routine-preview-ex" onclick="toggleRoutineExerciseMap(' + idx + ')">' +
           '<span class="flex-1"><strong>' + (idx + 1) + '. ' + escapeHtml(ex.name) + '</strong></span>' +
           '<span class="text-stone-400 font-mono text-[10px]">' + weight + ex.reps + ' · ' + ex.sets + '세트</span>' +
-        '</div>';
+        '</div>' +
+        (mapHtml ? '<div style="margin: -2px 0 6px;">' + mapHtml + '</div>' : '');
     });
   }
   
@@ -852,8 +859,9 @@ function renderWorkoutStep3() {
           icon('play', 16) + ' ' + (isEmpty ? '종목을 먼저 추가하세요' : '이 루틴으로 시작') +
         '</button>' +
       '</div>' +
-      
-    '</div>';
+
+    '</div>' +
+    buildMuscleMapZoomHtml();
 }
 
 // 생성된 루틴으로 운동 세션 시작
@@ -1918,7 +1926,7 @@ function startRestTimerTick() {
       restTickerInterval = null;
       // 시트(편집/종목변경/채팅)가 열려 있으면 전체 렌더 대신 타이머 UI만 제거
       // (채팅 입력·스트리밍 중 전체 렌더는 키보드/포커스/말풍선을 끊는다)
-      if (state.editingSet || state.exerciseSwapOpen || state.sessionChatOpen) {
+      if (state.editingSet || state.exerciseSwapOpen || state.sessionChatOpen || state.muscleMapZoom) {
         var wrapEl = document.querySelector('.rest-timer-wrap');
         if (wrapEl && wrapEl.parentNode) wrapEl.parentNode.removeChild(wrapEl);
       } else {
@@ -1928,7 +1936,7 @@ function startRestTimerTick() {
     }
     // 시트(편집/종목변경/세트사이채팅)가 열려 있으면 시트가 깜빡이지 않도록 타이머만 부분 갱신
     // (채팅은 입력·스트리밍 중이라 전체 렌더가 매초 돌면 입력이 초기화된다)
-    if (state.editingSet || state.exerciseSwapOpen || state.sessionChatOpen) {
+    if (state.editingSet || state.exerciseSwapOpen || state.sessionChatOpen || state.muscleMapZoom) {
       var remaining = state.restTimer.duration - elapsed;
       var el = document.getElementById('rest-time-text');
       if (el) {
@@ -1951,6 +1959,7 @@ function startRestTimerTick() {
 // 종목 변경 (이동)
 window.goToExercise = function(idx) {
   if (state.activeSession) {
+    state.muscleMapZoom = null;   // 종목이 바뀌면 열려 있던 자극 근육 확대는 닫는다
     var cur = state.activeSession.currentExerciseIdx;
     state._exSwipeDir = (idx === cur) ? null : (idx > cur ? 'next' : 'prev'); // 6-C② 들어오는 카드 방향
     state.activeSession.currentExerciseIdx = idx;
@@ -2425,7 +2434,10 @@ function renderWorkoutSession() {
         '<h2 class="font-bebas text-2xl mb-1">' + escapeHtml(exercise.name) + '</h2>' +
         '<p class="text-xs font-mono text-stone-400">' + exercise.type + '</p>' +
       '</div>' +
-      
+
+      // 자극 근육 인체도 (앞/뒤). 매핑 없는 종목이면 빈 문자열 → 아무것도 안 그림
+      buildMuscleMapBlock(exercise.name) +
+
       // 이전 기록
       // 지난 기록 + 다음 추천 카드 (점진적 과부하)
       (function() {
@@ -2510,7 +2522,8 @@ function renderWorkoutSession() {
     restTimerHtml +
     sheetHtml +
     swapSheetHtml +
-    buildSessionChatSheetHtml(session, exercise);
+    buildSessionChatSheetHtml(session, exercise) +
+    buildMuscleMapZoomHtml();
 }
 
 // 세트 사이 코치 시트 (운동 중 채팅 — 3단계)
@@ -5579,6 +5592,7 @@ init();
 // 지금 화면에서 "가장 위에 떠 있는 단계"를 문자열로 판별 (render 우선순위와 정합)
 function getTopLayer() {
   // 모달/시트 (다른 화면 위에 겹쳐 뜨는 가장 위 레이어)
+  if (state.muscleMapZoom) return 'muscleMapZoom';    // 자극 근육 확대 (세션/미리보기 위)
   if (state.itemDetailSheet) return 'itemDetail';     // 기록 상세 (탭 위)
   if (state.editingSet) return 'setEditor';           // 세트 편집 (세션 위)
   if (state.exerciseSwapOpen) return 'exerciseSwap';  // 종목 교체 (세션 위)
@@ -5617,6 +5631,7 @@ function navBack() {
 
   switch (top) {
     // 모달/시트 — 기존 닫기 함수 그대로 재사용(애니가 있는 4종은 그 안에서 처리)
+    case 'muscleMapZoom': closeMuscleMapZoom(); break;
     case 'itemDetail': closeItemDetail(); break;
     case 'setEditor': closeSetEditor(); break;
     case 'exerciseSwap': closeExerciseSwap(); break;
@@ -5761,6 +5776,7 @@ function ensureBackTrap() {
     if (state.completedSession) return;
     if (state.itemDetailSheet) return;
     if (state.resetConfirming) return;
+    if (state.muscleMapZoom) return;   // 자극 근육 확대 중엔 스와이프로 종목이 넘어가면 안 된다
 
     var touch = e.changedTouches[0];
     if (!touch) return;
