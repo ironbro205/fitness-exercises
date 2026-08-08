@@ -2045,131 +2045,93 @@ test('휴식 타이머 — 미등록 복합 종목도 부위 판정으로 150초
   assert.ok(row && row.compound === true, "'머신 로우'도 복합으로 잡혀야 한다");
 });
 
+
 // ═══════════════════════════════════════════════
 // XSS 회귀 — AI 응답 필드는 화면에 날것으로 들어가면 안 된다
 // ═══════════════════════════════════════════════
 // 배경: js/ai.js 는 모델 응답을 `parsed.X || 기본값` 으로만 받는다 — 타입 강제도 검증도 없다.
-// 그래서 reps/sets/weight/rir/totalSets/duration/grade 처럼 "숫자처럼 생긴" 칸에도
+// 그래서 reps/sets/weight/rir/totalSets/duration/grade/type 처럼 "숫자·라벨처럼 생긴" 칸에도
 // 모델이 임의 문자열을 넣을 수 있고, 그 값이 innerHTML 로 들어가면 그대로 실행된다.
 // (실제로 PR #53 리뷰에서 루틴 미리보기의 ex.reps/ex.sets 가 무이스케이프로 발견됐다.)
-// 계약: 렌더 결과에 페이로드가 **날것으로** 남아 있으면 안 된다. escapeHtml 이 유일한 방어선이다.
-test('XSS 회귀 — AI 루틴/주간리뷰의 숫자형 필드도 이스케이프된다', () => {
-  const PAYLOAD = '<img src=x onerror=alert(1)>';
-  const snapshot = {
-    tab: app.state.currentTab,
-    routine: app.state.generatedRoutine,
-    part: app.state.selectedBodyPart,
-    step: app.state.workoutWizardStep,
-    expanded: app.state.routinePreviewExpanded,
-    history: app.state.routineChatHistory,
-    review: app.state.weeklyReview,
-    loading: app.state.routineLoading,
-    chatInput: app.state.routineChatInput,
+//
+// 위쪽 '복원 — 모든 기록에 태그를 심어도…' 테스트와 **같은 방식**을 쓴다: 격리된 loadApp() 인스턴스에
+// 페이로드를 심고 인자 없이 부를 수 있는 화면을 전부 그려 본다. 공유 state 를 건드리지 않으므로
+// 어서션이 중간에 실패해도 뒤 테스트가 오염되지 않고, 새 화면이 생기면 저절로 검사 대상이 된다.
+// 그 테스트가 "저장된 기록"을 심는다면, 이 테스트는 "AI 응답과 사용자 입력"을 심는다.
+test('XSS 회귀 — AI 응답·사용자 입력을 심어도 어떤 화면에서도 살아있는 태그·속성이 안 나온다', () => {
+  const fresh = loadApp();
+  const P = '<img src=x onerror=eeek()>';
+  const ATTR = '" autofocus onfocus=eeek() x="';   // 속성 자리 탈출용 (P 에는 따옴표가 없다)
+
+  fresh.state.apiKey = 'sk-ant-' + P;
+  fresh.state.apiKeyModalOpen = true;
+  fresh.state.apiKeyInput = ATTR;
+
+  // 루틴 마법사 — selectedBodyPart 를 비워 partName 이 routine.bodyPart 로 폴백하는 경로까지 태운다
+  fresh.state.selectedBodyPart = null;
+  fresh.state.workoutWizardStep = 2;
+  fresh.state.routineLoading = false;
+  fresh.state.routinePreviewExpanded = true;
+  fresh.state.routineChatHistory = [{ role: 'assistant', content: P, changes: [{ type: 'add', exercise: P, detail: P }], approvalStatus: 'pending' }];
+  fresh.state.routineChatInput = ATTR;
+  fresh.state.generatedRoutine = {
+    bodyPart: P, headline: P, reason: P, caution: P, duration: P, totalSets: P, intensity: P,
+    exercises: [{ name: P, type: P, isMain: true, sets: P, reps: P, weight: P, rir: P, rest: null, note: P }],
   };
 
-  // 모델이 모든 칸에 페이로드를 심어 돌려준 상황
-  app.state.selectedBodyPart = 'pull';
-  app.state.routineLoading = false;
-  app.state.routineChatHistory = [];
-  app.state.routineChatInput = '';
-  app.state.routinePreviewExpanded = true;
-  app.state.generatedRoutine = {
-    bodyPart: 'pull',
-    headline: PAYLOAD,
-    reason: PAYLOAD,
-    caution: PAYLOAD,
-    duration: PAYLOAD,
-    totalSets: PAYLOAD,
-    intensity: 'moderate',
-    exercises: [{
-      name: PAYLOAD, type: PAYLOAD, isMain: true,
-      sets: PAYLOAD, reps: PAYLOAD, weight: PAYLOAD, rir: PAYLOAD, rest: null, note: PAYLOAD,
-    }],
-  };
-
-  // STEP2(루틴 상세) · STEP3(대화 + 미리보기) 양쪽 다 검사한다 — 같은 필드를 서로 다르게 그린다
-  for (const [label, html] of [['step2', app.renderWorkoutStep2()], ['step3', app.renderWorkoutStep3()]]) {
-    assert.ok(!html.includes(PAYLOAD), label + ' 에 페이로드가 날것으로 남아 있다');
-    assert.ok(!html.includes('<img'), label + ' 에 살아 있는 <img> 태그가 만들어졌다');
-    assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'), label + ' 에 이스케이프된 형태가 안 보인다');
-  }
-
-  // 루틴 생성 실패 메시지(에러 문자열도 외부에서 온다)
-  app.state.generatedRoutine = { bodyPart: 'pull', error: PAYLOAD };
-  const errHtml = app.renderWorkoutStep2();
-  assert.ok(!errHtml.includes(PAYLOAD), '루틴 실패 메시지가 날것으로 들어간다');
-
-  // 주간 리뷰 등급 — 한 글자짜리 칸이라 놓치기 쉽다 (홈 카드 + 상세 화면 둘 다)
-  app.state.weeklyReview = {
+  // 주간 리뷰 · 정체기 · 오늘의 추천
+  fresh.state.weeklyReview = {
     weekId: '2026-W32', monday: '2026-08-03', sunday: '2026-08-09',
-    grade: PAYLOAD, headline: PAYLOAD, wins: [PAYLOAD], improvements: [], nextWeek: [],
-    coachNote: PAYLOAD, stats: { workoutCount: 3, weightChange: 0, prCount: 1 },
+    grade: P, headline: P, wins: [P], improvements: [P], nextWeek: [P], coachNote: P,
+    stats: { workoutCount: 1, weightChange: 0, prCount: 0 },
   };
-  const reviewHtml = app.renderWeeklyReviewDetail();
-  assert.ok(!reviewHtml.includes(PAYLOAD), '주간 리뷰 상세에 페이로드가 날것으로 남아 있다');
-  app.state.currentTab = 'home';
-  const homeHtml = app.renderHome();
-  assert.ok(!homeHtml.includes(PAYLOAD), '홈의 주간 리뷰 카드에 페이로드가 날것으로 남아 있다');
+  fresh.state.plateauCheck = { detectedAt: fresh.getTodayStr(), signals: [P], severity: P, diagnosis: P, primary_cause: P, recommendations: [P], encouragement: P };
+  fresh.state.aiRecommendation = { session: P, title: P, reason: P, caution: P, suggestion: P, intensity: P };
 
-  // 더보기 화면의 주간 리뷰 진입 줄에도 같은 등급이 들어간다 (API 키가 있어야 그 줄이 그려진다)
-  const snapKey = app.state.apiKey;
-  app.state.apiKey = 'sk-ant-' + PAYLOAD;
-  const moreHtml = app.renderMore();
-  assert.ok(!moreHtml.includes(PAYLOAD), '더보기의 주간 리뷰 줄에 페이로드가 날것으로 남아 있다');
-  // 마스킹된 API 키도 사용자가 친 글자다 — 앞 10자만 남지만 그 안에 태그 시작이 들어갈 수 있다
+  // 진행 중 세션 — AI 루틴의 type·lastWeight 가 세션 종목으로 그대로 복사돼 들어온다
+  fresh.storage.set(fresh.KEYS.ONE_RM_DATA, { '랫 풀 다운': 70 });   // 지난 기록 줄(prevText)이 그려지는 조건
+  fresh.state.activeSession = {
+    sessionType: 'pull', sessionName: P, startTime: Date.now(), currentExerciseIdx: 0,
+    exercises: [{ name: '랫 풀 다운', type: P, targetReps: '8-12', lastWeight: P, lastReps: null, scheme: 'straight',
+                  sets: [{ weight: 40, reps: 10, isWarmup: false, completed: false, role: 'work' }] }],
+  };
+
+  // 프로필 편집 · 유산소 시간 입력 (둘 다 value="..." 속성 자리)
+  fresh.state.profileEditModalOpen = true;
+  fresh.state.profileEdit = { age: ATTR, height: 170, weight: 77.5, workoutFreq: 4 };
+  fresh.state.cardio = { mode: 'interval', phase: 'idle', inputMin: ATTR, loading: false, error: null, plan: null, run: null, reqId: 0 };
+
+  // 인자 없이 부를 수 있는 화면 함수를 전부 그려본다 (새 화면이 생겨도 자동으로 포함된다)
+  const screenFns = fresh.__APP_GLOBALS__
+    .filter((n) => /^render[A-Z]/.test(n) && typeof fresh[n] === 'function' && fresh[n].length === 0);
+  assert.ok(screenFns.length >= 8, '화면 함수를 찾지 못함: ' + screenFns.length);
+
+  const leakedTag = [];
+  const leakedAttr = [];
+  let rendered = 0;
+  for (const name of screenFns) {
+    let html;
+    try { html = fresh[name](); } catch (e) { continue; }   // 별도 상태가 필요한 화면은 건너뜀
+    if (typeof html !== 'string') continue;
+    rendered++;
+    if (html.includes('<img') || html.includes('<script')) leakedTag.push(name);
+    if (html.includes(ATTR)) leakedAttr.push(name);         // 따옴표가 살아 있으면 속성 탈출
+  }
+  assert.ok(rendered >= 8, '실제로 그려진 화면이 너무 적다: ' + rendered);
+  assert.deepEqual(leakedTag, [], '태그가 살아있는 화면: ' + leakedTag.join(', '));
+  assert.deepEqual(leakedAttr, [], '속성 탈출이 가능한 화면: ' + leakedAttr.join(', '));
+
+  // 루틴 생성 실패 화면은 정상 루틴과 배타적인 분기라 따로 그려 본다 (에러 문구도 외부에서 온다)
+  const okRoutine = fresh.state.generatedRoutine;
+  fresh.state.generatedRoutine = { bodyPart: 'pull', error: P };
+  assert.ok(!fresh.renderWorkoutStep2().includes('<img'), '루틴 생성 실패 메시지가 날것으로 들어간다');
+  fresh.state.generatedRoutine = okRoutine;
+
+  // 마스킹된 API 키는 앞 10자만 남아 '<img' 가 통째로 안 나온다 → 태그 검사가 못 잡는 사각지대라 따로 본다
+  const moreHtml = fresh.renderMore();
   assert.ok(!moreHtml.includes('sk-ant-<im'), '마스킹된 API 키가 날것으로 들어간다');
 
-  // 속성(attribute) 자리 — 따옴표가 살아 있으면 value="..." 를 탈출해 새 속성을 붙일 수 있다
-  const ATTR_PAYLOAD = '" autofocus onfocus=alert(1) x="';
-  const snapModal = { open: app.state.apiKeyModalOpen, input: app.state.apiKeyInput };
-  app.state.apiKeyModalOpen = true;
-  app.state.apiKeyInput = ATTR_PAYLOAD;
-  const keyHtml = app.renderMore();
-  assert.ok(!keyHtml.includes(ATTR_PAYLOAD), 'API 키 입력칸이 속성을 탈출당한다');
-  assert.ok(keyHtml.includes('&quot;'), 'API 키 입력칸의 따옴표가 이스케이프되지 않았다');
-  app.state.apiKeyModalOpen = snapModal.open;
-  app.state.apiKeyInput = snapModal.input;
-  app.state.apiKey = snapKey;
-
-  // 화면에 있는 모든 value="..." 입력칸이 같은 규칙을 따르는지 (프로필 편집 · 유산소 시간)
-  const snapProfileEdit = { open: app.state.profileEditModalOpen, edit: app.state.profileEdit };
-  app.state.profileEditModalOpen = true;
-  app.state.profileEdit = { age: ATTR_PAYLOAD, height: 170, weight: 77.5, workoutFreq: 4 };
-  const profileHtml = app.renderProfileEditModal();
-  assert.ok(!profileHtml.includes(ATTR_PAYLOAD), '프로필 편집 입력칸이 속성을 탈출당한다');
-  app.state.profileEditModalOpen = snapProfileEdit.open;
-  app.state.profileEdit = snapProfileEdit.edit;
-
-  // 운동 세션 화면 — AI 루틴의 type·lastWeight가 세션 종목으로 그대로 복사돼 들어온다
-  // (대화 수정 경로 approveRoutineChange는 exercises 배열을 통째로 갈아끼워 무게 스냅을 거치지 않는다)
-  const snapSession = { session: app.state.activeSession, log: app.state.data.workoutLog };
-  app.state.data.workoutLog = [];
-  app._lastSetsCache = null;
-  // 지난 기록 줄(prevText)은 1RM 추정 추천이 있을 때만 그려진다 → 1RM을 심어 그 경로를 태운다
-  const snapRM = app.storage.get(app.KEYS.ONE_RM_DATA, {});
-  app.storage.set(app.KEYS.ONE_RM_DATA, { '랫 풀 다운': 70 });
-  app.state.activeSession = {
-    sessionType: 'pull', sessionName: '테스트', startTime: Date.now(), currentExerciseIdx: 0,
-    exercises: [{
-      name: '랫 풀 다운', type: PAYLOAD, targetReps: '8-12',
-      lastWeight: PAYLOAD, lastReps: null, scheme: 'straight',
-      sets: [{ weight: 40, reps: 10, isWarmup: false, completed: false, role: 'work' }],
-    }],
-  };
-  const sessionHtml = app.renderWorkoutSession();
-  assert.ok(!sessionHtml.includes(PAYLOAD), '운동 세션 화면에 페이로드가 날것으로 남아 있다');
-  app.state.activeSession = snapSession.session;
-  app.state.data.workoutLog = snapSession.log;
-  app.storage.set(app.KEYS.ONE_RM_DATA, snapRM);
-  app._lastSetsCache = null;
-
-  app.state.currentTab = snapshot.tab;
-  app.state.generatedRoutine = snapshot.routine;
-  app.state.selectedBodyPart = snapshot.part;
-  app.state.workoutWizardStep = snapshot.step;
-  app.state.routinePreviewExpanded = snapshot.expanded;
-  app.state.routineChatHistory = snapshot.history;
-  app.state.weeklyReview = snapshot.review;
-  app.state.routineLoading = snapshot.loading;
-  app.state.routineChatInput = snapshot.chatInput;
+  // 이스케이프가 "값을 지운" 게 아니라 "무해하게 바꾼" 것인지도 확인한다
+  const step2 = fresh.renderWorkoutStep2();
+  assert.ok(step2.includes('&lt;img src=x onerror=eeek()&gt;'), '이스케이프된 형태가 화면에 보이지 않는다');
 });

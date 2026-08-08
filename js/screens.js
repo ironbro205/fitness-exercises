@@ -903,7 +903,7 @@ function renderWorkoutStep3() {
           '<button onclick="backToStep2()" class="session-header-btn" title="뒤로">' + icon('arrowLeft', 18) + '</button>' +
           '<div class="text-center">' +
             '<p class="text-[10px] font-mono text-stone-500" style="letter-spacing: 0.2em;">' + (isFree ? 'FREE · 자유 구성' : 'STEP 3 · 대화 수정') + '</p>' +
-            '<p class="text-[10px] font-mono text-stone-600 mt-0\\.5">' + partName + '</p>' +
+            '<p class="text-[10px] font-mono text-stone-600 mt-0\\.5">' + escapeHtml(partName) + '</p>' +
           '</div>' +
           '<div style="width: 36px;"></div>' +
         '</div>' +
@@ -919,7 +919,7 @@ function renderWorkoutStep3() {
       '<div class="routine-preview">' +
         '<div class="routine-preview-collapsed" onclick="' + (isEmpty ? '' : 'toggleRoutinePreview()') + '">' +
           '<div class="flex items-center gap-2">' +
-            '<span class="ai-badge">' + partName + '</span>' +
+            '<span class="ai-badge">' + escapeHtml(partName) + '</span>' +
             '<div>' +
               '<p class="text-xs font-display font-bold">' + (isEmpty ? '아직 종목이 없어요' : escapeHtml(routine.headline)) + '</p>' +
               '<p class="text-[10px] font-mono text-stone-500">' + (isEmpty ? '대화로 종목을 추가해주세요' : exCount + '개 종목 · ' + escapeHtml(routine.totalSets) + '세트 · ' + escapeHtml(routine.duration) + '분' + (routine.wasModified ? ' · ✨수정됨' : '')) + '</p>' +
@@ -2954,7 +2954,7 @@ function renderWorkoutSession() {
       '<div class="flex items-center justify-between mb-4">' +
         '<button class="session-header-btn" onclick="endSession()">' + icon('close', 18) + '</button>' +
         '<div class="text-center">' +
-          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">' + session.sessionName + ' · 종목 ' + (session.currentExerciseIdx + 1) + '/' + totalExercises + '</p>' +
+          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">' + escapeHtml(session.sessionName) + ' · 종목 ' + (session.currentExerciseIdx + 1) + '/' + totalExercises + '</p>' +
           '<p class="text-xs font-mono accent mt-0\\.5">⏱ ' + elapsedStr + '</p>' +
         '</div>' +
         '<div class="flex gap-2">' +
@@ -5374,7 +5374,7 @@ function renderPlateauDetail() {
   var signalsHtml = p.signals.map(function(s) {
     return '<div class="review-bullet">' +
       '<div class="review-bullet-dot" style="background: #fbbf24;"></div>' +
-      '<p>' + (signalLabels[s] || s) + '</p>' +
+      '<p>' + escapeHtml(signalLabels[s] || s) + '</p>' +
     '</div>';
   }).join('');
   
