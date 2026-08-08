@@ -738,6 +738,10 @@ function scrollChatToBottom() {
 }
 
 // HTML 이스케이프 (innerHTML/속성 값에 사용자·AI 텍스트 넣을 때)
+// ⚠ onclick="fn('...')" 처럼 **JS 문자열** 자리에는 이것만으로 부족하다 —
+//   &#39; 를 HTML 파서가 ' 로 되돌린 뒤 JS 가 읽으므로 문자열을 탈출할 수 있다.
+//   그런 자리에는 sanitizeIdentifier 로 좁혀진 식별자만 넣거나(현재 코드가 그렇다),
+//   자유 텍스트는 state 에 담고 핸들러에서 읽어라 (swapCurrentExercise 방식).
 function escapeHtml(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

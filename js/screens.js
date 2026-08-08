@@ -3502,7 +3502,7 @@ function renderWorkoutComplete() {
       '<div class="' + completeIconClass + '">' + icon('check', 28) + '</div>' +
       '<p class="text-xs uppercase accent font-mono mb-2" style="letter-spacing: 0.3em;">WORKOUT COMPLETE</p>' +
       '<h1 class="font-bebas text-5xl">완료!</h1>' +
-      '<p class="text-sm text-stone-400 mt-2">' + cs.sessionName + ' · ' + dateStr + '</p>' +
+      '<p class="text-sm text-stone-400 mt-2">' + escapeHtml(cs.sessionName) + ' · ' + dateStr + '</p>' +
     '</div>' +
     
     '<div class="' + completeListClass + '">' +

@@ -2089,11 +2089,21 @@ test('XSS 회귀 — AI 응답·사용자 입력을 심어도 어떤 화면에�
   fresh.state.aiRecommendation = { session: P, title: P, reason: P, caution: P, suggestion: P, intensity: P };
 
   // 진행 중 세션 — AI 루틴의 type·lastWeight 가 세션 종목으로 그대로 복사돼 들어온다
-  fresh.storage.set(fresh.KEYS.ONE_RM_DATA, { '랫 풀 다운': 70 });   // 지난 기록 줄(prevText)이 그려지는 조건
+  fresh.storage.set(fresh.KEYS.ONE_RM_DATA, { '랫 풀 다운': 70, '풀업': 50 });   // 지난 기록 줄(prevText)이 그려지는 조건
   fresh.state.activeSession = {
     sessionType: 'pull', sessionName: P, startTime: Date.now(), currentExerciseIdx: 0,
     exercises: [{ name: '랫 풀 다운', type: P, targetReps: '8-12', lastWeight: P, lastReps: null, scheme: 'straight',
-                  sets: [{ weight: 40, reps: 10, isWarmup: false, completed: false, role: 'work' }] }],
+                  sets: [{ weight: 40, reps: 10, isWarmup: false, completed: false, role: 'work' }] },
+                // 무게가 없는 종목은 lastReps 쪽 분기를 탄다 (prevText 의 다른 갈래)
+                { name: '풀업', type: P, targetReps: '5-8', lastWeight: null, lastReps: P, scheme: 'straight',
+                  sets: [{ weight: null, reps: 8, isWarmup: false, completed: false, role: 'work' }] }],
+  };
+
+  // 완료 화면 (세션과 배타적이지 않다 — render 우선순위상 completedSession 이 위)
+  fresh.state.completedSession = {
+    workoutId: 'w_1', sessionName: P, duration: 42, exerciseCount: 1, setCount: 3,
+    exercises: [{ name: P, type: P, sets: 3, setsCount: 3, setsDetail: [], weights: [40], reps: [10], maxWeight: 40, lastWeight: null, lastReps: null }],
+    newPRs: [], date: new Date('2026-08-08T00:00:00Z'),
   };
 
   // 프로필 편집 · 유산소 시간 입력 (둘 다 value="..." 속성 자리)
@@ -2120,6 +2130,13 @@ test('XSS 회귀 — AI 응답·사용자 입력을 심어도 어떤 화면에�
   assert.ok(rendered >= 8, '실제로 그려진 화면이 너무 적다: ' + rendered);
   assert.deepEqual(leakedTag, [], '태그가 살아있는 화면: ' + leakedTag.join(', '));
   assert.deepEqual(leakedAttr, [], '속성 탈출이 가능한 화면: ' + leakedAttr.join(', '));
+
+  // '지난 기록' 줄은 현재 종목 하나만 그린다 → 무게 있는 종목/맨몸 종목 두 갈래를 각각 태운다
+  for (const idx of [0, 1]) {
+    fresh.state.activeSession.currentExerciseIdx = idx;
+    assert.ok(!fresh.renderWorkoutSession().includes('<img'), '세션 화면 종목 ' + idx + ' 에서 태그가 살아있다');
+  }
+  fresh.state.activeSession.currentExerciseIdx = 0;
 
   // 루틴 생성 실패 화면은 정상 루틴과 배타적인 분기라 따로 그려 본다 (에러 문구도 외부에서 온다)
   const okRoutine = fresh.state.generatedRoutine;
