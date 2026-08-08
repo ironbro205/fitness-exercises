@@ -1241,8 +1241,11 @@ async function loadAIRecommendationIfNeeded() {
   
   var rec = await fetchAIRecommendation();
   state.aiRecommendation = rec;
-  // 실패(null)면 오늘은 자동 재시도 금지 — 성공하면 잠금 해제
+  // 실패(null)면 오늘은 자동 재시도 금지 — 성공하면 잠금 해제.
+  // localStorage에도 남긴다: 메모리에만 두면 새로고침·서비스워커 갱신 때마다 잠금이 풀려
+  // 실패가 반복될 때 앱을 열 때마다 유료 호출이 한 번씩 더 나간다.
   state.aiRecFailedDate = rec ? null : todayStr;
+  storage.set(KEYS.AI_REC_FAILED_DATE, state.aiRecFailedDate);
   state.aiRecLoading = false;
   render();
 }
@@ -1594,9 +1597,15 @@ function getStalledLifts() {
           if (s && !s.isWarmup && s.reps && s.reps > topReps) topReps = s.reps;
         }
       } else if (ex.reps) {
-        // 옛 기록은 reps가 배열([12,12,12])이거나 문자열일 수 있다 — 숫자로 정규화하지 않으면
-        // 아래 bestOf 비교가 문자열 비교로 새어 정체 판정이 뒤집힌다 (_buildRecentSetsMap과 같은 방어).
-        topReps = parseInt(Array.isArray(ex.reps) ? ex.reps[0] : ex.reps, 10) || 0;
+        // 옛 기록은 reps가 배열([8,10,12])이거나 문자열일 수 있다.
+        // 위 setsDetail 분기와 같은 의미가 되려면 **최댓값**을 써야 한다 —
+        // 첫 세트만 보면 세션 안에서 반복을 올린 사용자([8,8,8] → [8,10,12])가
+        // 둘 다 8로 읽혀 "반복도 안 오름" = 정체로 오판된다(더블 프로그레션 정상 진행인데).
+        var repsArr = Array.isArray(ex.reps) ? ex.reps : [ex.reps];
+        for (var r = 0; r < repsArr.length; r++) {
+          var rv = parseInt(repsArr[r], 10) || 0;
+          if (rv > topReps) topReps = rv;
+        }
       }
 
       // 별칭 표기('랫풀다운')와 표준명('랫 풀 다운')이 한 종목으로 모이게 표준명을 키로 쓴다 —

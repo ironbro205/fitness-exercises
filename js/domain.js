@@ -328,18 +328,25 @@ var ROLLING_1RM_MAX_REPS = 12; // 절대 상한(클래스별 상한의 천장) �
 
 // e1RM 반복 상한 (종목 클래스별).
 // 근거상 10회 이하가 확실히 더 정확하다 (Reynolds 2006 — 5RM이 가장 정확 / Mayhew 2008 — 10회 미만에서 우수).
-// 다만 상한을 일괄 10으로 내리면 처방 반복이 12~15회인 '고립' 종목(펙 덱·푸시다운·컬·레그 익스텐션·
-// 레그 컬)은 본세트가 전부 잘려 calculateRollingMax1RM이 null → 추적 1RM이 INITIAL_1RM에 영원히 묶이고
-// PR 배지도 다시는 안 뜬다. 그래서 클래스 반복범위 하한 아래로는 자르지 않고, 기존 상한(12)보다
-// 느슨해지지도 않게 min/max로 묶는다.
-//   compound_heavy(5-8) · compound_moderate(8-12) → 10 (강화)
-//   isolation(12-15) · light_isolation(15-25) · rehab(15-20) → 12 (현행 유지)
+//
+// ★ 철칙: 상한이 그 종목의 **처방 반복 상단(repMax) 아래로 내려가면 안 된다.**
+//   앱이 스스로 시키는 반복을 e1RM 추적에서 잘라내면, 지시대로 운동한 사용자의 본세트가 전부
+//   제외돼 calculateRollingMax1RM이 null → reconcile1RMFromLog가 건너뛰고(`if (!roll) continue`)
+//   추적 1RM이 INITIAL_1RM에 영원히 묶이며 PR 배지도 다시는 안 뜬다.
+//   (repMin을 쓰면 '중강도 복합'(8~12회 처방)이 상한 10이 되어 11·12회 본세트가 통째로 잘린다 —
+//    랫 풀 다운·머신 시티드 로우·머신 체스트 프레스가 정확히 이 경우다.)
+// 그래서 repMax를 바닥으로 삼고, 기존 상한(12)보다 느슨해지지도 않게 min/max로 묶는다.
+//   compound_heavy(5~8회 처방)   → 10 (강화. 처방이 8회를 넘지 않으므로 잘리는 세트가 없다)
+//   compound_moderate(8~12회)    → 12 (유지)
+//   isolation(12~15) · light_isolation(15~25) · rehab(15~20) → 12 (유지)
+// 즉 "처방 범위는 절대 자르지 않되, 그 위로는 12회를 천장으로 둔다"가 실제 규칙이다.
+// 근본 해결(반복 12회 초과 구간까지 정확한 e1RM)은 세트별 RIR 실측이 필요하다 — 백로그 #7.
 var ROLLING_1RM_BASE_MAX_REPS = 10;
 
 function rolling1RMMaxReps(exerciseName) {
   var rules = EXERCISE_CLASS_RULES[getExerciseClass(exerciseName)];
-  if (!rules) return ROLLING_1RM_BASE_MAX_REPS;
-  return Math.min(ROLLING_1RM_MAX_REPS, Math.max(ROLLING_1RM_BASE_MAX_REPS, rules.repMin));
+  if (!rules) return ROLLING_1RM_MAX_REPS;
+  return Math.min(ROLLING_1RM_MAX_REPS, Math.max(ROLLING_1RM_BASE_MAX_REPS, rules.repMax));
 }
 
 function calculateRollingMax1RM(exerciseName, windowSessions) {
@@ -426,7 +433,10 @@ function recalc1RMAfterEdit(exerciseName, prevRM) {
   var maxReps = rolling1RMMaxReps(exerciseName); // 위 두 경로와 동일한 클래스별 상한
   if (state.activeSession && Array.isArray(state.activeSession.exercises)) {
     state.activeSession.exercises.forEach(function(ex) {
-      if (ex.name !== exerciseName) return;
+      // 표준명으로 비교한다 — 한 세션에 같은 운동이 두 표기로 들어 있으면(복원된 세션·AI 루틴)
+      // 위의 key/roll은 표준명 하나로 합쳐지는데 여기만 원문 비교라 다른 표기의 완료 세트를
+      // 통째로 놓쳐, 기록이 살아 있는데도 추적 1RM이 깎여 내려간다.
+      if (canonicalExerciseName(ex.name) !== key) return;
       (ex.sets || []).forEach(function(s) {
         if (!s.completed || s.isWarmup || !s.weight || !s.reps) return;
         if (s.reps > maxReps) return;
@@ -687,10 +697,10 @@ function getExercisePart(exerciseName) {
   if (canonical && EXERCISE_BODY_PART_MAP[canonical]) return EXERCISE_BODY_PART_MAP[canonical];
 
   // 3. 부분 매칭 — 맵 키가 질의 이름 **안에** 통째로 들어있을 때만, 그 중 가장 긴(=가장 구체적인) 키.
-  //    반대 방향(질의가 키의 일부)은 버렸다: '프레스' 한 단어가 아무 프레스 종목이나 잡고,
-  //    '덤벨 프레스'가 '인클라인 덤벨 프레스'(가슴 상부)로 잡히는 오탐이 실제로 났다.
-  //    가장 긴 키를 고르는 이유: '스탠딩 카프 레이즈 머신'이 '카프 레이즈'(맨몸)가 아니라
+  //    이 방향을 먼저 두는 이유: '스탠딩 카프 레이즈 머신'이 '카프 레이즈'(맨몸)가 아니라
   //    '스탠딩 카프 레이즈'(스미스)로 가야 장비 판정이 맞는다.
+  //    반대 방향(질의가 키의 일부)은 오탐이 많아 5번(최후 수단)으로 내렸다 —
+  //    '덤벨 프레스'가 '인클라인 덤벨 프레스'(가슴 상부)로 잡히던 문제.
   var q = squash(exerciseName);
   var bestKey = null;
   var bestLen = 0;
@@ -721,7 +731,28 @@ function getExercisePart(exerciseName) {
   if (name.indexOf('rdl') >= 0 || name.indexOf('데드리프트') >= 0) return { primary: 'hamstrings', secondary: ['glutes'], compound: true };
   if (name.indexOf('힙') >= 0) return { primary: 'glutes', secondary: [], compound: false };
   if (name.indexOf('카프') >= 0 || name.indexOf('종아리') >= 0) return { primary: 'calves', secondary: [], compound: false };
-  
+  // ── 아래는 '한 단어만 남은' 짧은 이름을 위한 마지막 키워드들. 반드시 위 구체 규칙 뒤에 둔다
+  //    (예: '레그 프레스'·'벤치 프레스'는 위에서 이미 잡히고, 여기까지 오지 않는다).
+  //    이게 없으면 '바벨 오버헤드 프레스' 같은 미등록 이름이 null이 되어
+  //    볼륨 집계에서 통째로 빠지고 휴식 타이머도 고립(90초)으로 떨어진다.
+  if (name.indexOf('오버헤드') >= 0 || name.indexOf('밀리터리') >= 0) return { primary: 'shoulders_front', secondary: ['triceps'], compound: true };
+  if (name.indexOf('프레스') >= 0) return { primary: 'chest', secondary: ['triceps', 'shoulders_front'], compound: true };
+  if (name.indexOf('레이즈') >= 0) return { primary: 'shoulders_side', secondary: [], compound: false };
+  if (name.indexOf('익스텐션') >= 0) return { primary: 'triceps', secondary: [], compound: false };
+  if (name.indexOf('펙') >= 0) return { primary: 'chest', secondary: [], compound: false };
+
+  // 5. 최후 수단 — 질의가 맵 키의 일부일 때(짧은 축약 이름). 가장 **짧은**(=가장 일반적인) 키를 고른다.
+  //    각도·장비 같은 구체 속성을 잘못 물고 오는 걸 줄이기 위해 최장이 아니라 최단을 쓴다.
+  //    부위 그룹(BODY_PART_GROUPS)은 chest/chest_upper/chest_lower를 하나로 합치므로
+  //    세부 부위가 조금 어긋나도 볼륨 집계는 맞고, null이 되어 세트가 통째로 사라지는 것보다 낫다.
+  var shortKey = null;
+  var shortLen = Infinity;
+  for (var rk in EXERCISE_BODY_PART_MAP) {
+    var rkS = squash(rk);
+    if (rkS.indexOf(q) !== -1 && rkS.length < shortLen) { shortKey = rk; shortLen = rkS.length; }
+  }
+  if (shortKey) return EXERCISE_BODY_PART_MAP[shortKey];
+
   return null;
 }
 

@@ -94,26 +94,41 @@ test('calculateRollingMax1RM — 최근 N세션 윈도우 최고 e1RM', () => {
 
 // 상한은 종목 클래스별이다 — '랫풀다운'은 compound_moderate(8-12) 이라 상한 10회.
 // (클래스별 상한 자체는 파일 끝 'rolling1RMMaxReps' 테스트에서 못 박는다)
-test('calculateRollingMax1RM — 고횟수 세트는 추세에서 제외 (복합=10회 상한: 11회 제외, 10회 포함)', () => {
-  assert.equal(app.getExerciseClass('랫풀다운'), 'compound_moderate', '이 테스트는 복합(상한 10) 종목을 전제로 한다');
-  assert.equal(app.rolling1RMMaxReps('랫풀다운'), 10);
+test('calculateRollingMax1RM — 고횟수 세트는 추세에서 제외 (고중량 복합=10회 상한: 11회 제외, 10회 포함)', () => {
+  // 상한은 그 종목의 **처방 상단(repMax)** 아래로 절대 내려가지 않는다.
+  // '랫풀다운'은 8~12회 처방(compound_moderate)이라 상한이 12여야 한다 —
+  // 여기를 10으로 조이면 지시대로 12회 한 사용자의 본세트가 전부 잘려 1RM이 동결된다.
+  assert.equal(app.getExerciseClass('랫풀다운'), 'compound_moderate');
+  assert.equal(app.rolling1RMMaxReps('랫풀다운'), 12, '처방 상단(12)까지는 잘리면 안 된다');
+  // 5~8회 처방인 고중량 복합만 10으로 조인다(처방이 8회를 넘지 않아 잘리는 세트가 없다).
+  assert.equal(app.getExerciseClass('데드리프트'), 'compound_heavy');
+  assert.equal(app.rolling1RMMaxReps('데드리프트'), 10);
 
   app.state.data.workoutLog = [
-    { date: '2026-06-01', completed: true, exercises: [{ name: '랫풀다운', setsDetail: [
+    { date: '2026-06-01', completed: true, exercises: [{ name: '데드리프트', setsDetail: [
       { weight: 60, reps: 20, isWarmup: false }, // 20회 → e1RM 신뢰 낮음 → 제외
-      { weight: 65, reps: 11, isWarmup: false }, // 11회 → 복합 상한(10) 초과 → 제외 (잘못 포함되면 88.8)
+      { weight: 65, reps: 11, isWarmup: false }, // 11회 → 고중량 복합 상한(10) 초과 → 제외 (포함되면 88.8)
       { weight: 70, reps: 8, isWarmup: false },  // 70*(1+8/30)=88.67 → 88.7
     ] }] },
   ];
-  assert.equal(app.calculateRollingMax1RM('랫풀다운', 4).value, 88.7);
+  assert.equal(app.calculateRollingMax1RM('데드리프트', 4).value, 88.7);
 
   // 경계값 10회는 포함된다 (상한은 "10회 초과부터 제외")
   app.state.data.workoutLog = [
-    { date: '2026-06-01', completed: true, exercises: [{ name: '랫풀다운', setsDetail: [
+    { date: '2026-06-01', completed: true, exercises: [{ name: '데드리프트', setsDetail: [
       { weight: 75, reps: 10, isWarmup: false }, // 75*(1+10/30)=100
     ] }] },
   ];
-  assert.equal(app.calculateRollingMax1RM('랫풀다운', 4).value, 100);
+  assert.equal(app.calculateRollingMax1RM('데드리프트', 4).value, 100);
+
+  // 절대 상한 12는 모든 종목에 적용된다 (13회는 어떤 클래스에서도 제외)
+  app.state.data.workoutLog = [
+    { date: '2026-06-01', completed: true, exercises: [{ name: '랫풀다운', setsDetail: [
+      { weight: 90, reps: 13, isWarmup: false }, // 13회 → 절대 상한 초과 → 제외
+      { weight: 60, reps: 12, isWarmup: false }, // 60*(1+12/30)=84 → 처방 범위라 포함
+    ] }] },
+  ];
+  assert.equal(app.calculateRollingMax1RM('랫풀다운', 4).value, 84);
 });
 
 // ── 사이클: 주차 → 단계 (1~4 빌드, 5 디로드) ──
@@ -1207,43 +1222,62 @@ test('부위 매핑: 퍼지 매칭이 엉뚱한 종목을 집지 않는다', () 
   // 리버스 플라이는 가슴이 아니라 후면 삼각근
   assert.equal(app.getExercisePart('케이블 리버스 플라이').primary, 'shoulders_rear');
   assert.equal(app.getExercisePart('리버스 펙덱 플라이').primary, 'shoulders_rear');
-  // 한 단어짜리 일반 명사가 아무 종목이나 집으면 안 된다
-  assert.equal(app.getExercisePart('프레스'), null);
-  assert.equal(app.getExercisePart('레이즈'), null);
+  // 한 단어짜리 일반 명사도 **null이 되면 안 된다** — null이면 그 세트가 볼륨 집계에서
+  // 통째로 빠지고(getRecentVolumeSplitByPart의 `if (!info) return`), 휴식 타이머도 고립으로 떨어진다.
+  // 다만 엉뚱한 부위로 가면 안 되므로 부위까지 함께 못 박는다.
+  assert.equal(app.getExercisePart('프레스').primary, 'chest');
+  assert.equal(app.getExercisePart('레이즈').primary, 'shoulders_side');
+  assert.equal(app.getExercisePart('익스텐션').primary, 'triceps');
+  // 미등록 복합 종목도 부위·복합 판정이 나와야 휴식 150초가 붙는다
+  const ohp = app.getExercisePart('바벨 오버헤드 프레스');
+  assert.equal(ohp.primary, 'shoulders_front');
+  assert.equal(ohp.compound, true, '복합으로 안 잡히면 휴식이 90초로 떨어진다');
   // 더 구체적인 키가 이긴다 — 맨몸으로 새면 미보유 기구 게이트가 뚫린다
   assert.equal(app.getExerciseEquipment('스탠딩 카프 레이즈 머신'), 'smith');
   assert.equal(app.isExerciseAvailable('시티드 카프 레이즈 머신'), false);
   // 평벤치 덤벨 프레스가 인클라인(가슴 상부)으로 잡히지 않는다
-  const dp = app.getExercisePart('덤벨 프레스');
-  assert.ok(!dp || dp.primary !== 'chest_upper', "'덤벨 프레스'가 가슴 상부로 잡히면 안 된다");
+  assert.equal(app.getExercisePart('덤벨 프레스').primary, 'chest', "'덤벨 프레스'가 가슴 상부로 잡히면 안 된다");
 });
 
 // ── e1RM 반복 상한을 종목 클래스별로 (복합 10 / 고립 이하 12) ──
 //    일괄 10으로 내리면 처방 반복이 12~15회인 고립 종목은 본세트가 전부 잘려
 //    calculateRollingMax1RM 이 null → 추적 1RM 이 INITIAL_1RM 에 영원히 묶인다.
-test('rolling1RMMaxReps — 복합 10회·고립 12회 (고립 1RM 동결 방지)', () => {
-  assert.equal(app.rolling1RMMaxReps('레그 프레스'), 10);              // compound_moderate 8-12
-  assert.equal(app.rolling1RMMaxReps('머신 펙 덱 플라이'), 12);         // isolation 12-15
-  assert.equal(app.rolling1RMMaxReps('덤벨 사이드 레터럴 레이즈'), 12);  // light_isolation 15-25
+// ★ 이 테스트가 지키는 불변식: e1RM 반복 상한은 그 종목의 **처방 상단(repMax) 아래로 내려가지 않는다.**
+//   앱이 시키는 반복을 추적에서 잘라내면 지시대로 운동한 사용자의 본세트가 전부 제외돼
+//   calculateRollingMax1RM이 null → reconcile1RMFromLog가 건너뛰고 → 추적 1RM이 영원히 동결된다.
+test('rolling1RMMaxReps — 처방 상단은 절대 자르지 않는다 (1RM 동결 방지)', () => {
+  assert.equal(app.rolling1RMMaxReps('데드리프트'), 10);               // compound_heavy 5-8 → 10 (강화)
+  assert.equal(app.rolling1RMMaxReps('레그 프레스'), 12);              // compound_moderate 8-12 → 12
+  assert.equal(app.rolling1RMMaxReps('머신 펙 덱 플라이'), 12);         // isolation 12-15 → 12
+  assert.equal(app.rolling1RMMaxReps('덤벨 사이드 레터럴 레이즈'), 12);  // light_isolation 15-25 → 12
   assert.equal(app.rolling1RMMaxReps('없는운동xyz'), 12);               // 미등록 → isolation 기본값
 
-  // 고립 종목의 12회 세트는 계속 추적돼야 한다.
+  // 어떤 클래스든 "처방 상단까지는 추적된다"를 표로 못 박는다.
+  Object.keys(app.EXERCISE_CLASS_RULES).forEach(function (cls) {
+    const rules = app.EXERCISE_CLASS_RULES[cls];
+    const cap = Math.min(12, Math.max(10, rules.repMax));
+    assert.ok(cap >= Math.min(rules.repMax, 12),
+      cls + ': 상한(' + cap + ')이 처방 상단(' + rules.repMax + ')을 잘라내면 안 된다');
+  });
+
+  // 고립 종목(12-15 처방)의 12회 세트는 계속 추적돼야 한다.
   app.state.data.workoutLog = [
     { date: '2026-06-01', completed: true, exercises: [{ name: '머신 펙 덱 플라이', setsDetail: [
       { weight: 40, reps: 12, isWarmup: false },  // 40*(1+12/30)=56
-      { weight: 40, reps: 14, isWarmup: false },  // 14회 → 제외
+      { weight: 40, reps: 14, isWarmup: false },  // 14회 → 절대 상한 초과 → 제외
     ] }] },
   ];
   assert.equal(app.calculateRollingMax1RM('머신 펙 덱 플라이', 4).value, 56);
 
-  // 복합 종목의 11~12회 세트는 이제 제외된다
+  // 중강도 복합(8-12 처방)의 12회 세트도 추적돼야 한다 — 여기를 자르면 랫 풀 다운·시티드 로우·
+  // 체스트 프레스처럼 12회로 굴리는 종목의 1RM이 INITIAL_1RM에 묶여 PR 배지가 영영 안 뜬다.
   app.state.data.workoutLog = [
     { date: '2026-06-01', completed: true, exercises: [{ name: '레그 프레스', setsDetail: [
-      { weight: 100, reps: 12, isWarmup: false }, // 제외 (상한 10)
-      { weight: 100, reps: 10, isWarmup: false }, // 100*(1+10/30)=133.33 → 133.3
+      { weight: 100, reps: 12, isWarmup: false }, // 100*(1+12/30)=140
     ] }] },
   ];
-  assert.equal(app.calculateRollingMax1RM('레그 프레스', 4).value, 133.3);
+  assert.equal(app.calculateRollingMax1RM('레그 프레스', 4).value, 140);
+  assert.notEqual(app.update1RM('레그 프레스', 100, 12), false, '12회 세트로도 1RM 갱신이 가능해야 한다');
 });
 
 // ── 정체 판정 — 더블 프로그레션(무게 고정 + 반복 상승)은 정체가 아니다 + 표본/기간 가드 ──
@@ -1335,10 +1369,21 @@ test('volumeByPartCardHtml — 2주 미만은 판정 보류, 이후는 프롬프
   assert.ok(early.includes('아직 판단하기 이릅니다'), '최소 표본 가드 문구');
   assert.ok(!early.includes('meal-status-pill'), '가드 중에는 판정 배지 없음');
 
-  // 21일 사용자 → 판정 표시. 창(최근 2주) 밖 기록은 볼륨에 안 잡힌다
+  // 오래 쉬다 복귀 → 첫 기록만 오래됐을 뿐 최근 2주 표본이 1회뿐이면 판정하지 않는다.
+  // (기간만 보면 1년 전 기록 하나로 가드가 풀려 복귀 첫날 전 부위가 '부족' 빨간 배지가 된다)
+  app.state.data.workoutLog = [
+    { date: isoDaysAgo(365), completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 4 }] },
+    { date: isoDaysAgo(1),   completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 4 }] }
+  ];
+  const comeback = app.volumeByPartCardHtml();
+  assert.ok(comeback.includes('아직 판단하기 이릅니다'), '복귀 직후는 최근 2주 표본 부족 → 판정 보류');
+  assert.ok(!comeback.includes('meal-status-pill'), '복귀 직후 판정 배지 없음');
+
+  // 21일 사용자 + 최근 2주 안에 2회 이상 → 판정 표시. 창(최근 2주) 밖 기록은 볼륨에 안 잡힌다
   app.state.data.workoutLog = [
     { date: isoDaysAgo(20), completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 4 }] },
-    { date: isoDaysAgo(3),  completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 6 }] }
+    { date: isoDaysAgo(6),  completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 3 }] },
+    { date: isoDaysAgo(3),  completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 3 }] }
   ];
   const html = app.volumeByPartCardHtml();
   assert.ok(!html.includes('아직 판단하기 이릅니다'));
@@ -1485,4 +1530,109 @@ test('정체기·주간리뷰 프롬프트 — 근거 없는 통념(자극 적�
   assert.ok(review.includes('이득 완만'), '상한 초과 라벨은 이득 완만');
   assert.ok(!review.includes('MEV'), "'MEV'는 검증된 경계값이 아니라 프롬프트에서 제거");
   assert.ok(!review.includes('과잉'), "'과잉'은 근거를 넘어선 표현이라 제거");
+});
+
+// ═══════════════════════════════════════════════
+// 코드리뷰 지적 반영 회귀 (PR #49 리뷰)
+// 아래 5개는 전부 "고쳤다고 생각했는데 실제로는 깨져 있던" 지점이라, 재발하면 즉시 빨개져야 한다.
+// ═══════════════════════════════════════════════
+
+// ── 종목 교체 검색: 옛 별칭 이름으로도 찾혀야 한다 ──
+// 별칭을 검색 대상에서 통째로 빼면 어순이 뒤집힌 쌍('체스트 프레스 머신' ↔ '머신 체스트 프레스')은
+// 옛 이름으로 검색했을 때 결과가 0건이 된다 — 사용자의 저장된 기록에 아직 남아 있는 이름인데도.
+test('종목 교체 검색 — 옛 별칭 이름으로 검색해도 표준명이 나온다 (중복 없이)', () => {
+  const a = loadApp();
+  a.state.activeSession = { exercises: [{ name: '덤벨 해머 컬', sets: [] }], currentExerciseIdx: 0 };
+  const hits = (q) => (a.buildSwapListHtml(q).match(/swapCurrentExercise\('([^']+)'\)/g) || [])
+    .map((s) => s.slice(21, -2));
+
+  assert.deepEqual(hits('체스트 프레스 머신'), ['머신 체스트 프레스'], '어순 뒤집힌 별칭도 표준명으로 찾힘');
+  assert.deepEqual(hits('숄더 프레스 머신'), ['머신 시티드 숄더 프레스']);
+  assert.deepEqual(hits('트라이셉스 푸시다운'), ['케이블 푸시 다운'], '단어가 전혀 겹치지 않는 별칭도 찾힘');
+
+  const pressHits = hits('프레스');
+  assert.ok(pressHits.length > 0, "'프레스' 검색이 비면 이 테스트가 헛돈다");
+  assert.equal(new Set(pressHits).size, pressHits.length, '같은 종목이 두 번 나오면 안 된다');
+  assert.deepEqual(pressHits.filter((n) => a.isAliasExerciseName(n)), [], '별칭 표기가 그대로 노출되면 안 된다');
+});
+
+// ── recalc1RMAfterEdit: 한 세션에 같은 운동이 두 표기로 있어도 1RM이 깎이지 않는다 ──
+test('recalc1RMAfterEdit — 세션 내 별칭/표준명 두 표기를 같은 종목으로 본다', () => {
+  const a = loadApp();
+  a.storage.set(a.KEYS.ONE_RM_DATA, { '랫 풀 다운': 100 });
+  a.state.activeSession = { exercises: [
+    { name: '랫풀다운',   sets: [{ weight: 70, reps: 10, completed: true, isWarmup: false }] }, // 70*(1+10/30)=93.3
+    { name: '랫 풀 다운', sets: [{ weight: 50, reps: 8,  completed: true, isWarmup: false }] },
+  ] };
+  a.state.data.workoutLog = [];
+  a._lastSetsCache = null;
+
+  a.recalc1RMAfterEdit('랫 풀 다운', null);
+  assert.equal(a.storage.get(a.KEYS.ONE_RM_DATA, {})['랫 풀 다운'], 93.3,
+    '원문 비교면 다른 표기의 세트를 놓쳐 63.3으로 깎인다');
+});
+
+// ── getStalledLifts: 레거시 reps 배열에서도 "최대" 반복을 봐야 한다 ──
+// 첫 세트만 보면 세션 안에서 반복을 올린 사용자가 "반복도 안 오름" = 정체로 오판된다.
+test('getStalledLifts — 레거시 reps 배열도 최대 반복 기준 (더블 프로그레션 오판 금지)', () => {
+  const a = loadApp();
+  const ago = (n) => a.getDateStr(new Date(Date.now() - n * 86400000));
+  const log = (repsFor) => [0, 1, 2, 3, 4, 5].map((i) => ({
+    date: ago(35 - i * 7), completed: true,
+    exercises: [{ name: '머신 체스트 프레스', maxWeight: 60, reps: repsFor(i) }],
+  }));
+
+  // 무게 고정 + 세션 내 반복 상승([8,8,8] → [8,10,12]) = 정상 진행
+  a.state.data.workoutLog = log((i) => (i < 3 ? [8, 8, 8] : [8, 10, 12]));
+  assert.deepEqual(plain(a.getStalledLifts()), [], '첫 세트만 보면 둘 다 8로 읽혀 정체로 오판된다');
+
+  // 진짜 정체는 여전히 잡힌다
+  a.state.data.workoutLog = log(() => [8, 8, 8]);
+  assert.deepEqual(plain(a.getStalledLifts()), ['머신 체스트 프레스']);
+});
+
+// ── 정체기 화면 신호 라벨: 영문 식별자가 그대로 노출되면 안 된다 ──
+test('정체기 화면 — 새 신호 키가 전부 한글 라벨을 갖는다', () => {
+  const a = loadApp();
+  a.state.plateauCheck = {
+    signals: ['lift_stalled', 'pr_stalled', 'frequency_drop'],
+    severity: 'medium', diagnosis: 'd', primary_cause: 'c', recommendations: [], encouragement: 'e',
+  };
+  a.state.plateauDetailOpen = true;
+  const html = a.renderPlateauDetail();
+
+  ['lift_stalled', 'pr_stalled', 'frequency_drop'].forEach((k) => {
+    assert.ok(!html.includes(k), '영문 식별자 ' + k + '가 화면에 그대로 노출됨');
+  });
+  assert.ok(html.includes('무게·횟수 둘 다 정체'), 'lift_stalled 라벨');
+  assert.ok(html.includes('PR 갱신 정체 (4주)'), 'pr_stalled 라벨이 실제 판정 기간(4주)과 일치');
+  assert.ok(!html.includes('PR 갱신 정체 (2주)'), '옛 2주 표기가 남으면 안 된다');
+});
+
+// ── 오늘의 추천 실패 잠금은 새로고침을 넘어 살아남아야 한다 ──
+// 메모리에만 두면 하드 리로드마다 잠금이 풀려, 실패가 반복될 때 앱을 열 때마다 유료 호출이 나간다.
+test('오늘의 추천 — 실패 잠금이 localStorage에 남아 재부팅 후에도 유지된다', () => {
+  const today = loadApp().getTodayStr();
+
+  const a = loadApp();
+  a.localStorage.setItem('fitness_ai_rec_failed_date', JSON.stringify(today));
+  a.init();
+  assert.equal(a.state.aiRecFailedDate, today, '재부팅 후 잠금이 복원돼야 자동 재호출이 막힌다');
+
+  const b = loadApp();
+  b.localStorage.setItem('fitness_ai_rec_failed_date', JSON.stringify('2020-01-01'));
+  b.init();
+  assert.equal(b.state.aiRecFailedDate, null, '어제 잠금은 버려야 오늘 다시 시도한다');
+
+  assert.ok(a.KEYS.AI_REC_FAILED_DATE, '전용 KEY 존재');
+  assert.ok(a.BACKUP_EXCLUDE_KEYS.indexOf(a.KEYS.AI_REC_FAILED_DATE) !== -1, '하루짜리 임시값은 백업에서 제외');
+});
+
+// ── 휴식 타이머: 종목표에 없는 복합 종목도 150초를 받아야 한다 ──
+test('휴식 타이머 — 미등록 복합 종목도 부위 판정으로 150초', () => {
+  const a = loadApp();
+  const ohp = a.getExercisePart('바벨 오버헤드 프레스');
+  assert.ok(ohp && ohp.compound === true, '미등록 복합 종목이 null이면 휴식이 90초로 떨어진다');
+  const row = a.getExercisePart('머신 로우');
+  assert.ok(row && row.compound === true, "'머신 로우'도 복합으로 잡혀야 한다");
 });

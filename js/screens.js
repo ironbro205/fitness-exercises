@@ -1954,10 +1954,15 @@ window.completeSet = function() {
   }
 
   // 휴식 시간 결정: AI가 지정한 rest(초) 우선, 없으면 복합/고립 기본값 (B안)
-  // 복합 판정은 종목표(compound 플래그)로 — 이름 키워드 목록은 표준명 '랫 풀 다운'처럼
+  // 복합 판정은 종목표(compound 플래그)를 우선 — 이름 키워드 목록만 쓰면 표준명 '랫 풀 다운'처럼
   // 띄어쓰기가 다른 이름을 놓쳐 복합 종목에 고립 휴식(90초)을 준다.
+  // 종목표에도 없는 이름(사용자 자유 입력·AI 신규 종목)은 옛 키워드 목록으로 폴백한다 —
+  // exercise.type은 '머신'·'덤벨'·'케이블'뿐이라 '복합'과 절대 같아지지 않아 폴백이 못 된다.
   var restInfo = EXERCISE_BODY_PART_MAP[exercise.name] || getExercisePart(exercise.name);
-  var isCompound = restInfo ? !!restInfo.compound : (exercise.type === '복합');
+  var isCompound = restInfo ? !!restInfo.compound
+    : ['프레스', '풀업', '풀다운', '풀 다운', '로우', '스쿼트', '데드리프트', '딥스'].some(function(k) {
+        return exercise.name.indexOf(k) !== -1;
+      });
   var aiRest = exercise.rest ? parseInt(String(exercise.rest), 10) : NaN; // 범위 "120-180"이면 하단 120초
   var restDuration = set.isWarmup ? 60 : ((!isNaN(aiRest) && aiRest > 0) ? aiRest : (isCompound ? 150 : 90));
 
@@ -2099,9 +2104,23 @@ function buildSwapListHtml(query) {
         return ai - bi;
       });
   } else {
-    // 전체 종목에서 검색 (공백 무시 부분일치), 같은 부위 우선
+    // 전체 종목에서 검색 (공백 무시 부분일치), 같은 부위 우선.
+    // 별칭 표기도 **검색 대상에는 남기고** 결과만 표준명으로 접는다 — 별칭을 검색에서 아예 빼면
+    // 어순이 뒤집힌 쌍('체스트 프레스 머신' ↔ '머신 체스트 프레스')은 옛 이름으로 검색했을 때
+    // 결과가 0건이 된다. 사용자의 저장된 기록에 아직 남아 있는 이름이라 반드시 찾혀야 한다.
+    var seenCanon = {};
     candidates = Object.keys(EXERCISE_BODY_PART_MAP)
-      .filter(function(name) { return canonicalExerciseName(name) !== canonicalExerciseName(exercise.name) && !isAliasExerciseName(name) && norm(name).indexOf(nq) !== -1 && isExerciseAvailable(name); })
+      .filter(function(name) { return norm(name).indexOf(nq) !== -1 && isExerciseAvailable(name); })
+      .map(function(name) {
+        var canon = canonicalExerciseName(name);
+        return EXERCISE_BODY_PART_MAP[canon] ? canon : name; // 표준명이 종목표에 있을 때만 접는다
+      })
+      .filter(function(name) {
+        if (name === canonicalExerciseName(exercise.name)) return false; // 자기 자신 제외
+        if (seenCanon[name]) return false;                               // 별칭·표준명 중복 제거
+        seenCanon[name] = true;
+        return true;
+      })
       .sort(function(a, b) {
         var ap = EXERCISE_BODY_PART_MAP[a].primary === primary ? 0 : 1;
         var bp = EXERCISE_BODY_PART_MAP[b].primary === primary ? 0 : 1;
@@ -4273,11 +4292,15 @@ function renderPlateauDetail() {
       '</div>';
   }
   
-  // 신호 라벨
+  // 신호 라벨 — js/ai.js detectPlateauSignals가 만드는 키와 **반드시** 같이 유지할 것.
+  // (키가 없으면 아래 폴백이 'lift_stalled' 같은 영문 식별자를 그대로 화면에 찍는다)
+  // weight_stalled는 삭제됐다 — 체중 유지 + 수행 상승은 리컴포지션 정상 진행이지 정체가 아니다.
+  // 3일짜리 옛 캐시에 남아 있을 수 있어 라벨만 남겨 둔다.
   var signalLabels = {
-    'pr_stalled': '🏆 PR 갱신 정체 (2주)',
-    'weight_stalled': '⚖️ 체중 변화 없음',
-    'frequency_drop': '📉 운동 빈도 감소'
+    'lift_stalled': '📊 무게·횟수 둘 다 정체 (4주 이상)',
+    'pr_stalled': '🏆 PR 갱신 정체 (4주)',
+    'frequency_drop': '📉 운동 빈도 감소',
+    'weight_stalled': '⚖️ 체중 변화 없음 (옛 기준)'
   };
   
   var signalsHtml = p.signals.map(function(s) {
@@ -4758,16 +4781,21 @@ function volumeByPartCardHtml() {
   var log = (state.data && state.data.workoutLog) ? state.data.workoutLog : [];
   if (!log.length) return '';
 
-  // 최소 표본 가드 — 첫 기록부터 오늘까지 14일 미만이면 판정하지 않는다.
-  // (볼륨은 항상 2로 나눈 주간 평균이라, 3일 쓴 사용자는 전 부위가 '부족'으로 보인다)
+  // 최소 표본 가드 — 두 조건을 **모두** 만족해야 판정한다.
+  //  (1) 첫 기록부터 오늘까지 14일 이상: 볼륨은 항상 2로 나눈 주간 평균이라 3일 쓴 사용자는
+  //      전 부위가 '부족'으로 보인다.
+  //  (2) 최근 2주 창 안에 운동이 2회 이상: (1)만 보면 1년 전에 한 번 기록한 복귀 사용자가
+  //      복귀 첫날 바로 전 부위 '부족' 빨간 배지를 보게 된다 — 가드가 막으려던 바로 그 오해다.
   var dates = log.map(function(w) { return String(w.date || ''); }).filter(function(s) { return s; }).sort();
+  var todayD = new Date(getTodayStr() + 'T00:00:00');
   var spanDays = 0;
   if (dates.length > 0) {
     var firstD = new Date(dates[0] + 'T00:00:00');
-    var todayD = new Date(getTodayStr() + 'T00:00:00');
     spanDays = Math.floor((todayD.getTime() - firstD.getTime()) / 86400000) + 1;
   }
-  var enoughData = spanDays >= WEEKS * 7;
+  var windowStartStr = getDateStr(new Date(todayD.getTime() - WEEKS * 7 * 86400000));
+  var sessionsInWindow = dates.filter(function(d) { return d >= windowStartStr; }).length;
+  var enoughData = spanDays >= WEEKS * 7 && sessionsInWindow >= 2;
 
   var split = getRecentVolumeSplitByPart(WEEKS);
   var groupedFrac = groupVolumeBy(split.fractional);

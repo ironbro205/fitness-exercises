@@ -28,6 +28,7 @@ var KEYS = {
   CYCLE_HISTORY: 'fitness_cycle_history',
   COACH_MEMORY: 'fitness_coach_memory',
   AI_RECOMMENDATION_HISTORY: 'fitness_ai_recommendation_history',
+  AI_REC_FAILED_DATE: 'fitness_ai_rec_failed_date',
   CHAT_SIGNALS: 'fitness_chat_signals',
   LAST_BACKUP: 'fitness_last_backup'
 };
@@ -137,6 +138,7 @@ var BACKUP_TRANSIENT_KEYS = [
   KEYS.EXERCISES_VERSION,
   KEYS.AI_RECOMMENDATION,  // AI 캐시 (새 데이터 기준으로 재생성)
   KEYS.AI_RECOMMENDATION_HISTORY, // 추천 다양성용 이력 (재생성 가능)
+  KEYS.AI_REC_FAILED_DATE, // 오늘 추천 실패 잠금 (하루짜리 임시값)
   KEYS.WEEKLY_REVIEW,
   KEYS.PLATEAU_CHECK
 ];
@@ -843,6 +845,10 @@ function init() {
   if (cachedRec && cachedRec.date === getTodayStr()) {
     state.aiRecommendation = cachedRec;
   }
+  // 오늘 추천 실패 잠금 복원 — 메모리에만 두면 새로고침마다 잠금이 풀려
+  // 실패할 때마다 유료 API가 다시 나간다(앱을 열 때마다 1회). 어제 것은 버린다.
+  var failedDate = storage.get(KEYS.AI_REC_FAILED_DATE);
+  state.aiRecFailedDate = (failedDate === getTodayStr()) ? failedDate : null;
   
   // 캐시된 주간 리뷰 로드 (이번 주 것만)
   var cachedReview = storage.get(KEYS.WEEKLY_REVIEW);
