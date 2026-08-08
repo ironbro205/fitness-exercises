@@ -138,9 +138,18 @@ function getRecentPerformances(exerciseName, n) {
 // 아래 한 개의 판정 함수를 단일 원천으로 삼아, 진행·세트구성·1RM·문구가 같은 방향을 본다.
 
 function isReverseProgression(exerciseName) {
-  var name = canonicalExerciseName(exerciseName || '');
-  if (REVERSE_PROGRESSION_EXERCISES.indexOf(name) !== -1) return true;
-  // 키워드 경로는 '어시스트' + '풀업/친업/딥스'가 **둘 다** 있어야 한다 (오탐 방지 — data.js 주석).
+  var raw = canonicalExerciseName(exerciseName || '');
+  if (REVERSE_PROGRESSION_EXERCISES.indexOf(raw) !== -1) return true;
+
+  // 표기 변형 흡수 — 공백·하이픈·가운뎃점을 지우고 매칭한다 ('어시스트 풀 업', '어시스티드 풀-업').
+  var name = raw.replace(/[\s\-_·]/g, '');
+
+  // 밴드 보조는 가변 보조라 이 축에 올릴 수 없다 (data.js ASSIST_EXCLUDE_KEYWORDS 주석).
+  for (var e = 0; e < ASSIST_EXCLUDE_KEYWORDS.length; e++) {
+    if (name.indexOf(ASSIST_EXCLUDE_KEYWORDS[e]) !== -1) return false;
+  }
+
+  // 키워드 경로는 '어시스트/보조' + '풀업/친업/딥스'가 **둘 다** 있어야 한다 (오탐 방지).
   var hasAssist = false, hasMovement = false;
   for (var i = 0; i < ASSIST_NAME_KEYWORDS.length; i++) {
     if (name.indexOf(ASSIST_NAME_KEYWORDS[i]) !== -1) { hasAssist = true; break; }

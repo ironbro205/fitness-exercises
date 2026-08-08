@@ -40,12 +40,23 @@ test('판정: AI가 만든 이름 변형도 키워드로 잡는다', () => {
   assert.equal(app.isReverseProgression('어시스티드 풀업'), true);
   assert.equal(app.isReverseProgression('머신 어시스트 딥스'), true);
   assert.equal(app.isReverseProgression('어시스트 친업'), true);
+  // 띄어쓰기·하이픈·'보조' 표기 변형까지 (공백/하이픈 제거 후 매칭)
+  assert.equal(app.isReverseProgression('어시스트 풀 업'), true);
+  assert.equal(app.isReverseProgression('어시스티드 풀-업'), true);
+  assert.equal(app.isReverseProgression('보조 풀업'), true);
+  assert.equal(app.isReverseProgression('보조 딥스'), true);
+});
+
+test('판정: 밴드 보조는 제외한다 (가변 보조 — kg 한 칸 개념이 성립 안 함)', () => {
+  assert.equal(app.isReverseProgression('밴드 보조 풀업'), false);
+  assert.equal(app.isReverseProgression('밴드 어시스트 딥스'), false);
 });
 
 test('판정: "어시스트"만 있고 풀업/딥스가 아니면 역방향이 아니다 (키워드 오탐 방지)', () => {
   // 보조 기구는 풀업·친업·딥스 전용이다. 이 가드가 없으면 아래 이름의 1RM이 조용히 삭제된다.
   assert.equal(app.isReverseProgression('어시스트 레그 프레스'), false);
   assert.equal(app.isReverseProgression('어시스트 체스트 프레스'), false);
+  assert.equal(app.isReverseProgression('보조 운동'), false); // '보조'는 movement 없이 단독으로 안 걸린다
 });
 
 // ═══ 2. 진행 방향 (핵심) ═══
