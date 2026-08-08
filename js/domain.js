@@ -905,29 +905,40 @@ function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
   //    맨몸 복합(풀업 등)은 무게를 낮출 수 없으니 램프 대신 1세트만 (기존 동작 유지).
   var rows = [];
   if (wantWarmup && workingCount > 0) {
+    var ramp = [];
     if (reverse && (cls === 'compound_heavy' || cls === 'compound_moderate')) {
       // 역방향: 워밍업 = 보조를 **더 준** 가벼운 세트 (보조 0kg에서도 성립한다)
       var wstep = getWeightIncrement(exerciseName);
       var base = weight > 0 ? weight : 0;
-      if (cls === 'compound_heavy') rows.push(warmupRow(base + wstep * 3, 8));
-      rows.push(warmupRow(base + wstep, cls === 'compound_heavy' ? 4 : 8));
+      if (cls === 'compound_heavy') ramp.push(warmupRow(base + wstep * 3, 8));
+      ramp.push(warmupRow(base + wstep, cls === 'compound_heavy' ? 4 : 8));
     } else if (weight > 0 && cls === 'compound_heavy') {
-      rows.push(warmupRow(snapWeightToEquipment(weight * 0.50, exerciseName), 8));
-      rows.push(warmupRow(snapWeightToEquipment(weight * 0.75, exerciseName), 4));
+      ramp.push(warmupRow(snapWeightToEquipment(weight * 0.50, exerciseName), 8));
+      ramp.push(warmupRow(snapWeightToEquipment(weight * 0.75, exerciseName), 4));
       // [v2 §2-F] 피더 단 — 램프가 75%에서 멈추면 첫 워킹세트가 무겁게 느껴진다.
       // 근거는 "마지막 웜업 단을 더 무겁게, 더 적은 반복으로"(De Freitas PAP 등, 급성 수행 개선 = 중간).
-      // 첫 워킹세트보다 가벼울 때만 넣는다 — 피라미드처럼 첫 세트가 이미 가벼운 스킴엔 자리가 없다.
-      var feeder = reduceWeight(weight, FEEDER_PCT, exerciseName);
-      var firstWorkW = workRows.length ? workRows[0].weight : weight;
-      var rampTop = rows[rows.length - 1].weight;
-      if (build.feeder && feeder > rampTop && feeder < firstWorkW) {
-        rows.push(warmupRow(feeder, FEEDER_REPS));
-      }
+      if (build.feeder) ramp.push(warmupRow(reduceWeight(weight, FEEDER_PCT, exerciseName), FEEDER_REPS));
     } else if (weight > 0 && cls === 'compound_moderate') {
-      rows.push(warmupRow(snapWeightToEquipment(weight * 0.55, exerciseName), 8));
+      ramp.push(warmupRow(snapWeightToEquipment(weight * 0.55, exerciseName), 8));
     } else if (!weight && (cls === 'compound_heavy' || cls === 'compound_moderate')) {
-      rows.push(warmupRow(null, 8));
+      ramp.push(warmupRow(null, 8));
     }
+
+    // 워밍업은 **첫 워킹세트보다 반드시 쉬워야** 한다. 램프 비율(50/75/90%)은 워킹 무게 기준인데
+    // 첫 워킹세트가 그보다 가벼운 스킴이 있고(피라미드 = 85%부터 시작), 아주 가벼운 무게에서는
+    // 격자 반올림 때문에 램프가 워킹세트를 따라잡는다. 조건을 못 지키는 단은 통째로 버린다
+    // — 워밍업이 본 세트보다 무거우면 준비가 아니라 그냥 더 힘든 세트다.
+    // 역방향(어시스트)은 방향이 뒤집힌다: 쉬운 세트 = 보조가 **더 많은** 세트.
+    var firstWorkW = workRows.length ? workRows[0].weight : weight;
+    var prevW = null;
+    ramp.forEach(function(r) {
+      if (typeof r.weight === 'number' && typeof firstWorkW === 'number') {
+        if (reverse ? !(r.weight > firstWorkW) : !(r.weight < firstWorkW)) return;
+        if (prevW !== null && (reverse ? r.weight >= prevW : r.weight <= prevW)) return; // 램프는 계속 올라간다
+        prevW = r.weight;
+      }
+      rows.push(r);
+    });
   }
   rows = rows.concat(workRows);
 

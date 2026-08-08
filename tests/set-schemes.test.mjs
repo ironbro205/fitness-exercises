@@ -605,6 +605,74 @@ test('[불변식] 미리보기 처방 표와 실제 세션 세트의 무게·반
   resetOverrides();
 });
 
+test('[불변식] 전 스킴 × 전 클래스 × 무게 3~200kg × 세트 1~6 전수 — 세트 배열이 항상 말이 된다', () => {
+  resetOverrides();
+  seedLog([]);
+  const names = ['핵 스쿼트', '레그 프레스', '머신 레그 익스텐션', '덤벨 사이드 레터럴 레이즈',
+                 '덤벨 벤치 프레스', '해머 컬', '어시스트 풀업'];
+  const bad = [];
+  let checked = 0;
+
+  names.forEach((name) => {
+    const rev = app.isReverseProgression(name);
+    const step = app.getWeightIncrement(name);
+    const rules = app.EXERCISE_CLASS_RULES[app.getExerciseClass(name)];
+    const range = { low: rules.repMin, high: rules.repMax };
+    // 역방향은 "가볍다 = 보조가 많다" 라 모든 비교가 뒤집힌다
+    const easier = (a, b) => (rev ? a > b : a < b);
+
+    app.SET_SCHEME_ORDER.forEach((sc) => {
+      for (let w = step * 3; w <= 200; w += step) {
+        [1, 2, 3, 4, 6].forEach((n) => {
+          checked++;
+          const where = `${name}/${sc} w=${w} n=${n}`;
+          const rows = app.buildSchemeSets(name, w, range.low, range, sc, { sets: n, warmup: true });
+          const work = rows.filter((s) => !s.isWarmup);
+          const warm = rows.filter((s) => s.isWarmup);
+
+          rows.forEach((s) => {
+            if (typeof s.weight !== 'number') return;
+            if (Math.abs(s.weight % step) > 1e-9) bad.push(`${where}: ${s.weight}kg 가 ${step}kg 격자 밖 (소수점 금지)`);
+            if (s.weight < 0) bad.push(`${where}: 음수 무게 ${s.weight}`);
+            if (!(s.reps >= 1)) bad.push(`${where}: 반복 ${s.reps}`);
+            if (!(s.rest > 0)) bad.push(`${where}: 휴식 ${s.rest}`);
+          });
+
+          // 감량 세트는 탑세트보다 반드시 쉽다
+          const top = work.filter((s) => s.role === 'top')[0];
+          if (top && top.weight > 0) {
+            work.forEach((s) => {
+              if (s.role === 'top' || typeof s.weight !== 'number') return;
+              if (!easier(s.weight, top.weight)) bad.push(`${where}: ${s.role} ${s.weight} 가 탑 ${top.weight} 보다 안 쉽다`);
+            });
+          }
+
+          // 사다리의 서로 다른 배율 단은 서로 다른 무게여야 한다 (반올림 뭉개짐 방지)
+          const byPct = {};
+          work.forEach((s) => { if (typeof s.pct === 'number') byPct[s.pct] = s.weight; });
+          const ks = Object.keys(byPct).map(Number).sort((a, b) => b - a);
+          for (let i = 1; i < ks.length; i++) {
+            if (!easier(byPct[ks[i]], byPct[ks[i - 1]])) bad.push(`${where}: ${ks[i - 1]}·${ks[i]} 단이 같은 무게(${byPct[ks[i]]})로 뭉갰다`);
+          }
+
+          // 워밍업은 첫 워킹세트보다 쉽고, 램프는 계속 올라간다
+          if (warm.length && work.length && typeof work[0].weight === 'number') {
+            warm.forEach((s) => {
+              if (!easier(s.weight, work[0].weight)) bad.push(`${where}: 워밍업 ${s.weight} 이 첫 워킹세트 ${work[0].weight} 보다 안 쉽다`);
+            });
+            for (let i = 1; i < warm.length; i++) {
+              if (easier(warm[i].weight, warm[i - 1].weight)) bad.push(`${where}: 램프가 거꾸로 간다 (${warm[i - 1].weight} → ${warm[i].weight})`);
+            }
+          }
+        });
+      }
+    });
+  });
+
+  assert.ok(checked > 15000, `전수 검사 조합이 너무 적다: ${checked}`);
+  assert.equal(bad.slice(0, 5).join(' | '), '', `${bad.length}건 위반 (앞 5건만 표시)`);
+});
+
 // ═══ 4. 휴식시간 (§3-B 권장표 · §3-C 자가조절) ═══
 
 test('휴식 기본값: 180 / 150 / 120 / 90 / 60초 (클래스별 새 권장치)', () => {
