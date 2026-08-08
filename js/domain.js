@@ -306,7 +306,7 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
   // "모든 세트가 상단 반복"을 영원히 만족하지 못해 증량이 통째로 막힌다.
   // 역방향(어시스트)은 보조 0kg(= 맨몸)이 유효한 최종 목표값이라 재활과 같이 0을 허용한다.
   var workingSets = last.sets.filter(function(s) {
-    if (s.role === 'drop' || s.role === 'myo') return false;
+    if (isOffProgressSet(s)) return false;
     return ((cls === 'rehab' || reverse) ? s.weight >= 0 : s.weight > 0) && s.reps > 0;
   });
   if (!workingSets.length) return null;
@@ -353,7 +353,7 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
   // (docs/research/set-schemes.md §2-B ⚠️ · §5-D — 의도된 변경)
   function reachedTopAt(perf, weight) {
     var ws = perf.sets.filter(function(s) {
-      if (s.role === 'drop' || s.role === 'myo') return false;
+      if (isOffProgressSet(s)) return false;
       return s.weight === weight && s.reps > 0 && !s.isWarmup;
     });
     return ws.length > 0 && ws.every(function(s) { return s.reps >= topReps; });
@@ -479,7 +479,7 @@ function getAssistProgressTrend(exerciseName, n) {
   var values = [];
   for (var i = 0; i < perfs.length; i++) {
     var ws = perfs[i].sets.filter(function(s) {
-      return s.role !== 'drop' && s.role !== 'myo' && !s.isWarmup && s.reps > 0 && s.weight >= 0;
+      return !isOffProgressSet(s) && !s.isWarmup && s.reps > 0 && s.weight >= 0;
     });
     if (!ws.length) continue;
     values.push(Math.min.apply(null, ws.map(function(s) { return s.weight; })));
@@ -570,7 +570,7 @@ function calculateRollingMax1RM(exerciseName, windowSessions) {
         // 드롭·마이오렙 세트 제외 (완료 시점의 update1RM과 같은 규칙 — 세 경로가 어긋나면 안 된다).
         // 특히 경량 고립은 워킹세트(20회)가 반복 상한에 걸려 빠지는데 미니세트(5회)만 남아,
         // 지친 상태의 미니세트가 그 종목의 유일한 e1RM 근거가 되는 역전이 생긴다.
-        if (s.role === 'drop' || s.role === 'myo') continue;
+        if (isOffProgressSet(s)) continue;
         if (!s.weight || !s.reps) continue;
         if (s.reps > maxReps) continue; // 고횟수 제외 (클래스별 상한)
         var e = calculate1RM(s.weight, s.reps);
@@ -629,13 +629,25 @@ function getSessionSetPlan(exerciseName, fallbackWeight, targetReps, opts) {
   };
 }
 
+// 그 세트법이 **감량(무게를 낮추는 단)** 위에 서 있는가. 스킴 표에서 직접 읽는다 —
+// 스킴이 늘어날 때마다 여기 이름을 추가하는 걸 잊으면 미리보기와 실제 세트가 어긋난다(v2 §4-E).
+function schemeNeedsWeight(scheme) {
+  var b = SET_SCHEMES[scheme] && SET_SCHEMES[scheme].build;
+  if (!b || !Array.isArray(b.steps)) return false;
+  for (var i = 0; i < b.steps.length; i++) {
+    if (typeof b.steps[i].pct === 'number' && b.steps[i].pct < 1) return true;
+  }
+  return false;
+}
+
 // 실제로 적용되는 세트법. 무게를 모르는 종목(맨몸·미측정)은 감량 자체가 불가능하므로
-// 탑+백오프·드롭이 성립하지 않는다 → 스트레이트로 접어서 **화면 표기와 실제 세트를 일치시킨다**.
+// 탑+백오프·백다운·피라미드·역피라미드·드롭이 성립하지 않는다
+// → 스트레이트로 접어서 **화면 표기와 실제 세트를 일치시킨다**.
 function effectiveSetScheme(exerciseName, weight) {
   var scheme = getSetScheme(exerciseName);
   // 역방향(어시스트)은 보조 0kg에서도 "더 쉽게"가 가능하다(보조를 더 준다) → 스킴을 접지 않는다.
   if (isReverseProgression(exerciseName)) return scheme;
-  if ((!weight || weight <= 0) && (scheme === 'top_backoff' || scheme === 'drop')) return 'straight';
+  if ((!weight || weight <= 0) && schemeNeedsWeight(scheme)) return 'straight';
   return scheme;
 }
 
@@ -670,9 +682,19 @@ function setSetSchemeOverride(exerciseName, scheme) {
   return true;
 }
 
+// 어시스트(역방향) 종목에서 다시 쓰는 설명문. "가볍게 = 보조를 더" 라서 %·감량 표기가 정반대로 읽힌다.
+var REVERSE_SCHEME_DESC = {
+  top_backoff:  '가장 낮은 보조로 1세트 → 보조를 한 칸 올려 2세트',
+  top_backdown: '가장 낮은 보조로 1세트 → 보조를 크게 올려 12~15회',
+  pyramid:      '보조를 많이 준 세트부터 시작해 점점 줄여요',
+  rpt:          '가장 낮은 보조로 시작해 세트마다 보조를 늘려요',
+  drop:         '마지막 세트에서 보조를 두 칸씩 올려 이어서'
+};
+
 // 세트법 선택지 (세션 화면 "세트법 바꾸기" 시트용).
-// 재활은 스트레이트 하나뿐. 나머지는 4개를 모두 고를 수 있되, 근거상 권장 여부를 warn으로 알려준다
+// 재활은 스트레이트 하나뿐. 나머지는 7종을 모두 고를 수 있되, 근거상 권장 여부를 warn으로 알려준다
 // — 자동 배정은 앱이 하지만 최종 선택은 사용자 몫이라는 게 이 기능의 요구사항이다.
+// warn 문구는 v2 §4-C② 표를 그대로 옮긴 것이다(해요체 · 40자 이내).
 function getSetSchemeOptions(exerciseName) {
   var cls = getExerciseClass(exerciseName);
   var rules = EXERCISE_CLASS_RULES[cls];
@@ -683,21 +705,78 @@ function getSetSchemeOptions(exerciseName) {
   }
   var machineOrCable = isMachineOrCableExercise(exerciseName);
   var reverse = isReverseProgression(exerciseName);
-  return ['straight', 'top_backoff', 'drop', 'myo_reps'].map(function(id) {
+  var freeHeavy = (cls === 'compound_heavy' || cls === 'compound_moderate') && !machineOrCable;
+  return SET_SCHEME_ORDER.map(function(id) {
     var warn = '';
     if (id === 'top_backoff' && cls !== 'compound_heavy') warn = '고중량 복합에 맞춘 방식이에요';
+    if (id === 'top_backdown' && cls === 'compound_heavy') warn = '시간이 3분쯤 더 들어요';
+    if (id === 'top_backdown' && freeHeavy) warn = '프리웨이트에선 마지막에 폼이 흔들려요';
+    if (id === 'pyramid') warn = '첫 세트는 자극이 약해요';
+    if (id === 'rpt' && freeHeavy) warn = '첫 세트부터 한계라 폼이 흔들려요';
     if (id === 'drop' && !machineOrCable) warn = '프리웨이트에선 위험해요 — 마이오렙을 권해요';
     if (id === 'drop' && cls === 'compound_heavy') warn = '고중량 복합에는 권하지 않아요 (피로 대비 이득 없음)';
     if (id === 'myo_reps' && cls === 'compound_heavy') warn = '고중량 복합에는 권하지 않아요';
-    // 어시스트 종목은 "가볍게 = 보조를 더" 라서 기본 설명문(90% 무게 / −25%)이 정반대로 읽힌다.
-    var desc = SET_SCHEMES[id].desc;
-    if (reverse && id === 'top_backoff') desc = '가장 낮은 보조로 1세트 → 보조를 한 칸 올려 2세트';
-    if (reverse && id === 'drop') desc = '마지막 세트에서 보조를 두 칸씩 올려 이어서';
     return {
-      id: id, kr: SET_SCHEMES[id].kr, desc: desc,
+      id: id, kr: SET_SCHEMES[id].kr,
+      desc: (reverse && REVERSE_SCHEME_DESC[id]) || SET_SCHEMES[id].desc,
       current: id === current, suggested: id === rules.scheme, warn: warn
     };
   });
+}
+
+// 그 스킴이 탑세트 **다음**에 두는 단 (없으면 null).
+// "세트 추가"가 탑세트 뒤에 무엇을 붙일지 결정하는 데 쓴다 — 탑+백오프면 백오프, 탑+백다운이면 백다운.
+function nextStepAfterTop(scheme) {
+  var build = SET_SCHEMES[scheme] && SET_SCHEMES[scheme].build;
+  if (!build || build.pattern !== 'ramp' || !Array.isArray(build.steps)) return null;
+  var seenTop = false;
+  for (var i = 0; i < build.steps.length; i++) {
+    if (build.steps[i].role === 'top') { seenTop = true; continue; }
+    if (seenTop && typeof build.steps[i].pct === 'number' && build.steps[i].pct < 1) return build.steps[i];
+  }
+  return null;
+}
+
+// [v2 §2-E③] 탑세트가 목표 반복을 못 채웠으면 **아직 안 한 백오프**를 한 스텝 더 내린다.
+// 근거: Khairallah 2009 — 필요한 감량폭은 그날 컨디션·종목에 따라 다르고, 탑세트가 이미 무너졌다면
+// 10% 감량으로는 백오프에서 반복이 또 무너진다. Helms 2018도 감량폭을 키우면 총 볼륨이 산다고 보고했다.
+// 세션 중에(탑세트를 실제로 기록한 뒤) 부르는 자가조절 규칙이라 미리보기 계획은 건드리지 않는다.
+// 반환: 실제로 낮춘 세트 수 (0이면 아무것도 안 바뀜)
+function applyTopSetAutoDeload(exercise) {
+  if (!exercise || !Array.isArray(exercise.sets)) return 0;
+  var build = SET_SCHEMES[exercise.scheme] && SET_SCHEMES[exercise.scheme].build;
+  if (!build || !build.autoDeload) return 0;
+
+  var top = null;
+  for (var i = 0; i < exercise.sets.length; i++) {
+    var s = exercise.sets[i];
+    if (s && s.completed && !s.isWarmup && s.role === 'top') top = s;
+  }
+  if (!top || top.weight === null || top.weight === undefined || !(top.reps > 0)) return 0;
+
+  var range = clampRepsToClass(exercise.name, exercise.targetReps);
+  if (top.reps >= range.high) return 0;                 // 목표 달성 — 현행 감량폭 유지
+
+  // 평소 백오프보다 **반드시 한 스텝 더** 쉬운 무게. 반올림으로 두 값이 같아지는 구간을 막는다.
+  var step = getWeightIncrement(exercise.name);
+  var normal = reduceWeight(top.weight, BACKOFF_PCT, exercise.name);
+  var deloaded = reduceWeight(top.weight, build.autoDeload.pct, exercise.name);
+  if (isReverseProgression(exercise.name)) {
+    if (deloaded <= normal) deloaded = normal + step;    // 보조는 더 늘어야 쉬워진다
+  } else if (deloaded >= normal) {
+    deloaded = Math.max(step, normal - step);
+  }
+  if (deloaded === normal) return 0;                     // 더 내릴 자리가 없다 (최저 중량)
+
+  var changed = 0;
+  exercise.sets.forEach(function(s) {
+    if (!s || s.completed || s.isWarmup || s.role !== 'backoff') return;
+    if (s.weight === deloaded) return;
+    s.weight = deloaded;
+    s.autoDeloaded = true;
+    changed++;
+  });
+  return changed;
 }
 
 // 장비가 머신·케이블인가 (드롭세트 조건 §4-A②: 안정성이 높아 실패 지점에서도 부상 위험이 낮다 — Sødal 2023)
@@ -715,6 +794,12 @@ function getExerciseRestSec(exerciseName) {
   return EXERCISE_CLASS_RULES[getExerciseClass(exerciseName)].restSec;
 }
 
+// 진행 판정·1RM·'지난 기록'에서 빼야 하는 세트인가 (data.js SET_ROLES_OFF_PROGRESS 가 단일 원천).
+// **볼륨 카운트에는 쓰지 않는다** — 백다운은 독립 워킹세트라 볼륨에 들어간다(v2 §3-C C-4).
+function isOffProgressSet(s) {
+  return !!(s && s.role && SET_ROLES_OFF_PROGRESS.indexOf(s.role) !== -1);
+}
+
 // 볼륨 카운트용 워킹세트 수.
 // 드롭·마이오렙 세트는 **마지막 워킹세트의 연장**이지 독립 세트가 아니다. 그대로 세면
 // 3세트 종목이 5세트로 잡혀 주간 볼륨 폐루프(AI 프롬프트·부족 부위 판정)가 부풀려진다.
@@ -726,9 +811,55 @@ function countWorkingSets(sets) {
   }).length;
 }
 
+// 램프 스텝을 실제 워킹세트 수(n)에 맞춰 펼친다 (v2 §4-A build.steps 해석기).
+// 규칙:
+//  · repeat:'fill' 스텝은 남는 자리를 전부 채운다 (백오프·백다운·피라미드 하단)
+//  · last:true 스텝은 언제나 **마지막 자리**를 차지한다 (백오프의 RIR 0~1 세트, 피라미드의 탑세트)
+//  · n이 스텝 수보다 적으면 **핵심 세트부터** 남긴다 — 핵심은 progressFrom 이 가리키는 쪽
+//    (증량 판정 기준 세트가 사라지면 그 스킴은 진행이 멈춘다)
+// 반환: 선언 순서대로 정렬된 스텝 배열 (길이 = n)
+function expandRampSteps(build, n) {
+  if (n <= 0) return [];
+  var steps = (build && build.steps) || [];
+  if (!steps.length) return [];
+
+  var fillIdx = -1, lastIdx = -1;
+  for (var i = 0; i < steps.length; i++) {
+    if (steps[i].repeat === 'fill' && fillIdx < 0) fillIdx = i;
+    if (steps[i].last) lastIdx = i;
+  }
+
+  // 세트 수가 모자랄 때 남길 우선순위. 피라미드는 마지막(가장 무거운) 세트가 핵심이다.
+  var priority = [];
+  for (var f = 0; f < steps.length; f++) {
+    if (f !== fillIdx) priority.push(f);
+  }
+  if (build.progressFrom === 'last') priority.reverse();
+  if (fillIdx >= 0) priority.push(fillIdx);   // fill 은 남는 자리를 채우는 역할이라 마지막 순위
+
+  var keep = {}, kept = 0;
+  for (var p = 0; p < priority.length && kept < n; p++) { keep[priority[p]] = 1; kept++; }
+
+  // 남는 자리는 전부 fill 스텝 차지. 다른 스텝은 한 자리씩이므로 먼저 세어 두고 나머지를 넘긴다
+  // (여기서 자리 수를 잘못 세면 마지막에 slice 로 탑세트가 잘려 나간다).
+  var fixedKept = 0;
+  for (var q = 0; q < steps.length; q++) if (keep[q] && q !== fillIdx) fixedKept++;
+  var fillTimes = keep[fillIdx] ? Math.max(1, n - fixedKept) : 0;
+
+  var out = [];
+  for (var s = 0; s < steps.length; s++) {
+    if (!keep[s] || s === lastIdx) continue;                  // last 스텝은 맨 끝에 따로 붙인다
+    var times = (s === fillIdx) ? fillTimes : 1;
+    for (var t = 0; t < times; t++) out.push(steps[s]);
+  }
+  if (lastIdx >= 0 && keep[lastIdx]) out.push(steps[lastIdx]);
+  return out.slice(0, n);
+}
+
 // 세트 배열 생성. opts = { sets: 워킹세트 수, warmup: 워밍업 포함 여부 }
-// 무게를 모르는 종목(맨몸·미측정)은 감량 자체가 불가능하므로 탑+백오프·드롭을 스트레이트로 접는다.
+// 무게를 모르는 종목(맨몸·미측정)은 감량 자체가 불가능하므로 감량 기반 스킴을 스트레이트로 접는다.
 // sets: 0 은 유효한 값이다 — "남은 워킹세트가 없다"는 뜻이고, 이때 새 워킹세트를 만들면 안 된다.
+// **세트 생성 규칙은 코드가 아니라 SET_SCHEMES[scheme].build 에 있다** (v2 §4-A) — 여기는 해석기다.
 function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
   var requested = (opts && opts.sets !== undefined && opts.sets !== null) ? opts.sets : 3;
   var workingCount = Math.max(0, requested);
@@ -736,16 +867,33 @@ function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
   var classRest = getExerciseRestSec(exerciseName);
   var cls = getExerciseClass(exerciseName);
   var reverse = isReverseProgression(exerciseName);
-  var rows = [];
 
   // 역방향(어시스트)은 보조 0kg에서도 감량(=보조 증가)이 가능하므로 스킴을 접지 않는다.
-  if (!reverse && (!weight || weight <= 0)) {
-    if (scheme === 'top_backoff' || scheme === 'drop') scheme = 'straight';
+  if (!reverse && (!weight || weight <= 0) && schemeNeedsWeight(scheme)) scheme = 'straight';
+  var build = (SET_SCHEMES[scheme] && SET_SCHEMES[scheme].build) || SET_SCHEMES.straight.build;
+
+  // ── 워킹세트를 **먼저** 만든다. 워밍업 램프의 마지막 단(피더)이 첫 워킹세트보다
+  //    무거우면 안 되기 때문이다(피라미드는 첫 워킹세트가 이미 85%라 피더가 들어갈 자리가 없다).
+  var workRows = [];
+  if (workingCount > 0 && build.pattern === 'ramp') {
+    var plan = expandRampSteps(build, workingCount);
+    // 사다리 무게는 **한 번에** 계산한다 — 단마다 따로 반올림하면 두 단이 같은 값으로 뭉개진다.
+    var pcts = [];
+    plan.forEach(function(st) { if (pcts.indexOf(st.pct) === -1) pcts.push(st.pct); });
+    pcts.sort(function(a, b) { return b - a; });          // 무거운 순
+    var ladder = buildWeightLadder(exerciseName, weight, pcts);
+    plan.forEach(function(st) {
+      workRows.push(workRow(st.role || 'work', ladder[st.pct], stepReps(st), st.rest || classRest, st.rir, st));
+    });
+  } else if (workingCount > 0) {
+    var rir = (cls === 'compound_heavy' || cls === 'compound_moderate') ? '2-3' : '0-2';
+    for (var i = 0; i < workingCount; i++) workRows.push(workRow('work', weight, reps, classRest, rir, null));
   }
 
   // ── 워밍업 (§2-B 규칙①) — 자극이 아니라 준비이므로 저부하 고반복은 피로만 준다.
   //    고립 이하는 첫 워킹세트가 자체 워밍업 역할을 하므로 넣지 않는다.
   //    맨몸 복합(풀업 등)은 무게를 낮출 수 없으니 램프 대신 1세트만 (기존 동작 유지).
+  var rows = [];
   if (wantWarmup && workingCount > 0) {
     if (reverse && (cls === 'compound_heavy' || cls === 'compound_moderate')) {
       // 역방향: 워밍업 = 보조를 **더 준** 가벼운 세트 (보조 0kg에서도 성립한다)
@@ -756,52 +904,71 @@ function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
     } else if (weight > 0 && cls === 'compound_heavy') {
       rows.push(warmupRow(snapWeightToEquipment(weight * 0.50, exerciseName), 8));
       rows.push(warmupRow(snapWeightToEquipment(weight * 0.75, exerciseName), 4));
+      // [v2 §2-F] 피더 단 — 램프가 75%에서 멈추면 첫 워킹세트가 무겁게 느껴진다.
+      // 근거는 "마지막 웜업 단을 더 무겁게, 더 적은 반복으로"(De Freitas PAP 등, 급성 수행 개선 = 중간).
+      // 첫 워킹세트보다 가벼울 때만 넣는다 — 피라미드처럼 첫 세트가 이미 가벼운 스킴엔 자리가 없다.
+      var feeder = reduceWeight(weight, FEEDER_PCT, exerciseName);
+      var firstWorkW = workRows.length ? workRows[0].weight : weight;
+      var rampTop = rows[rows.length - 1].weight;
+      if (build.feeder && feeder > rampTop && feeder < firstWorkW) {
+        rows.push(warmupRow(feeder, FEEDER_REPS));
+      }
     } else if (weight > 0 && cls === 'compound_moderate') {
       rows.push(warmupRow(snapWeightToEquipment(weight * 0.55, exerciseName), 8));
     } else if (!weight && (cls === 'compound_heavy' || cls === 'compound_moderate')) {
       rows.push(warmupRow(null, 8));
     }
   }
+  rows = rows.concat(workRows);
 
-  // ── 워킹세트
-  if (workingCount === 0) {
-    // 남은 워킹세트가 없다 = 본 세트를 다 끝냈다. 새로 만들지 않고, 드롭·마이오렙만
-    // 이미 끝낸 마지막 세트에 이어 붙인다("마지막 세트를 드롭으로" 요청의 정확한 의미).
-  } else if (scheme === 'top_backoff') {
-    // 탑세트 1 + 백오프 (탑의 90%). 백오프도 **같은 반복 목표**를 쓰는 것이 이 방식의 핵심 —
-    // 탑에서 못 채운 반복을 백오프에서 채우는 것이 곧 볼륨 로드 보존 메커니즘이다.
-    var backoffW = reduceWeight(weight, BACKOFF_PCT, exerciseName);
-    rows.push(workRow('top', weight, reps, classRest, '1-2'));
-    for (var b = 1; b < workingCount; b++) rows.push(workRow('backoff', backoffW, reps, classRest, '2-3'));
-  } else {
-    var rir = (cls === 'compound_heavy' || cls === 'compound_moderate') ? '2-3' : '0-2';
-    for (var i = 0; i < workingCount; i++) rows.push(workRow('work', weight, reps, classRest, rir));
-  }
-
-  // ── 마지막 워킹세트에만 붙는 확장 (§2-B 규칙④⑤).
+  // ── 마지막 워킹세트에만 붙는 확장 (§2-B 규칙④⑤ — build.pattern === 'extend').
   //    워킹세트가 0개여도(=본 세트를 이미 다 끝냈어도) 붙는다 — 그 경우 호출부가 들고 있는
   //    "완료된 마지막 세트"에 이어지므로, rows가 비어 있을 때는 rest 덮어쓰기만 건너뛴다.
-  var lastIdx = rows.length - 1;
-  if (scheme === 'drop' && (reverse ? weight >= 0 : weight > 0)) {
-    if (lastIdx >= 0) rows[lastIdx].rest = REST_DROP_SEC;   // 드롭 사이는 무게 바꾸는 시간뿐
-    var d1 = reduceWeight(weight, DROP_PCT, exerciseName);
-    var d2 = reduceWeight(d1, DROP_PCT, exerciseName);
-    rows.push(workRow('drop', d1, range.high, REST_DROP_SEC, '0'));
-    rows.push(workRow('drop', d2, range.high, classRest, '0'));
-  } else if (scheme === 'myo_reps') {
-    if (lastIdx >= 0) rows[lastIdx].rest = REST_MYO_SEC;    // 활성화 세트 후 20초
-    for (var m = 0; m < 3; m++) {
-      rows.push(workRow('myo', weight, 5, m === 2 ? classRest : REST_MYO_SEC, '0'));
+  //    마이오렙은 무게를 바꾸지 않으므로 맨몸 종목에서도 성립한다 — 감량이 필요한 드롭만 무게를 요구한다.
+  var extendOk = !schemeNeedsWeight(scheme) || (reverse ? weight >= 0 : weight > 0);
+  if (build.pattern === 'extend' && extendOk) {
+    var extRows = [];
+    var chainW = weight;
+    (build.steps || []).forEach(function(st) {
+      var times = (typeof st.repeat === 'number') ? st.repeat : 1;
+      for (var k = 0; k < times; k++) {
+        var w = (st.pct >= 1) ? weight
+              : reduceWeight(st.chainFrom === 'prev' ? chainW : weight, st.pct, exerciseName);
+        chainW = w;
+        extRows.push(workRow(st.role, w, stepReps(st), st.rest || classRest, st.rir, st));
+      }
+    });
+    if (extRows.length) {
+      // 연장 세트 **사이**의 짧은 휴식이 이 스킴의 정의다 — 직전 세트의 휴식도 그 값으로 덮어쓴다.
+      var gap = (build.steps[0] && build.steps[0].rest) || classRest;
+      if (rows.length) rows[rows.length - 1].rest = gap;
+      for (var e = 0; e < extRows.length - 1; e++) extRows[e].rest = gap;
+      extRows[extRows.length - 1].rest = classRest;   // 마지막 연장 뒤는 클래스 휴식으로 복귀
+      rows = rows.concat(extRows);
     }
   }
 
   return rows;
 
+  // 그 단의 목표 반복. repsAbs 는 절대값, repsDelta 는 가감, repsMode:'high' 는 범위 상단.
+  // **클래스 범위로 클램프하지 않는다** — 피라미드의 +4나 백다운의 12~15가 잘리면 스킴이 무너진다
+  // (v2 §4-E "가장 놓치기 쉬운 지점").
+  function stepReps(st) {
+    if (!st) return reps;
+    if (Array.isArray(st.repsAbs)) return st.repsAbs[0];
+    if (st.repsMode === 'high') return range.high;
+    return Math.max(1, reps + (st.repsDelta || 0));
+  }
   function warmupRow(w, r) {
     return { weight: w, reps: r, completed: false, isWarmup: true, role: 'warmup', rest: REST_WARMUP_SEC };
   }
-  function workRow(role, w, r, rest, rirBand) {
-    return { weight: w, reps: r, completed: false, isWarmup: false, role: role, rest: rest, rir: rirBand };
+  function workRow(role, w, r, rest, rirBand, st) {
+    var row = { weight: w, reps: r, completed: false, isWarmup: false, role: role, rest: rest, rir: rirBand };
+    // 미리보기(describeSetStructure)가 화면에 적을 **명목 배율**. 실제 무게에서 역산하지 않는 이유는
+    // 반올림 때문에 60kg의 90%가 "92%"로 뜨는 등 스킴이 선언한 규칙과 다른 숫자가 나가기 때문이다.
+    if (st && typeof st.pct === 'number' && st.pct < 1) row.pct = st.pct;
+    if (st && st.amrap && Array.isArray(st.repsAbs)) { row.amrap = true; row.repsMax = st.repsAbs[1]; }
+    return row;
   }
 }
 
@@ -862,6 +1029,13 @@ function restSecToMin(v) {
   return mins.length ? mins.join('-') + '분' : null;
 }
 
+// 배율 → 화면 문자열. 82.5%·92.5% 처럼 0.5 단위가 있는 스킴이 있으므로 소수 한 자리까지 살린다
+// (정수로 반올림하면 시트 설명의 '82.5%'와 미리보기의 '83%'가 어긋난다).
+function formatPct(pct) {
+  var v = Math.round(pct * 1000) / 10;
+  return (v % 1 === 0 ? String(v) : v.toFixed(1)) + '%';
+}
+
 // 세트 구성 한 줄 — "탑세트 1 + 백오프 2 (90%)".
 // 숫자·비율을 화면에서 따로 적지 않고 **실제로 만들어진 세트 배열에서 센다**. 그래야 사용자가
 // 세트법을 바꾸거나(종목별 override), 무게를 몰라 스트레이트로 접힐 때(effectiveSetScheme)
@@ -871,28 +1045,53 @@ function restSecToMin(v) {
 // 첫 세트 기준이 되는데, 그 줄만 보면 뒤 세트도 같은 강도인 줄 읽힌다.
 function describeSetStructure(sets, exerciseName) {
   if (!Array.isArray(sets)) return '';
-  var order = [], count = {}, rirOf = {}, rirSeen = {}, rirKinds = 0;
+  var order = [], count = {}, rirOf = {}, rirSeen = {}, rirKinds = 0, pctsOf = {}, ampOf = {}, wOf = {}, allW = [];
   sets.forEach(function(s) {
     if (!s || s.isWarmup) return;
     var role = s.role || 'work';
-    if (count[role] === undefined) { count[role] = 0; order.push(role); rirOf[role] = s.rir; }
+    if (count[role] === undefined) { count[role] = 0; order.push(role); rirOf[role] = s.rir; pctsOf[role] = []; wOf[role] = []; }
     count[role]++;
+    if (typeof s.weight === 'number') {
+      allW.push(s.weight);
+      if (wOf[role].indexOf(s.weight) === -1) wOf[role].push(s.weight);
+    }
+    // 명목 배율은 세트 배열이 들고 있는 값을 그대로 쓴다(buildSchemeSets 가 스탬프한 build.steps[].pct).
+    // 실제 무게에서 역산하면 반올림 때문에 "90% 백오프"가 화면에 92%로 뜬다.
+    if (typeof s.pct === 'number' && pctsOf[role].indexOf(s.pct) === -1) pctsOf[role].push(s.pct);
+    if (s.amrap && s.repsMax && !ampOf[role]) ampOf[role] = s.reps + '~' + s.repsMax + '회';
     if (s.rir !== undefined && s.rir !== null && !rirSeen[s.rir]) { rirSeen[s.rir] = true; rirKinds++; }
   });
   if (!order.length) return '';
   if (order.length === 1 && order[0] === 'work') return '';
 
   // 역방향(어시스트)은 "가볍게 = 보조를 더" 라서 90%·−25% 가 정반대로 읽힌다.
+  // 보조 종목의 %는 실질 부하(체중 − 보조)와 아무 관계가 없으므로 **실제 무게 차이를 '칸'으로** 적는다.
   var reverse = isReverseProgression(exerciseName);
-  var weightNote = {};
-  if (count.backoff) weightNote.backoff = reverse ? '보조 한 칸' : Math.round(BACKOFF_PCT * 100) + '%';
-  if (count.drop) weightNote.drop = reverse ? '보조 두 칸' : '−' + Math.round((1 - DROP_PCT) * 100) + '%';
+  var baseW = allW.length ? Math.min.apply(null, allW) : null;   // 보조가 가장 적은 = 가장 어려운 세트
+  var inc = getWeightIncrement(exerciseName);
+  var STEP_KR = ['', '한', '두', '세', '네', '다섯'];
 
   var parts = order.map(function(role, i) {
     var kr = SET_ROLE_KR[role];                      // work 는 빈 문자열 = 역할 이름이 없는 보통 세트
     var label = kr ? kr + ' ' + count[role] : count[role] + '세트';
     var notes = [];
-    if (weightNote[role]) notes.push(weightNote[role]);
+    var pcts = pctsOf[role] || [];
+    if (pcts.length) {
+      if (reverse) {
+        var steps = [];
+        (wOf[role] || []).forEach(function(w) {
+          var d = Math.round((w - baseW) / inc);
+          var t = STEP_KR[d] || String(d);
+          if (d > 0 && steps.indexOf(t) === -1) steps.push(t);
+        });
+        if (steps.length) notes.push('보조 ' + steps.join('→') + ' 칸');
+      } else if (role === 'drop') {
+        notes.push('−' + Math.round((1 - pcts[0]) * 100) + '%');   // 드롭은 "매번 −25%"가 더 읽기 쉽다
+      } else {
+        notes.push(pcts.map(formatPct).join('→'));
+      }
+    }
+    if (ampOf[role]) notes.push(ampOf[role]);
     // RIR은 **첫 역할 다음부터**만 적는다 — 첫 역할의 값은 이미 'RIR' 열에 있다.
     if (i > 0 && rirKinds > 1 && rirOf[role] !== undefined && rirOf[role] !== null) notes.push('RIR ' + rirOf[role]);
     return label + (notes.length ? ' (' + notes.join(' · ') + ')' : '');
@@ -919,7 +1118,7 @@ function resolveRestSec(exercise, set) {
   }
 
   // 드롭·마이오렙 사이의 짧은 휴식은 그 스킴의 정의 그 자체라 자가조절 대상이 아니다.
-  if (set.role === 'drop' || set.role === 'myo') return base;
+  if (isOffProgressSet(set)) return base;
 
   var range = clampRepsToClass(exercise ? exercise.name : '', exercise ? exercise.targetReps : null);
   if (set.reps > 0 && set.reps < range.low) base += REST_AUTOREG_BONUS_SEC;
@@ -1107,7 +1306,7 @@ function recalc1RMAfterEdit(exerciseName, prevRM) {
       if (canonicalExerciseName(ex.name) !== key) return;
       (ex.sets || []).forEach(function(s) {
         if (!s.completed || s.isWarmup || !s.weight || !s.reps) return;
-        if (s.role === 'drop' || s.role === 'myo') return; // 위 두 경로와 같은 규칙 (§5-D 1RM 오염 방지)
+        if (isOffProgressSet(s)) return; // 위 두 경로와 같은 규칙 (§5-D 1RM 오염 방지)
         if (s.reps > maxReps) return;
         candidates.push(calculate1RM(s.weight, s.reps));
       });
@@ -1143,9 +1342,14 @@ function reconcile1RMFromLog(exerciseNames) {
 }
 
 // 장비별 최소 무게 증량 단위 (사용자 짐 기준): 덤벨 2kg, 그 외(머신·케이블·바벨·스미스) 5kg.
-// 종목 이름으로 판별 (예: "체스트 프레스 머신"→5, "덤벨 숄더 프레스"→2). 맨몸/무게없음은 호출부에서 걸러짐.
+// 이 값이 **모든 무게 계산의 격자**다 — 추천·스냅·감량이 전부 여기를 통과하므로 소수점 무게가 나올 수 없다.
+// 판정 원천 두 가지: ① 종목 이름의 '덤벨' ② 종목표의 장비 태그 'dumbbell'.
+// ②가 필요한 이유: '해머 컬'·'사이드 레터럴 레이즈'·'풀오버'·'컨센트레이션 컬'·'켈소 슈러그'처럼
+// 이름에 '덤벨'이 없는 덤벨 종목이 있고, 이들이 5kg 격자를 쓰면 8kg 덤벨의 다음 칸이 10kg이 아니라
+// 13kg으로 잡혀 실행 불가능한 무게가 나온다.
 function getWeightIncrement(exerciseName) {
-  return (exerciseName || '').indexOf('덤벨') >= 0 ? 2 : 5;
+  if ((exerciseName || '').indexOf('덤벨') >= 0) return 2;
+  return getExerciseEquipment(exerciseName) === 'dumbbell' ? 2 : 5;
 }
 
 // 무게를 그 종목 장비가 실제로 낼 수 있는 단위로 스냅(반올림). .5kg 같은 실행 불가 무게 방지.
@@ -1167,7 +1371,7 @@ function snapWeightToEquipment(weight, exerciseName) {
 // 백오프의 존재 이유가 "무게를 낮춰 반복을 지킨다"이므로 감량 0은 스킴 자체를 무효로 만든다.
 // (docs/research/set-schemes.md §2-B 반올림 함정 · §5-D 리스크표)
 function reduceWeight(top, pct, exerciseName) {
-  // 역방향(어시스트): "가볍게 한다" = 보조를 **더 준다**. 백오프(90%)는 한 칸, 드롭(75%)은 두 칸.
+  // 역방향(어시스트): "가볍게 한다" = 보조를 **더 준다**. 백오프(90%)는 한 칸, 그보다 큰 감량은 두 칸.
   // 보조 무게에 0.9를 곱하면 오히려 더 어려워져 백오프·드롭의 존재 이유가 정반대로 뒤집힌다.
   // 비율을 그대로 쓰지 않는 이유: 보조 무게의 %는 실질 부하와 아무 관계가 없다(실질 = 체중 − 보조).
   if (isReverseProgression(exerciseName)) {
@@ -1177,9 +1381,37 @@ function reduceWeight(top, pct, exerciseName) {
   }
   if (!top || top <= 0) return top;              // 맨몸·무게 미정 종목은 그대로 (호출부가 스킴을 접는다)
   var step = getWeightIncrement(exerciseName);
-  var w = Math.round(top * pct / step) * step;
-  if (w >= top) w = top - step;                  // 반올림으로 감량이 사라졌을 때 방어
-  return Math.max(step, w);                      // 0kg 이하 방지
+  var w = Math.round(top * pct / step) * step;   // **가까운 배수** — 목표 %에서 가장 적게 벗어난다
+  if (w >= top) w = top - step;                  // 반올림으로 감량이 사라졌을 때 방어 (탑 20의 90% = 18 → 20 → 15)
+  return Math.min(top, Math.max(step, w));       // 0kg 이하 방지. 한 스텝 아래가 0인 저중량은 top 을 넘지 않게 유지
+}
+
+// 여러 단으로 내려가는 감량 사다리(피라미드·역피라미드의 세트별 무게)의 무게표.
+// pcts 는 **무거운 순(내림차순)**. 반환값은 { pct: 무게 } 맵.
+// reduceWeight 를 단마다 따로 부르면 두 단이 같은 값으로 뭉개진다 —
+//   예) 30kg 피라미드: 92.5% → 28 → 30, 85% → 25.5 → 25 ... 5kg 격자에선 둘 다 25가 되는 구간이 생긴다.
+// 그래서 **직전(더 무거운) 단보다 반드시 한 스텝 아래**가 되도록 사다리를 이어서 만든다.
+// 역방향(어시스트)은 방향이 뒤집힌다 — 가벼운 단 = 보조가 **더 많은** 단이므로 위로 벌린다.
+function buildWeightLadder(exerciseName, topWeight, pcts) {
+  var out = {};
+  if (!Array.isArray(pcts) || !pcts.length) return out;
+  var reverse = isReverseProgression(exerciseName);
+  var step = getWeightIncrement(exerciseName);
+  var prev = null;
+  for (var i = 0; i < pcts.length; i++) {
+    var pct = pcts[i];
+    var w = (pct >= 1) ? topWeight : reduceWeight(topWeight, pct, exerciseName);
+    if (prev !== null && typeof w === 'number' && typeof prev === 'number') {
+      if (reverse) {
+        if (w <= prev) w = prev + step;                        // 보조는 단마다 늘어난다
+      } else if (w >= prev && prev > step) {
+        w = Math.max(step, prev - step);                       // 무게는 단마다 줄어든다
+      }
+    }
+    out[pct] = w;
+    prev = w;
+  }
+  return out;
 }
 
 // 작업 무게 추천 (1RM의 N%) — 신규 종목 또는 기록 없는 종목용 백업
