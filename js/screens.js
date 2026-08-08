@@ -1965,9 +1965,12 @@ window.addSetToExercise = function(exerciseIdx) {
   var addedRole = (lastSet && lastSet.role) || 'work';
   var addedWeight = lastSet ? lastSet.weight : null;
   var addedReps = lastSet ? lastSet.reps : clampRepsToClass(exercise.name, exercise.targetReps).low;
-  var addedRest = getExerciseRestSec(exercise.name);
+  // 같은 역할을 이어 붙이는 경우엔 휴식·배율·한계반복 표기까지 그대로 물려받는다 —
+  // 백다운을 하나 더 붙였는데 "12~15회"가 사라지고 휴식만 180초로 튀면 같은 세트가 아니게 된다.
+  var addedRest = (lastSet && lastSet.rest > 0) ? lastSet.rest : getExerciseRestSec(exercise.name);
   var addedPct = lastSet ? lastSet.pct : undefined;
-  var addedSet = null;
+  var addedSet = (lastSet && lastSet.amrap && lastSet.repsMax)
+    ? { amrap: true, repsMax: lastSet.repsMax } : null;
   if (lastSet && lastSet.role === 'top') {
     // 스킴이 탑 다음에 두는 단. 없으면(스트레이트·피라미드 등) 기존 동작대로 백오프로 이어 붙인다.
     var afterTop = nextStepAfterTop(sessionSchemeOf(exercise))

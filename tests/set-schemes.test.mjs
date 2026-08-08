@@ -588,6 +588,29 @@ test('[신규] SET_SCHEMES 표 자체의 무결성 (pct 범위·rir 형식·role
   assert.equal(app.SET_SCHEME_ORDER.slice().sort().join(','), Object.keys(app.SET_SCHEMES).sort().join(','));
 });
 
+test('[신규] "세트 추가"가 스킴이 정한 다음 단을 이어 붙인다 (탑 → 백오프 / 탑 → 백다운)', () => {
+  heavySeed();
+  const expected = {
+    top_backoff:  'top:60x8/180 backoff:55x8/180 backoff:55x8/180',
+    top_backdown: 'top:60x8~15/180 backdown:50x12~15/120 backdown:50x12~15/120'
+  };
+  Object.keys(expected).forEach((sc) => {
+    app.setSetSchemeOverride('핵 스쿼트', sc);
+    const plan = app.getSessionSetPlan('핵 스쿼트', null, '5-8', { sets: 3, warmup: false });
+    app.state.activeSession = {
+      currentExerciseIdx: 0,
+      exercises: [{ name: '핵 스쿼트', targetReps: '5-8', scheme: plan.scheme, sets: [plan.sets[0]] }]
+    };
+    app.addSetToExercise(0);   // 탑세트 뒤 → 스킴이 정한 단
+    app.addSetToExercise(0);   // 그 뒤 → 같은 단이 이어진다 (휴식·한계반복 표기까지)
+    const got = app.state.activeSession.exercises[0].sets
+      .map((s) => `${s.role}:${s.weight}x${s.reps}${s.amrap ? '~' + s.repsMax : ''}/${s.rest}`).join(' ');
+    assert.equal(got, expected[sc].replace('60x8~15', '60x8'), sc);
+  });
+  app.state.activeSession = null;
+  resetOverrides();
+});
+
 test('[불변식] 미리보기 처방 표와 실제 세션 세트의 무게·반복이 같다 (반올림 포함)', () => {
   heavySeed();
   app.SET_SCHEME_ORDER.forEach((id) => {
