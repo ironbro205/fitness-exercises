@@ -235,3 +235,108 @@ test('화면 문구에 근거 한계가 명시돼 있다', () => {
   assert.ok(src.includes('근육통·부상 예방·근성장 효과는 기대하지 마세요'), '기대치를 낮추는 문구 필요');
   assert.ok(src.includes('60초 넘게'), '본세트 전 장시간 정적 스트레칭 경고 문구 필요');
 });
+
+// ── 진행 상태머신 · 복원 · 라우팅 ──────────────────────────────
+// 순수 함수가 아니라 state를 건드리므로 매 테스트마다 세션을 새로 만든다.
+
+function freshWarmup(app2, type = 'legs') {
+  app2.state.stretchGuide = null;
+  app2.state.completedSession = null;
+  app2.state.activeSession = null;
+  app2.startSession(type);
+  return app2.state.activeSession.warmup;
+}
+
+test('mobilityNext — 늦게 도착한 탭은 한 구간을 더 건너뛰지 않는다', () => {
+  const w = freshWarmup(app);
+  assert.equal(w.idx, 0);
+  app.mobilityNext(0);                 // 정상 탭
+  assert.equal(app.state.activeSession.warmup.idx, 1);
+  app.mobilityNext(0);                 // 타이머가 먼저 넘긴 뒤 도착한 옛 버튼의 탭 → 무시
+  assert.equal(app.state.activeSession.warmup.idx, 1);
+  app.mobilityNext(1);                 // 지금 구간 번호면 진행
+  assert.equal(app.state.activeSession.warmup.idx, 2);
+});
+
+test('mobilitySkipStep — 좌우로 쪼개진 동작은 통째로 넘긴다', () => {
+  const w = freshWarmup(app);
+  const segs = app.expandMobilitySegments(w.keys);
+  // 좌우 구간(리버스 런지 등)의 첫 번째 위치를 찾는다
+  const leftIdx = segs.findIndex((s) => s.side === 'left');
+  assert.ok(leftIdx > 0, '좌우 구간이 있어야 함');
+  app.state.activeSession.warmup.idx = leftIdx;
+  app.mobilitySkipStep(leftIdx);
+  const after = app.state.activeSession.warmup.idx;
+  assert.ok(after > leftIdx + 1 || after >= segs.length,
+    `건너뛰기는 오른쪽 구간까지 넘어야 함 (${leftIdx} → ${after})`);
+  if (segs[after]) assert.notEqual(segs[after].key, segs[leftIdx].key);
+  // 반면 "완료"는 한 구간만 넘어간다
+  const w2 = freshWarmup(app);
+  const segs2 = app.expandMobilitySegments(w2.keys);
+  const l2 = segs2.findIndex((s) => s.side === 'left');
+  app.state.activeSession.warmup.idx = l2;
+  app.mobilityNext(l2);
+  assert.equal(app.state.activeSession.warmup.idx, l2 + 1);
+  assert.equal(segs2[l2 + 1].side, 'right');
+});
+
+// 3분 유산소 중에 "짧게"를 누르면 타이머가 되감겨 짧게 > 표준이 되는 역전이 있었다.
+test('setWarmupMode — 같은 구간을 하고 있으면 카운트다운을 이어간다', () => {
+  freshWarmup(app);
+  const w = app.state.activeSession.warmup;
+  w.segEndsAt = Date.now() + 42000;    // 일반 유산소 진행 중(남은 42초)
+  app.setWarmupMode('short');
+  assert.equal(app.state.activeSession.warmup.mode, 'short');
+  assert.equal(app.state.activeSession.warmup.segEndsAt, w.segEndsAt, '남은 시간이 되감기면 안 됨');
+  assert.equal(app.state.activeSession.warmup.done, false);
+});
+
+test('setWarmupMode — 드릴 구간에서 짧게로 바꾸면 웜업이 끝난다', () => {
+  freshWarmup(app);
+  app.state.activeSession.warmup.idx = 3;   // 일반 웜업을 지나 드릴 진행 중
+  app.setWarmupMode('short');
+  assert.equal(app.state.activeSession.warmup.done, true);
+});
+
+test('mobilityRepairState — 범위 밖 idx로 복원돼도 갇히지 않는다', () => {
+  freshWarmup(app);
+  app.state.activeSession.warmup.idx = 999;  // 옛 저장분 / 목록이 바뀐 경우
+  app.render();
+  assert.equal(app.state.activeSession.warmup.done, true, '웜업을 끝난 것으로 정리해야 함');
+
+  // 사전에서 사라진 키만 남은 경우도 마찬가지
+  freshWarmup(app);
+  app.state.activeSession.warmup.keys = ['사라진_동작'];
+  app.state.activeSession.warmup.idx = 0;
+  app.render();
+  assert.equal(app.state.activeSession.warmup.done, true);
+
+  // 스트레칭 가이드도 같은 방식으로 정리된다
+  app.state.activeSession = null;
+  app.state.stretchGuide = { keys: ['calf_wall'], idx: 99, segEndsAt: null, soundOn: true, omitted: 0 };
+  app.render();
+  assert.equal(app.state.stretchGuide, null);
+});
+
+test('웜업이 끝나지 않은 세션은 본운동보다 웜업 화면이 먼저다', () => {
+  freshWarmup(app);
+  assert.equal(app.getTopLayer(), 'warmupGuide');
+  app.mobilitySkipAll();
+  assert.equal(app.getTopLayer(), 'session');
+  // 스트레칭은 완료 화면보다 위
+  app.state.activeSession = null;
+  app.state.completedSession = { workoutId: 'w', sessionName: 'LEGS', sessionType: 'legs', duration: 50,
+    exerciseCount: 1, setCount: 3, exercises: [{ name: '레그 프레스', reps: [10], maxWeight: 100 }], newPRs: [], date: new Date() };
+  assert.equal(app.getTopLayer(), 'completed');
+  app.openStretchGuide();
+  assert.equal(app.getTopLayer(), 'stretchGuide');
+  app.closeStretchGuide();
+  assert.equal(app.getTopLayer(), 'completed');
+});
+
+test('warmup 필드가 없는 옛 저장 세션은 웜업 화면을 건너뛴다 (하위 호환)', () => {
+  freshWarmup(app);
+  delete app.state.activeSession.warmup;
+  app.render();
+  assert.equal(app.getTopLayer(), 'session');
+});

@@ -1960,9 +1960,13 @@ function deriveWarmupGroups(exercises) {
     if (count[group] === undefined) { count[group] = 0; order.push(group); }
     count[group]++;
   });
+  // 동률 판정에 쓸 "첫 등장 순서"는 정렬 전에 찍어 둔다.
+  // order 를 정렬하면서 order.indexOf 를 부르면 반쯤 정렬된 배열을 읽어 비교가 뒤집힌다.
+  var firstSeen = {};
+  order.forEach(function(g, i) { firstSeen[g] = i; });
   order.sort(function(a, b) {
     if (count[b] !== count[a]) return count[b] - count[a];
-    return order.indexOf(a) - order.indexOf(b);   // 동률 → 첫 등장 순서 유지
+    return firstSeen[a] - firstSeen[b];           // 동률 → 첫 등장 순서 유지
   });
   return order.slice(0, 2);
 }

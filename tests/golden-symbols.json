@@ -1,5 +1,5 @@
 {
-  "functionCount": 407,
+  "functionCount": 409,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -247,6 +247,7 @@
     "mergeCoachMemory",
     "mobilityAdvance",
     "mobilityBeep",
+    "mobilityClearTicker",
     "mobilityCurrent",
     "mobilityEnsureTicker",
     "mobilityFinish",
@@ -256,6 +257,7 @@
     "mobilityPaintDynamic",
     "mobilityPersist",
     "mobilityReleaseWakeLock",
+    "mobilityRepairState",
     "mobilityRequestWakeLock",
     "mobilitySegmentAmount",
     "mobilitySegmentLabel",
