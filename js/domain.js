@@ -1345,3 +1345,204 @@ function applyChatSignalToExercise(ex, signal) {
   }
   return applied;
 }
+
+// ═══════════════════════════════════════════════
+// 인클라인 워킹(경사 걷기) — 처방 계산 (순수 함수)
+// 근거: docs/research/incline-walking.md §2(처방표) · §4(점진 규칙) · §5(주의사항)
+// 화면(screens.js)의 로컬 폴백 구성과 AI 프롬프트(ai.js)의 앵커가 같은 값을 쓰도록 여기 한 곳에 모은다.
+// ═══════════════════════════════════════════════
+
+// cardioLog 에서 한 모드의 세션만 최신순(최신이 앞)으로 추린다.
+// ★두 모드가 같은 cardioLog 를 공유하므로, 각 모드의 "지난 회 기준선"은 반드시 자기 모드만 봐야 한다.
+//   (안 그러면 인터벌 처방이 걷기 세션을 기준선으로 삼아 "뛰기 0회"를 읽고 엉뚱하게 상향한다.)
+// ★날짜(date)는 YYYY-MM-DD라 시각이 없다. 같은 날 두 세션이면 날짜만으로는 순서를 못 가리고,
+//   Array.prototype.sort 는 안정 정렬이라 "먼저 기록된 쪽"이 앞에 남는다 → 그러면 하향 게이트가
+//   나중 세션(손잡이 잡음·미완주)을 못 보고 넘어간다. 그래서 동률은 저장 순서(뒤에 push 된 쪽이 최신)로 가른다.
+// 옛 기록에는 mode 필드가 없다 → 'interval' 로 간주(하위 호환, §7-2).
+function cardioSessionsByMode(log, mode) {
+  var arr = Array.isArray(log) ? log : [];
+  var want = (mode === 'walk') ? 'walk' : 'interval';
+  var picked = [];
+  arr.forEach(function(s, i) {
+    if (!s) return;
+    var m = (s.mode === 'walk') ? 'walk' : 'interval';
+    if (m === want) picked.push({ s: s, i: i });
+  });
+  picked.sort(function(a, b) {
+    var da = a.s.date ? String(a.s.date) : '';
+    var db = b.s.date ? String(b.s.date) : '';
+    if (da !== db) return da < db ? 1 : -1;       // 최근 날짜가 앞으로
+    return b.i - a.i;                             // 같은 날이면 나중에 저장된 쪽이 앞으로
+  });
+  return picked.map(function(p) { return p.s; });
+}
+
+function cardioWalkSessions(log) { return cardioSessionsByMode(log, 'walk'); }
+function cardioIntervalSessions(log) { return cardioSessionsByMode(log, 'interval'); }
+
+// 세션의 본 구간(walk) 경사 % — 본 구간이 여러 개면 가장 높은 값. 없으면 0.
+function cardioWalkMainIncline(session) {
+  var segs = (session && Array.isArray(session.segments)) ? session.segments : [];
+  var max = 0;
+  segs.forEach(function(s) {
+    if (!s || s.type !== 'walk') return;
+    var v = Number(s.incline);
+    if (isFinite(v) && v > max) max = v;
+  });
+  return max;
+}
+
+// 권장 경사 상한 — 허리(lower_back) 이력이면 한 단계 낮춘다(§7-6 규칙7).
+// 절대 상한 12%는 어떤 경우에도 넘지 않는다(§1-3).
+function cardioWalkInclineCap(injuryAreas) {
+  var areas = Array.isArray(injuryAreas) ? injuryAreas : [];
+  return (areas.indexOf('lower_back') !== -1) ? WALK_PRESCRIPTION.inclineMaxBack : WALK_PRESCRIPTION.inclineMax;
+}
+
+// 이번 세션에 쓸 경사 % — §4-2 향상 게이트를 코드로 구현한 보수적 판정.
+// ★로컬 계산은 "올리지 않는다"(유지 또는 하향만). 상향은 시간 축이 먼저이고(§4-1),
+//   축 선택·폭 판단은 지난 기록 전체를 보는 AI(generateCardioWalk)가 맡는다.
+function cardioWalkNextIncline(log, injuryAreas) {
+  var cap = cardioWalkInclineCap(injuryAreas);
+  var areas = Array.isArray(injuryAreas) ? injuryAreas : [];
+  var back = areas.indexOf('lower_back') !== -1;
+  var start = back ? WALK_PRESCRIPTION.inclineStartBack : WALK_PRESCRIPTION.inclineStart;
+
+  var sessions = cardioWalkSessions(log);
+  if (!sessions.length) return Math.min(start, cap);
+
+  var last = sessions[0];
+  // 기준 경사는 "본 구간 경사가 기록된 가장 최근 세션"에서 가져온다.
+  // ★지난 세션을 몸풀기(경사 0%) 도중에 중단하면 본 구간 기록이 없어 경사가 0으로 읽힌다.
+  //   그때 첫 회 값(4%)으로 되돌리면 몇 주치 진행이 통째로 날아가므로, 그 앞 세션까지 거슬러 찾는다.
+  var inc = 0;
+  for (var i = 0; i < sessions.length; i++) {
+    inc = cardioWalkMainIncline(sessions[i]);
+    if (inc > 0) break;
+  }
+  if (!(inc > 0)) return Math.min(start, cap);     // 걷기 기록은 있지만 본 구간을 한 번도 못 한 경우
+
+  // 하향 게이트(§4-2)는 "가장 최근 세션"의 결과로 판정한다(기준 경사를 어디서 가져왔든).
+  // 여러 조건에 걸려도 한 세션에 한 번만 내린다(과하향 방지).
+  if (last.handrail === 'hold') inc -= 2;                                  // 손잡이 계속 잡음 = 강도가 이미 샌 상태(§5-2)
+  else if (!last.completed) inc -= 2;                                      // 미완주
+  else if (typeof last.rpe === 'number' && last.rpe >= 9) inc -= 2;        // RPE 9 이상
+
+  if (inc < WALK_PRESCRIPTION.inclineFloor) inc = WALK_PRESCRIPTION.inclineFloor;
+  if (inc > cap) inc = cap;
+  return Math.round(inc * 2) / 2;                                          // 0.5% 격자
+}
+
+// 경사가 오르면 속도는 내린다(§2 설계원칙 2 — 경사 12%에서 5.5km/h면 손잡이를 잡게 된다).
+function cardioWalkSpeedFor(incline) {
+  var inc = Number(incline);
+  if (!isFinite(inc) || inc < 0) inc = 0;
+  var spd = (inc >= 11) ? 4.8 : WALK_PRESCRIPTION.speedDefault;
+  if (spd < WALK_PRESCRIPTION.speedMin) spd = WALK_PRESCRIPTION.speedMin;
+  if (spd > WALK_PRESCRIPTION.speedMax) spd = WALK_PRESCRIPTION.speedMax;
+  return Math.round(spd * 10) / 10;
+}
+
+// ACSM 걷기 대사공식으로 세션 소모 열량을 "대략" 추정 (§1-2).
+//   VO₂(ml·kg⁻¹·min⁻¹) = 3.5 + (0.1 × 속도[m/분]) + (1.8 × 속도[m/분] × 경사[소수])
+//   kcal/분 = VO₂ × 체중(kg) ÷ 1000 × 5   (산소 1L ≈ 5 kcal)
+// ★실측 대비 약 +6% 과대추정이므로 화면에는 반드시 "대략"으로 표시한다(§7-8).
+function cardioWalkKcal(segments, weightKg) {
+  var w = Number(weightKg);
+  if (!isFinite(w) || w <= 0) return 0;
+  var segs = Array.isArray(segments) ? segments : [];
+  var kcal = 0;
+  segs.forEach(function(s) {
+    if (!s) return;
+    var sec = Number(s.sec);
+    if (!isFinite(sec) || sec <= 0) return;
+    var kmh = Number((s.actualSpeed != null) ? s.actualSpeed : s.targetSpeed);
+    if (!isFinite(kmh) || kmh < 0) kmh = 0;
+    var mPerMin = kmh * 1000 / 60;
+    var grade = Number(s.incline);
+    if (!isFinite(grade) || grade < 0) grade = 0;
+    var vo2 = 3.5 + (0.1 * mPerMin) + (1.8 * mPerMin * (grade / 100));
+    kcal += vo2 * w / 1000 * 5 * (sec / 60);
+  });
+  return Math.round(kcal);
+}
+
+// 화면 표시용 체중 — 최근 체중 기록 → 프로필 → 70kg(연구 표 기준값) 순.
+function cardioWalkBodyWeight() {
+  var bodyLog = (state.data && Array.isArray(state.data.bodyLog)) ? state.data.bodyLog : [];
+  var last = bodyLog.length ? Number(bodyLog[bodyLog.length - 1].weight) : NaN;
+  if (isFinite(last) && last > 0) return last;
+  var pw = (state.profile && Number(state.profile.weight));
+  if (isFinite(pw) && pw > 0) return pw;
+  return 70;
+}
+
+// 걷기 처방에 필요한 값을 한 번만 계산해 묶는다 — 로컬 폴백(screens.js)과 AI 프롬프트(ai.js)가
+// 같은 기준 경사를 쓰도록, 그리고 한 번의 생성에서 로그를 여러 번 훑지 않도록.
+function cardioWalkContext() {
+  var log = (state.data && Array.isArray(state.data.cardioLog)) ? state.data.cardioLog : [];
+  var areas = (typeof getUserInjuryAreas === 'function') ? getUserInjuryAreas() : [];
+  return {
+    log: log,
+    areas: areas,
+    back: areas.indexOf('lower_back') !== -1,
+    sessions: cardioWalkSessions(log),
+    cap: cardioWalkInclineCap(areas),
+    anchorIncline: cardioWalkNextIncline(log, areas)
+  };
+}
+
+// 걷기 세션 총시간 상한(§4-1) — 본 구간 33분을 넘기지 않도록 총시간 자체를 자른다.
+// ★cardioFitToTotal 은 구간을 totalSec 에 비례 스케일하므로, 구간만 잘라도 다시 늘어난다.
+//   그래서 상한은 반드시 "총시간" 단계에서 걸어야 한다.
+function cardioWalkClampTotalSec(totalSec) {
+  var T = Math.max(60, Math.round(Number(totalSec) || 0));
+  return Math.min(T, WALK_PRESCRIPTION.maxTotalSec);
+}
+
+// §3-2 표준 4구간 구조를 총시간에 맞춰 스케일한 원시 구간 배열(길이 sec 기반).
+//   몸풀기(경사 0%) → 준비 구간/램프(목표의 절반) → 본 구간(목표 경사 정속) → 정리(경사 0%)
+// ai.js 의 AI 폴백과 screens.js 의 로컬 폴백이 같은 구조를 쓰도록 여기 한 곳에서 만든다.
+// 30초 격자 스냅·총시간 정확히 맞추기는 cardioFitToTotal 이 마무리한다.
+function buildWalkRawSegments(totalSec, targetIncline) {
+  var T = cardioWalkClampTotalSec(totalSec);                   // 본 구간 33분 상한을 총시간 단계에서 강제(§4-1)
+  function snap30(x) { return Math.round(x / 30) * 30; }
+
+  var inc = Number(targetIncline);
+  if (!isFinite(inc) || inc < 0) inc = WALK_PRESCRIPTION.inclineStart;
+  if (inc > WALK_PRESCRIPTION.inclineMax) inc = WALK_PRESCRIPTION.inclineMax;
+  inc = Math.round(inc * 2) / 2;
+  var rampInc = Math.round(inc) / 2;                           // 목표의 절반(0.5% 격자) — 심박·아킬레스 예열
+  var spd = cardioWalkSpeedFor(inc);
+
+  var wu = Math.min(300, Math.max(120, snap30(T * 0.167)));    // 몸풀기 ~5분 (경사 0%: 시작부터 요추에 굴곡 부하를 주지 않음)
+  var ramp = (T >= 900) ? 120 : 60;                            // 램프 2분(짧은 세션은 1분)
+  var cd = Math.min(300, Math.max(120, snap30(T * 0.10)));     // 정리 3~5분
+  var main = T - wu - ramp - cd;
+  if (main < 180) {                                            // 본 구간 최소 3분 확보 — 짧은 세션은 앞뒤를 압축
+    ramp = 0;
+    wu = Math.max(60, snap30((T - 180) / 2));
+    cd = Math.max(60, T - 180 - wu);
+    main = T - wu - ramp - cd;
+  }
+  if (main < 60) { wu = 60; ramp = 0; cd = 60; main = Math.max(60, T - 120); }
+  // 본 구간 33분 상한(§4-1). 총시간은 이미 45분으로 잘렸지만, 반올림 때문에 몇십 초 넘칠 수 있다.
+  // 넘친 만큼은 정리 → 몸풀기 순으로(각 5분까지) 옮겨 총시간을 그대로 지킨다.
+  if (main > WALK_PRESCRIPTION.mainMaxSec) {
+    var over = main - WALK_PRESCRIPTION.mainMaxSec;
+    main -= over;
+    var giveCd = Math.min(over, Math.max(0, 300 - cd)); cd += giveCd; over -= giveCd;
+    var giveWu = Math.min(over, Math.max(0, 300 - wu)); wu += giveWu; over -= giveWu;
+    if (over > 0) main += over;                                // 더 둘 곳이 없으면 되돌린다(총시간 보존 우선)
+  }
+
+  var segs = [{ type: 'warmup', sec: wu, speed: WALK_PRESCRIPTION.speedDefault, incline: 0, label: '몸풀기' }];
+  if (ramp > 0 && rampInc > 0) {
+    segs.push({ type: 'warmup', sec: ramp, speed: WALK_PRESCRIPTION.speedDefault, incline: rampInc, label: '준비 구간' });
+  } else if (ramp > 0) {
+    segs[0].sec += ramp;                                       // 램프가 의미 없을 때(경사 0%)는 몸풀기에 합침
+  }
+  segs.push({ type: 'walk', sec: main, speed: spd, incline: inc, label: '본 구간' });
+  segs.push({ type: 'cooldown', sec: cd, speed: WALK_PRESCRIPTION.cooldownSpeed, incline: 0, label: '정리' });
+  return segs;
+}

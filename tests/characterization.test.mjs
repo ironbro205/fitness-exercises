@@ -1182,6 +1182,414 @@ test('코치지식 generateWeeklyReview — 지식 주입(문자열 system), 캐
 });
 
 // ═══════════════════════════════════════════════
+// 인클라인 워킹(경사 걷기) 모드 — docs/research/incline-walking.md §2~§5·§7
+// ═══════════════════════════════════════════════
+
+// ── §2 처방표: 첫 회 경사 + 허리 이력 수정판 ──
+test('경사걷기 cardioWalkNextIncline — 첫 회 4%(허리 이력 3%) · 상한 클램프', () => {
+  // 기록 없음 → 4% (§2-1 0단계)
+  assert.equal(app.cardioWalkNextIncline([], []), 4);
+  // 허리디스크 이력 → 3%에서 출발 (§2-2)
+  assert.equal(app.cardioWalkNextIncline([], ['lower_back']), 3);
+  // 인터벌 기록만 있으면 걷기 기록으로 치지 않는다(하위 호환: 옛 기록엔 mode 자체가 없다)
+  assert.equal(app.cardioWalkNextIncline([{ date: '2026-08-01', completed: true, rpe: 5, segments: [{ type: 'run', sec: 60 }] }], []), 4);
+  // 상한: 허리 없으면 12%, 허리 있으면 10% (§1-3 절대 상한 / §7-6 한 단계 낮춤)
+  const hot = [{ date: '2026-08-01', mode: 'walk', completed: true, rpe: 5, segments: [{ type: 'walk', sec: 1200, incline: 20 }] }];
+  assert.equal(app.cardioWalkNextIncline(hot, []), 12);
+  assert.equal(app.cardioWalkNextIncline(hot, ['lower_back']), 10);
+});
+
+// ── §4-2 향상 게이트: 하향 조건 ──
+test('경사걷기 cardioWalkNextIncline — 손잡이/미완주/RPE9 하향, 잘해도 로컬은 상향 안 함', () => {
+  const mk = (over) => [Object.assign({
+    date: '2026-08-01', mode: 'walk', completed: true, rpe: 5,
+    segments: [{ type: 'warmup', sec: 300, incline: 0 }, { type: 'walk', sec: 1200, incline: 8 }]
+  }, over)];
+  // 완주 + RPE 5 → 유지(로컬은 경사를 올리지 않는다 — 상향 축 선택은 AI가 맡음)
+  assert.equal(app.cardioWalkNextIncline(mk({}), []), 8);
+  // 손잡이를 계속 잡음 → −2% (§5-2: 실제로는 기록보다 낮은 경사를 한 것)
+  assert.equal(app.cardioWalkNextIncline(mk({ handrail: 'hold' }), []), 6);
+  // 가볍게만 얹음은 손실이 거의 없다 → 유지
+  assert.equal(app.cardioWalkNextIncline(mk({ handrail: 'light' }), []), 8);
+  // 미완주 → −2%
+  assert.equal(app.cardioWalkNextIncline(mk({ completed: false }), []), 6);
+  // RPE 9 이상 → −2%
+  assert.equal(app.cardioWalkNextIncline(mk({ rpe: 9 }), []), 6);
+  // RPE 7~8은 유지
+  assert.equal(app.cardioWalkNextIncline(mk({ rpe: 8 }), []), 8);
+  // 하한 3% 아래로는 안 내려간다
+  const low = [{ date: '2026-08-01', mode: 'walk', completed: false, segments: [{ type: 'walk', sec: 600, incline: 3 }] }];
+  assert.equal(app.cardioWalkNextIncline(low, []), 3);
+});
+
+// ── §2 설계원칙 2: 경사가 오르면 속도는 내린다 ──
+test('경사걷기 cardioWalkSpeedFor — 경사 11% 이상이면 속도를 내린다', () => {
+  assert.equal(app.cardioWalkSpeedFor(4), 5.0);
+  assert.equal(app.cardioWalkSpeedFor(10), 5.0);
+  assert.equal(app.cardioWalkSpeedFor(11), 4.8);
+  assert.equal(app.cardioWalkSpeedFor(12), 4.8);
+});
+
+// ── §3-2 표준 4구간 구조 ──
+test('경사걷기 buildWalkRawSegments — 몸풀기(0%) → 램프(절반) → 본 구간 → 정리(0%)', () => {
+  const segs = plain(app.buildWalkRawSegments(30 * 60, 8));   // vm realm → 현재 realm 으로 정규화
+  assert.equal(segs.length, 4, '4구간');
+  assert.deepEqual(segs.map((s) => s.type), ['warmup', 'warmup', 'walk', 'cooldown']);
+  assert.deepEqual(segs.map((s) => s.incline), [0, 4, 8, 0], '경사: 0 → 목표의 절반 → 목표 → 0');
+  assert.equal(segs.reduce((a, s) => a + s.sec, 0), 1800, '총합 = 정확히 30분');
+  assert.deepEqual(segs.map((s) => s.sec), [300, 120, 1200, 180], '§3-3 예시와 동일: 5 + 2 + 20 + 3분');
+  assert.equal(segs[3].speed, 4.5, '정리는 속도를 낮춘다');
+  // 짧은 세션(5분)도 본 구간이 남는다 — 앞뒤를 압축
+  const short = plain(app.buildWalkRawSegments(5 * 60, 4));
+  assert.equal(short.reduce((a, s) => a + s.sec, 0), 300);
+  assert.ok(short.some((s) => s.type === 'walk' && s.sec >= 120), '짧아도 본 구간 확보');
+});
+
+// ── §7-2·§1-3: 경사 상한은 프롬프트가 아니라 코드가 강제한다 ──
+test('경사걷기 cardioFitToTotal — 총시간 정확 + 30초 격자 + 경사 상한 클램프', () => {
+  const raw = [
+    { type: 'warmup', sec: 300, speed: 5, incline: 0 },
+    { type: 'warmup', sec: 120, speed: 5, incline: 9 },
+    { type: 'walk', sec: 1200, speed: 5, incline: 18 },   // ★상한 초과 — 코드가 잘라내야 함
+    { type: 'cooldown', sec: 180, speed: 4.5, incline: 0 }
+  ];
+  const out = app.cardioFitToTotal(raw, 1800, { incline: true, inclineMax: 12 });
+  assert.equal(out[out.length - 1].endSec, 1800, '마지막 구간이 정확히 총시간까지');
+  out.forEach((s) => {
+    assert.equal((s.endSec - s.startSec) % 30, 0, '모든 구간이 30초 배수');
+    assert.ok(s.incline <= 12, '경사 12% 초과 없음');
+  });
+  assert.equal(out[2].incline, 12, '18% → 12%로 클램프');
+  // 인터벌 모드(경사 미사용)는 incline 필드 자체가 붙지 않는다 — 기존 동작 보존
+  const iv = app.cardioFitToTotal([{ type: 'warmup', sec: 300, speed: 5 }, { type: 'run', sec: 60, speed: 8 }], 600, {});
+  assert.equal(iv[iv.length - 1].endSec, 600);
+  assert.ok(!('incline' in iv[0]), '인터벌 구간엔 incline 없음');
+});
+
+// ── §1-2 ACSM 걷기 대사공식 검산 ──
+test('경사걷기 cardioWalkKcal — ACSM 공식(12-3-30 조건)과 일치', () => {
+  // 연구 §1-2: 12% · 4.8km/h · 30분 · 75.4kg → ACSM 추정 10.85 kcal/분 ≈ 326 kcal
+  const kcal = app.cardioWalkKcal([{ type: 'walk', sec: 1800, actualSpeed: 4.8, incline: 12 }], 75.4);
+  assert.ok(Math.abs(kcal - 326) <= 2, `326 kcal 근처여야 함 (실제 ${kcal})`);
+  // 체중을 모르면 0 (표시하지 않음)
+  assert.equal(app.cardioWalkKcal([{ type: 'walk', sec: 1800, actualSpeed: 5, incline: 8 }], 0), 0);
+});
+
+// ── §3-4 안내 문구 규칙: 경사·속도를 함께, 방향을 명시 ──
+test('경사걷기 안내 문구 — 경사+속도 동시 표기 · 올림/내림 방향 명시', () => {
+  assert.equal(app.cardioInclineLabel({ incline: 8, targetSpeed: 5 }), '경사 8% · 5.0km/h');
+  assert.equal(app.cardioFmtIncline(8), '8');
+  assert.equal(app.cardioFmtIncline(4.5), '4.5');
+  assert.ok(app.cardioInclineCue({ incline: 4 }, { incline: 8, targetSpeed: 5 }).includes('올리세요'));
+  assert.ok(app.cardioInclineCue({ incline: 8 }, { incline: 0, targetSpeed: 4.5 }).includes('내리세요'));
+  assert.ok(app.cardioInclineCue({ incline: 8 }, null).includes('완주'));
+});
+
+// ── §3-3 본 구간 코칭 문구는 무음 화면 표시, 진입 2분 뒤부터 회전 ──
+test('경사걷기 cardioWalkTip — 본 구간 진입 2분 뒤부터 5분마다 회전', () => {
+  const seg = { type: 'walk', startSec: 420, endSec: 1620 };
+  assert.equal(app.cardioWalkTip(seg, 500), '', '진입 직후엔 조용');
+  assert.equal(app.cardioWalkTip(seg, 540), app.WALK_COACH_TIPS[0], '2분 뒤 첫 문구(손잡이)');
+  assert.equal(app.cardioWalkTip(seg, 840), app.WALK_COACH_TIPS[1], '5분 뒤 다음 문구');
+  assert.equal(app.cardioWalkTip({ type: 'warmup', startSec: 0, endSec: 300 }, 200), '', '몸풀기 구간엔 안 띄움');
+});
+
+// ── §7-2 하위 호환: 옛 기록(mode·incline 없음)이 섞여도 안 깨진다 ──
+test('경사걷기 cardioWalkSessions — 걷기 세션만 최근순, 옛 기록은 제외', () => {
+  const log = [
+    { date: '2026-08-01', segments: [] },                                  // 옛 기록(mode 없음) → interval 취급
+    { date: '2026-08-03', mode: 'walk', segments: [{ type: 'walk', sec: 600, incline: 6 }] },
+    { date: '2026-08-05', mode: 'walk', segments: [{ type: 'walk', sec: 600, incline: 8 }] },
+    { date: '2026-08-04', mode: 'interval', segments: [] }
+  ];
+  const out = plain(app.cardioWalkSessions(log));   // vm realm → 현재 realm 으로 정규화
+  assert.deepEqual(out.map((s) => s.date), ['2026-08-05', '2026-08-03'], '걷기만 · 최신이 앞');
+  assert.equal(app.cardioWalkMainIncline(out[0]), 8);
+  assert.equal(app.cardioWalkMainIncline({ segments: [] }), 0, '경사 없으면 0');
+});
+
+// ── §7-7: API 키가 없어도 걷기 모드가 100% 동작한다 ──
+test('경사걷기 buildFallbackWalk — 키 없이도 완전한 구성(총시간 정확·경사 상한 이내)', () => {
+  const a = loadApp();
+  a.state.apiKey = null;
+  a.state.data.cardioLog = [];
+  const plan = a.buildFallbackWalk(30, true);
+  assert.equal(plan.source, 'fallback');
+  assert.equal(plan.segments[plan.segments.length - 1].endSec, 1800, '총시간 정확히 30분');
+  assert.equal(plan.segments[0].incline, 0, '몸풀기는 경사 0%');
+  plan.segments.forEach((s) => assert.ok(s.incline <= 12, '경사 상한 이내'));
+  const main = plan.segments.filter((s) => s.type === 'walk');
+  assert.equal(main.length, 1, '본 구간은 쪼개지 않는다(§3-1 정속)');
+  assert.equal(main[0].incline, 4, '기록 없으면 4%');
+  // 허리디스크 기억 노트가 있으면 3%에서 출발 + 자세 큐가 note 에 들어간다
+  a.state.coachMemory = [{ category: 'injury', text: '허리 디스크 이력' }];
+  const back = a.buildFallbackWalk(30, false);
+  assert.equal(back.segments.filter((s) => s.type === 'walk')[0].incline, 3);
+  assert.ok(back.note.includes('고관절'), '허리 자세 큐 포함');
+});
+
+// ── §0·§1-1 톤 규칙: '지방 연소' 마케팅 금지 ──
+test('경사걷기 톤 — 안내 문구에 지방 연소/순삭 류 표현이 없다', () => {
+  const banned = ['지방 연소', '지방연소', '순삭', '애프터번', '폭발'];
+  const texts = [].concat(app.WALK_COACH_TIPS, app.buildFallbackWalk(30, true).note);
+  texts.forEach((t) => banned.forEach((b) => assert.ok(String(t).indexOf(b) === -1, `금지 표현 "${b}" 발견: ${t}`)));
+});
+
+// ── §7-6 AI 프롬프트: 구조 고정 · 경사 상한 · 손잡이 게이트 · 톤 규칙 ──
+test('경사걷기 generateCardioWalk — 프롬프트 규칙 주입 + 총시간 강제 + 경사 상한', async () => {
+  const a = loadApp();
+  a.state.apiKey = 'sk-test';
+  a.state.data.cardioLog = [];
+  let captured = null;
+  a.fetch = (url, opts) => {
+    captured = JSON.parse(opts.body);
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify({
+        headline: 'h', note: 'n',
+        segments: [
+          { type: 'warmup', sec: 300, speed: 5, incline: 0, label: '몸풀기' },
+          { type: 'warmup', sec: 120, speed: 5, incline: 4, label: '준비 구간' },
+          { type: 'walk', sec: 1200, speed: 5, incline: 30, label: '본 구간' },   // ★상한 위반 시도
+          { type: 'cooldown', sec: 180, speed: 4.5, incline: 0, label: '정리' }
+        ]
+      }) }] }),
+      text: () => Promise.resolve(''),
+    });
+  };
+  const plan = await a.generateCardioWalk(30);
+  assert.ok(captured, 'fetch 호출됨');
+  assert.equal(captured.model, 'claude-sonnet-5');
+  assert.deepEqual(captured.thinking, { type: 'disabled' }, 'Sonnet 5 빈 응답 회피');
+  const sys = captured.system;
+  assert.ok(sys.includes('1800초'), '총시간 규칙');
+  assert.ok(sys.includes('시간 → 빈도 → 경사 → 속도'), '향상 우선순위 (§4-1)');
+  assert.ok(sys.includes('12%'), '경사 상한 명시');
+  assert.ok(sys.includes('손잡이'), '손잡이 게이트 (§5-2)');
+  assert.ok(sys.includes('지방 연소'), '금지 규칙으로 언급(과장 금지 §1-1)');
+  assert.ok(sys.includes('본 구간을 여러 개로 쪼개지 말 것'), '정속 고정 (§3-1)');
+  // 코드가 총시간과 경사 상한을 강제한다
+  assert.equal(plan.segments[plan.segments.length - 1].endSec, 1800);
+  assert.equal(plan.segments[2].incline, 12, 'AI가 30% 줘도 12%로 잘림');
+});
+
+// ── §7-6 규칙7: 허리 이력이면 상한 10% + 자세 큐 주입 ──
+test('경사걷기 generateCardioWalk — 허리 이력 시 상한 10% + 자세 큐 블록', async () => {
+  const a = loadApp();
+  a.state.apiKey = 'sk-test';
+  a.state.data.cardioLog = [];
+  a.state.coachMemory = [{ category: 'injury', text: '허리 디스크 있음' }];
+  let captured = null;
+  a.fetch = (url, opts) => {
+    captured = JSON.parse(opts.body);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: '{"segments":[{"type":"walk","sec":1800,"speed":5,"incline":12}]}' }] }), text: () => Promise.resolve('') });
+  };
+  const plan = await a.generateCardioWalk(30);
+  assert.ok(captured.system.includes('허리(디스크) 이력 있음'), '허리 블록 주입');
+  assert.ok(captured.system.includes('고관절'), '자세 큐 포함');
+  assert.ok(captured.system.includes('10% 를 절대 넘기지 않는다'), '상한 한 단계 낮춤');
+  assert.equal(plan.segments[0].incline, 10, '허리 이력이면 코드도 10%로 자름');
+});
+
+// ── §7-7: API 오류·키 없음에도 기능이 죽지 않는다 ──
+test('경사걷기 generateCardioWalk — 키 없으면 null, API 오류면 로컬 폴백', async () => {
+  const a = loadApp();
+  a.state.apiKey = null;
+  assert.equal(await a.generateCardioWalk(30), null, '키 없으면 null(화면이 로컬 폴백 처리)');
+  a.state.apiKey = 'sk-test';
+  a.state.data.cardioLog = [];
+  a.fetch = () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}), text: () => Promise.resolve('') });
+  const plan = await a.generateCardioWalk(30);
+  assert.ok(plan && plan.segments.length, 'API 오류여도 폴백 구성이 나온다');
+  assert.equal(plan.segments[plan.segments.length - 1].endSec, 1800);
+});
+
+// ── 하위 호환: mode 인자를 안 주면 기존(인터벌) 라벨·아이콘 그대로 ──
+test('경사걷기 cardioTypeLabel/Icon — mode 없으면 기존 인터벌 표기 유지', () => {
+  assert.equal(app.cardioTypeLabel('run'), '뛰기');
+  assert.equal(app.cardioTypeLabel('walk'), '걷기');
+  assert.equal(app.cardioTypeLabel('warmup'), '워밍업');
+  assert.equal(app.cardioTypeIcon('run'), '🏃');
+  // 걷기 모드에서는 구간 이름이 바뀐다
+  assert.equal(app.cardioTypeLabel('walk', 'walk'), '본 구간');
+  assert.equal(app.cardioTypeLabel('warmup', 'walk'), '몸풀기');
+  assert.equal(app.cardioTypeLabel('cooldown', 'walk'), '정리');
+  assert.equal(app.cardioTypeIcon('walk', 'walk'), '⛰️');
+  // 램프 구간은 계획 label('준비 구간')을 우선 표시한다
+  assert.equal(app.cardioSegDisplayLabel({ type: 'warmup', label: '준비 구간' }, 'walk'), '준비 구간');
+});
+
+// ── §7-7: 모드 기본값은 interval — 기존 사용자 흐름이 바뀌지 않아야 한다 ──
+test('경사걷기 ensureCardioState/setCardioMode — 기본 interval, 전환 시 구성 초기화', () => {
+  const a = loadApp();
+  a.state.cardio = null;
+  assert.equal(a.ensureCardioState().mode, 'interval', '기본값은 인터벌');
+  a.state.cardio.plan = { segments: [] };
+  a.setCardioMode('walk');
+  assert.equal(a.state.cardio.mode, 'walk');
+  assert.equal(a.state.cardio.plan, null, '모드가 바뀌면 구성 초기화');
+  // 진행 중에는 못 바꾼다
+  a.state.cardio.phase = 'running';
+  a.setCardioMode('interval');
+  assert.equal(a.state.cardio.mode, 'walk', '실행 중 모드 변경 차단');
+});
+
+// ── 회귀: 두 모드가 같은 cardioLog 를 공유한다 — 각 모드는 자기 기록만 기준선으로 삼아야 한다 ──
+test('경사걷기 모드 분리 — 인터벌 기준선이 걷기 세션에 오염되지 않는다', () => {
+  const log = [
+    { date: '2026-08-01', mode: 'interval', completed: true, rpe: 6, segments: [{ type: 'run', sec: 60, actualSpeed: 8 }] },
+    { date: '2026-08-05', mode: 'walk', completed: true, rpe: 5, segments: [{ type: 'walk', sec: 1200, incline: 8 }] }
+  ];
+  // 인터벌 기준선 = 걷기 세션(더 최근)이 아니라 인터벌 세션이어야 한다
+  assert.deepEqual(plain(app.cardioIntervalSessions(log)).map((s) => s.date), ['2026-08-01']);
+  assert.deepEqual(plain(app.cardioWalkSessions(log)).map((s) => s.date), ['2026-08-05']);
+  // 옛 기록(mode 필드 없음)은 인터벌로 간주 — 하위 호환
+  assert.equal(app.cardioIntervalSessions([{ date: '2026-07-01', segments: [] }]).length, 1);
+});
+
+test('경사걷기 generateCardioInterval — 프롬프트 기록 블록에 걷기 세션이 섞이지 않는다', async () => {
+  const a = loadApp();
+  a.state.apiKey = 'sk-test';
+  a.state.data.cardioLog = [
+    { date: '2026-08-01', mode: 'interval', completed: true, rpe: 6, totalSec: 1800, segments: [{ type: 'run', sec: 60, actualSpeed: 8.5 }, { type: 'walk', sec: 120, actualSpeed: 5.5 }] },
+    { date: '2026-08-05', mode: 'walk', completed: true, rpe: 5, totalSec: 1800, segments: [{ type: 'walk', sec: 1200, actualSpeed: 5, incline: 8 }] }
+  ];
+  let captured = null;
+  a.fetch = (url, opts) => {
+    captured = JSON.parse(opts.body);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: '{"segments":[{"type":"warmup","sec":1800,"speed":5}]}' }] }), text: () => Promise.resolve('') });
+  };
+  await a.generateCardioInterval(30);
+  const sys = captured.system;
+  assert.ok(sys.includes('지난 회(기준선)'), '기록 블록이 들어감');
+  assert.ok(sys.includes('2026-08-01') || sys.includes('뛰기 1회'), '인터벌 세션이 기준선');
+  assert.ok(!sys.includes('2026-08-05'), '걷기 세션이 인터벌 프롬프트에 섞이지 않음');
+  // 반대 방향도 확인: 걷기 프롬프트엔 인터벌 세션이 안 들어간다
+  await a.generateCardioWalk(30);
+  assert.ok(!captured.system.includes('2026-08-01'), '인터벌 세션이 걷기 프롬프트에 섞이지 않음');
+});
+
+// ═══════════════════════════════════════════════
+// 코드리뷰(PR #46) 지적 반영 — 회귀 고정
+// ═══════════════════════════════════════════════
+
+// ── 같은 날 두 세션: 날짜 문자열만으로는 순서를 못 가린다 → 저장 순서로 동률을 가른다 ──
+test('리뷰① 같은 날 두 세션 — 최신(나중에 저장된) 세션이 기준선이 된다', () => {
+  const log = [
+    { date: '2026-08-07', mode: 'walk', completed: true, rpe: 5, segments: [{ type: 'walk', sec: 1200, incline: 8 }] },
+    { date: '2026-08-08', mode: 'walk', completed: true, rpe: 5, handrail: 'none', segments: [{ type: 'walk', sec: 1200, incline: 8 }] },
+    { date: '2026-08-08', mode: 'walk', completed: false, rpe: 9, handrail: 'hold', segments: [{ type: 'walk', sec: 600, incline: 8 }] }
+  ];
+  assert.equal(app.cardioWalkSessions(log)[0].handrail, 'hold', '같은 날이면 나중에 저장된 세션이 앞');
+  // 손잡이 '계속 잡음' 하향 게이트가 반드시 발동해야 한다 (§5-2)
+  assert.equal(app.cardioWalkNextIncline(log, []), 6, '−2% 하향이 건너뛰어지지 않음');
+  // 인터벌 쪽도 같은 규칙
+  const ilog = [
+    { date: '2026-08-08', mode: 'interval', rpe: 5, segments: [] },
+    { date: '2026-08-08', mode: 'interval', rpe: 9, segments: [] }
+  ];
+  assert.equal(app.cardioIntervalSessions(ilog)[0].rpe, 9);
+});
+
+// ── 몸풀기(경사 0%) 도중 중단 → 진행도가 초기값으로 리셋되면 안 된다 ──
+test('리뷰② 본 구간 없는 세션 — 그 앞 세션의 경사를 이어받는다(4%로 리셋 금지)', () => {
+  const log = [
+    { date: '2026-08-01', mode: 'walk', completed: true, rpe: 5, segments: [{ type: 'walk', sec: 1800, incline: 10 }] },
+    // 몸풀기 2분만 하고 중단 → walk 구간이 아예 없음
+    { date: '2026-08-05', mode: 'walk', completed: false, segments: [{ type: 'warmup', sec: 120, incline: 0 }] }
+  ];
+  // 기준 경사는 10%에서 이어받되, 최근 세션이 미완주이므로 −2% 하향이 적용된다
+  assert.equal(app.cardioWalkNextIncline(log, []), 8, '10% → 미완주 게이트로 8% (4%로 리셋 아님)');
+  // 걷기 기록은 있지만 본 구간을 한 번도 안 한 경우에만 첫 회 값
+  assert.equal(app.cardioWalkNextIncline([log[1]], []), 4);
+});
+
+// ── walk 모드는 run 세그먼트·범위 밖 속도를 코드가 막는다 ──
+test('리뷰③ cardioFitToTotal — 걷기 모드에서 run 타입과 범위 밖 속도를 코드가 차단', () => {
+  const out = app.cardioFitToTotal(
+    [{ type: 'run', sec: 1800, speed: 12, incline: 8 }],
+    1800,
+    { incline: true, inclineMax: 12, allowedTypes: app.CARDIO_WALK_ALLOWED_TYPES, speedMin: 4.5, speedMax: 5.5 }
+  );
+  assert.equal(out[0].type, 'walk', "run → walk 로 접힘");
+  assert.equal(out[0].speed, 5.5, '12km/h → 상한 5.5로 클램프');
+  // 인터벌 모드는 기존대로 run 과 8km/h 를 그대로 통과시킨다
+  const iv = app.cardioFitToTotal([{ type: 'run', sec: 600, speed: 8 }], 600, {});
+  assert.equal(iv[0].type, 'run');
+  assert.equal(iv[0].speed, 8);
+});
+
+test('리뷰③-2 generateCardioWalk — AI가 run/과속을 줘도 화면엔 walk·5.5 이하로만 나간다', async () => {
+  const a = loadApp();
+  a.state.apiKey = 'sk-test';
+  a.state.data.cardioLog = [];
+  a.fetch = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({ content: [{ type: 'text', text: '{"segments":[{"type":"run","sec":1800,"speed":12,"incline":8}]}' }] }),
+    text: () => Promise.resolve(''),
+  });
+  const plan = await a.generateCardioWalk(30);
+  plan.segments.forEach((s) => {
+    assert.notEqual(s.type, 'run', 'walk 모드에 run 구간 없음');
+    assert.ok(s.speed <= 5.5 && s.speed >= 4.5, '속도가 걷기 범위 안');
+  });
+  // 본 구간이 walk 로 남아야 경사 기록이 살아남는다
+  assert.equal(app.cardioWalkMainIncline({ segments: plan.segments.map((s) => ({ type: s.type, incline: s.incline })) }), 8);
+});
+
+// ── §4-1 본 구간 33분 상한을 코드가 강제한다 ──
+test('리뷰④ 본 구간 33분 상한 — 60분·120분을 요청해도 45분 세션으로 자른다', () => {
+  const a = loadApp();
+  a.state.apiKey = null;
+  a.state.data.cardioLog = [];
+  [60, 120].forEach((min) => {
+    const plan = a.buildFallbackWalk(min, true);
+    const total = plan.segments[plan.segments.length - 1].endSec;
+    assert.equal(total, 45 * 60, min + '분 요청 → 45분으로 클램프');
+    const main = plan.segments.filter((s) => s.type === 'walk').reduce((acc, s) => acc + (s.endSec - s.startSec), 0);
+    assert.ok(main <= 33 * 60, `본 구간 ${main}초 ≤ 33분`);
+    assert.ok(plan.note.includes('본 구간 상한'), '잘렸다는 사실을 note 로 알림');
+  });
+  // 45분 이하는 그대로 통과하고 안내 문구도 안 붙는다
+  const ok = a.buildFallbackWalk(30, true);
+  assert.equal(ok.segments[ok.segments.length - 1].endSec, 1800);
+  assert.ok(!ok.note.includes('본 구간 상한'));
+});
+
+// ── 모드 전환 경쟁 상태: 생성 중에 모드를 바꾸면 늦게 온 응답을 버린다 ──
+test('리뷰⑤ setCardioMode — 생성 중 모드 전환 시 옛 응답이 새 모드에 꽂히지 않는다', async () => {
+  const a = loadApp();
+  a.state.apiKey = 'sk-test';
+  a.state.data.cardioLog = [];
+  a.ensureCardioState();
+  a.state.cardio.mode = 'walk';
+  let release;
+  const pending = new Promise((r) => { release = r; });
+  a.fetch = () => pending;
+  a.buildCardioPlan(30);                       // 걷기 생성 시작 (응답 대기)
+  assert.equal(a.state.cardio.loading, true);
+  a.setCardioMode('interval');                 // 대기 중 모드 전환
+  assert.equal(a.state.cardio.loading, false, '전환 시 로딩 해제');
+  release({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: '{"segments":[{"type":"walk","sec":1800,"speed":5,"incline":8}]}' }] }), text: () => Promise.resolve('') });
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(a.state.cardio.mode, 'interval');
+  assert.equal(a.state.cardio.plan, null, '옛 걷기 응답이 인터벌 화면에 설치되지 않음');
+});
+
+// ── AI 폴백과 화면 폴백이 같은 구성을 쓴다(허리 자세 큐가 경로에 따라 달라지지 않게) ──
+test('리뷰⑥ generateCardioWalk 폴백 — 화면 폴백과 같은 안내(허리 자세 큐 포함)', async () => {
+  const a = loadApp();
+  a.state.apiKey = 'sk-test';
+  a.state.data.cardioLog = [];
+  a.state.coachMemory = [{ category: 'injury', text: '허리 디스크' }];
+  a.fetch = () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}), text: () => Promise.resolve('') });
+  const plan = await a.generateCardioWalk(30);
+  assert.ok(plan.note.includes('고관절'), 'API 오류 폴백에도 허리 자세 큐가 들어간다');
+  assert.equal(plan.segments[plan.segments.length - 1].endSec, 1800);
+});
+
+// ═══════════════════════════════════════════════
 // AI 코칭 수정 회귀 가드 (부위 매핑 · e1RM 상한 · 정체 판정 · 영양 지식 · 볼륨 노출 · 오늘의 추천)
 //   ⚠️ 반드시 파일 "맨 끝"에 둔다. 맨 위 골든심볼 테스트는 실행 시점의 typeof 로 전역을
 //      분류하므로, 로드 직후 null 인 전역(_lastSetsCache 등)을 먼저 채우는 테스트가 앞서면

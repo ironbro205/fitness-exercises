@@ -1812,6 +1812,102 @@ async function loadPlateauCheckIfNeeded() {
 }
 
 // ═══════════════════════════════════════════════
+// 유산소 구간 정규화 — 인터벌 모드·걷기(경사) 모드 공용
+// AI/폴백이 준 구간(길이 sec 기반)을 totalSec 에 "정확히" 맞춘다.
+//  - 각 구간 경계를 30초 배수(30·60·90…)로 스냅한다 → 모든 구간 길이가 30초 단위(연구: ±15~30초 진행).
+//  - totalSec 은 항상 60의 배수(mins*60)라 30 격자로 스냅해도 총합은 정확히 totalSec(초과·미달 0).
+//  - 종류/속력 이상값 정리, 퇴화(0초) 구간 제거, 첫 구간 0초부터 연속 보장.
+//  - opts.incline 이 true 면 incline(경사 %)도 정리해 함께 싣는다(걷기 모드). 상한은 opts.inclineMax.
+//  - opts.allowedTypes / opts.speedMin / opts.speedMax 로 모드별 허용 범위를 좁힐 수 있다.
+// ★시간·경사·종류·속력 상한은 프롬프트만 믿지 않고 여기(코드)에서 절대 불가하게 보정한다.
+// ═══════════════════════════════════════════════
+var CARDIO_ALLOWED_TYPES = { warmup: 1, run: 1, walk: 1, cooldown: 1 };
+// 걷기 모드는 'run' 을 쓰지 않는다 — 걷기 쪽 모든 로직(경사 기록·코칭 문구·기록 요약)이
+// type === 'walk' 를 본 구간으로 삼기 때문에, run 이 섞이면 그 세션의 경사 기록이 통째로 사라진다.
+var CARDIO_WALK_ALLOWED_TYPES = { warmup: 1, walk: 1, cooldown: 1 };
+
+function cardioFitToTotal(raw, totalSec, opts) {
+  opts = opts || {};
+  var defSpeed = opts.defaultSpeed || {};
+  var defLabel = opts.defaultLabel || {};
+  var wantIncline = !!opts.incline;
+  var inclineMax = (typeof opts.inclineMax === 'number') ? opts.inclineMax : 0;
+  var allowed = opts.allowedTypes || CARDIO_ALLOWED_TYPES;
+  var spdMin = (typeof opts.speedMin === 'number') ? opts.speedMin : 1;
+  var spdMax = (typeof opts.speedMax === 'number') ? opts.speedMax : 20;
+  var list = Array.isArray(raw) ? raw : [];
+
+  // 속력 숫자 정리: km/h, 모드별 범위로 클램프, 소수 1자리. 이상값이면 종류별 기본값.
+  function cleanSpeed(v, type) {
+    var n = Number(v);
+    if (!isFinite(n) || n <= 0) n = defSpeed[type] || 4;
+    if (n < spdMin) n = spdMin;
+    if (n > spdMax) n = spdMax;
+    return Math.round(n * 10) / 10;
+  }
+  // 경사 정리: 0~상한 클램프, 0.5% 격자. 상한 초과는 코드가 잘라낸다(§1-3 12% 초과 금지).
+  function cleanIncline(v) {
+    var n = Number(v);
+    if (!isFinite(n) || n < 0) n = 0;
+    if (n > inclineMax) n = inclineMax;
+    return Math.round(n * 2) / 2;
+  }
+
+  var clean = [];
+  var sum = 0;
+  for (var i = 0; i < list.length; i++) {
+    var seg = list[i] || {};
+    var type = allowed[seg.type] ? seg.type : 'walk';       // 허용 밖 종류(걷기 모드의 run 등)는 walk 로 접는다
+    var sec = Number(seg.sec);
+    if (!isFinite(sec) || sec <= 0) continue;
+    var item = {
+      type: type,
+      sec: sec,
+      speed: cleanSpeed(seg.speed, type),
+      label: (typeof seg.label === 'string' && seg.label.trim()) ? seg.label.trim() : (defLabel[type] || '구간')
+    };
+    if (wantIncline) item.incline = cleanIncline(seg.incline);
+    clean.push(item);
+    sum += sec;
+  }
+  if (!clean.length || sum <= 0) return null;
+
+  var STEP = 30;                                         // 30초 격자
+  var out = [];
+  var prev = 0;                                          // 확정된 끝(항상 30의 배수)
+  var cum = 0;
+  var n = clean.length;
+  for (var j = 0; j < n; j++) {
+    cum += clean[j].sec * totalSec / sum;               // 스케일된 이상적 끝(실수, 초)
+    var end;
+    if (j === n - 1) {
+      end = totalSec;                                    // 마지막 구간은 정확히 총시간(30의 배수)
+    } else {
+      end = Math.round(cum / STEP) * STEP;               // 30초 격자에 스냅
+      var minEnd = prev + STEP;                          // 이 구간 최소 30초 확보
+      var maxEnd = totalSec - (n - 1 - j) * STEP;        // 이후 구간마다 30초씩 남겨두기
+      if (end < minEnd) end = minEnd;
+      if (end > maxEnd) end = maxEnd;
+    }
+    if (end <= prev) continue;                           // 격자 부족 시 병합(누적은 유지)
+    var outSeg = {
+      startSec: prev,
+      endSec: end,
+      type: clean[j].type,
+      speed: clean[j].speed,
+      label: clean[j].label
+    };
+    if (wantIncline) outSeg.incline = clean[j].incline;
+    out.push(outSeg);
+    prev = end;
+  }
+  if (!out.length) return null;
+  // 마지막 구간이 정확히 끝(totalSec)까지 덮게 보정
+  if (out[out.length - 1].endSec !== totalSec) out[out.length - 1].endSec = totalSec;
+  return out;
+}
+
+// ═══════════════════════════════════════════════
 // 유산소 인터벌 생성 (러닝머신 걷기·뛰기) — Sonnet
 // 입력: 운동 시간(분)만. 출력: 그 시간에 "딱 맞는" 구간 리스트.
 // 반환: { headline, totalSec, segments:[{startSec,endSec,type,speed,label}], note } | null(API 키 없음)
@@ -1828,86 +1924,22 @@ async function generateCardioInterval(totalMinutes) {
   mins = Math.max(3, Math.min(180, mins));
   var totalSec = mins * 60;
 
-  var ALLOWED_TYPES = { warmup: 1, run: 1, walk: 1, cooldown: 1 };
   var DEFAULT_LABEL = { warmup: '워밍업 걷기', run: '뛰기', walk: '걷기 회복', cooldown: '쿨다운 걷기' };
   // 첫 회 기본 하한(사용자=중급): 걷기(회복) ≥5.5, 뛰기 ≥8.0, 워밍업·쿨다운 걷기 5.0. AI가 speed를 빠뜨렸을 때의 기본값.
   var DEFAULT_SPEED = { warmup: 5.0, run: 8.0, walk: 5.5, cooldown: 5.0 };
 
-  // 속력 숫자 정리: km/h, 1~20 클램프, 소수 1자리. 이상값이면 종류별 기본값.
-  function cleanSpeed(v, type) {
-    var n = Number(v);
-    if (!isFinite(n) || n <= 0) n = DEFAULT_SPEED[type] || 4;
-    if (n < 1) n = 1;
-    if (n > 20) n = 20;
-    return Math.round(n * 10) / 10;
-  }
-
-  // AI/폴백 구간(길이 sec 기반)을 totalSec에 "정확히" 맞춘다.
-  //  - 각 구간 경계를 30초 배수(30·60·90…)로 스냅한다 → 모든 구간 길이가 30초 단위(연구: ±15~30초 진행).
-  //  - totalSec은 항상 60의 배수(mins*60)라 30 격자로 스냅해도 총합은 정확히 totalSec(초과·미달 0).
-  //  - 종류/속력 이상값 정리, 퇴화(0초) 구간 제거, 첫 구간 0초부터 연속 보장.
+  // 총시간 정확히 맞추기 + 30초 격자 스냅은 공용 cardioFitToTotal 이 담당(걷기 모드와 동일 알고리즘).
   function fitToTotal(raw) {
-    var clean = [];
-    var sum = 0;
-    for (var i = 0; i < raw.length; i++) {
-      var seg = raw[i] || {};
-      var type = ALLOWED_TYPES[seg.type] ? seg.type : 'walk';
-      var sec = Number(seg.sec);
-      if (!isFinite(sec) || sec <= 0) continue;
-      clean.push({
-        type: type,
-        sec: sec,
-        speed: cleanSpeed(seg.speed, type),
-        label: (typeof seg.label === 'string' && seg.label.trim()) ? seg.label.trim() : (DEFAULT_LABEL[type] || '구간')
-      });
-      sum += sec;
-    }
-    if (!clean.length || sum <= 0) return null;
-
-    var STEP = 30;                                         // 30초 격자
-    var out = [];
-    var prev = 0;                                          // 확정된 끝(항상 30의 배수)
-    var cum = 0;
-    var n = clean.length;
-    for (var j = 0; j < n; j++) {
-      cum += clean[j].sec * totalSec / sum;               // 스케일된 이상적 끝(실수, 초)
-      var end;
-      if (j === n - 1) {
-        end = totalSec;                                    // 마지막 구간은 정확히 총시간(30의 배수)
-      } else {
-        end = Math.round(cum / STEP) * STEP;               // 30초 격자에 스냅
-        var minEnd = prev + STEP;                          // 이 구간 최소 30초 확보
-        var maxEnd = totalSec - (n - 1 - j) * STEP;        // 이후 구간마다 30초씩 남겨두기
-        if (end < minEnd) end = minEnd;
-        if (end > maxEnd) end = maxEnd;
-      }
-      if (end <= prev) continue;                           // 격자 부족 시 병합(누적은 유지)
-      out.push({
-        startSec: prev,
-        endSec: end,
-        type: clean[j].type,
-        speed: clean[j].speed,
-        label: clean[j].label
-      });
-      prev = end;
-    }
-    if (!out.length) return null;
-    // 마지막 구간이 정확히 끝(totalSec)까지 덮게 보정
-    if (out[out.length - 1].endSec !== totalSec) out[out.length - 1].endSec = totalSec;
-    return out;
+    return cardioFitToTotal(raw, totalSec, { defaultSpeed: DEFAULT_SPEED, defaultLabel: DEFAULT_LABEL });
   }
 
   // 지난 유산소 기록 요약 → 점진·게이트 컨텍스트. 기록 없으면 첫 회 안내.
+  // ★인터벌 세션만 본다 — 경사 걷기 세션이 같은 cardioLog 에 함께 쌓이므로,
+  //   걷기 세션을 기준선으로 삼으면 "뛰기 0회"를 읽고 엉뚱한 판정이 나온다.
   function cardioHistoryContext() {
     var log = (state.data && Array.isArray(state.data.cardioLog)) ? state.data.cardioLog : [];
-    if (!log.length) return '기록 없음 — 첫 회입니다. 위 "첫 회 처방"을 그대로 적용하고, 속력 욕심 없이 완주를 목표로 보수적으로 짜세요.';
-
-    var sorted = log.slice().sort(function(a, b) {
-      var da = (a && a.date) ? String(a.date) : '';
-      var db = (b && b.date) ? String(b.date) : '';
-      if (da === db) return 0;
-      return da < db ? 1 : -1;                             // 최근이 앞으로
-    });
+    var sorted = cardioIntervalSessions(log);
+    if (!sorted.length) return '기록 없음 — 첫 회입니다. 위 "첫 회 처방"을 그대로 적용하고, 속력 욕심 없이 완주를 목표로 보수적으로 짜세요.';
     var recent = sorted.slice(0, 3);
 
     function avg(arr, pick) {
@@ -2092,6 +2124,249 @@ ${cardioHistoryContext()}
   } catch (error) {
     console.error('유산소 인터벌 호출 실패:', error);
     return fallbackPlan();                                  // 네트워크 예외에도 유산소 시작 가능하게
+  }
+}
+
+// ═══════════════════════════════════════════════
+// 경사 걷기(인클라인 워킹) 세션 생성 — Sonnet
+// 입력: 운동 시간(분)만. 출력: 정속 4구간(몸풀기 → 준비(램프) → 본 구간 → 정리).
+// 반환: { headline, totalSec, segments:[{startSec,endSec,type,speed,incline,label}], note } | null(API 키 없음)
+// 근거: docs/research/incline-walking.md — §2(처방표) §3(세션 구조) §4(점진 규칙) §5(주의사항) §7-6(프롬프트 설계)
+// ★인터벌 모드와 같은 뼈대(JSON만 · cardioFitToTotal · 폴백)를 쓰고 프롬프트·경사 규칙만 다르다.
+// ═══════════════════════════════════════════════
+
+// 지난 "걷기 모드" 세션만 요약 → 점진·게이트 컨텍스트(§4-2). 기록 없으면 첫 회 안내.
+// ctx 는 cardioWalkContext() 결과(생략 시 여기서 계산) — 한 번의 생성에서 로그를 여러 번 훑지 않도록,
+// 그리고 프롬프트에 넣는 기준 경사와 폴백이 쓰는 기준 경사가 반드시 같은 값이도록 넘겨받는다.
+function cardioWalkHistoryContext(ctx) {
+  var c = ctx || cardioWalkContext();
+  var sessions = c.sessions;
+  var startInc = c.back ? WALK_PRESCRIPTION.inclineStartBack : WALK_PRESCRIPTION.inclineStart;
+
+  if (!sessions.length) {
+    return '기록 없음 — 경사 걷기 첫 회입니다. 경사 ' + startInc + '%, 속도 ' + WALK_PRESCRIPTION.speedDefault +
+      'km/h 로 시작하고 본 구간은 15~20분을 넘기지 마세요. 경사 욕심 없이 완주가 목표입니다.';
+  }
+
+  var HANDRAIL_KR = { none: '손잡이 안 잡음', light: '손가락만 가볍게', hold: '★손잡이 계속 잡음' };
+  var recent = sessions.slice(0, 3);
+  var lines = [];
+  recent.forEach(function(s, idx) {
+    if (!s) return;
+    var m = s.totalSec ? Math.round(s.totalSec / 60) : '?';
+    var inc = cardioWalkMainIncline(s);
+    var segs = Array.isArray(s.segments) ? s.segments : [];
+    var mains = segs.filter(function(g) { return g && g.type === 'walk'; });
+    var mainSec = 0, spd = 0;
+    mains.forEach(function(g) {
+      var sec = Number(g.sec) || 0;
+      mainSec += sec;
+      var v = Number((g.actualSpeed != null) ? g.actualSpeed : g.targetSpeed);
+      if (isFinite(v) && v > spd) spd = v;
+    });
+    var done = s.completed ? '완주O' : '미완주X';
+    var rpe = (typeof s.rpe === 'number') ? ('RPE ' + s.rpe) : 'RPE기록없음';
+    var hr = HANDRAIL_KR[s.handrail] || '손잡이 기록없음';
+    var tag = (idx === 0) ? '지난 회(기준선)' : (s.date || '이전');
+    lines.push('- ' + tag + ': 총 ' + m + '분 · 본 구간 ' + Math.round(mainSec / 60) + '분 · 경사 ' + inc + '%' +
+      (spd ? (' · 속도 ' + (Math.round(spd * 10) / 10) + 'km/h') : '') + ' · ' + done + ' · ' + rpe + ' · ' + hr);
+  });
+
+  // 최근 7일 세션 수 — 빈도 축(2순위) 판단용. 주 4회를 넘기지 않는다(§4-1 · §6-3).
+  var since = getDateStr(new Date(Date.now() - 6 * 86400000));
+  var weekCount = sessions.filter(function(s) { return s && String(s.date) >= since; }).length;
+
+  // 코드가 지난 기록으로 1차 판정(참고). 최종 축·폭은 프롬프트 규칙대로.
+  var last = recent[0] || {};
+  var gate;
+  if (last.handrail === 'hold') gate = '지난 회 손잡이를 계속 잡음 → 경사가 너무 높았다는 신호. 이번엔 경사 −2%(무조건).';
+  else if (!last.completed) gate = '지난 회 미완주 → 하향(경사 −2% + 본 구간 −5분).';
+  else if (typeof last.rpe === 'number' && last.rpe >= 9) gate = '지난 회 RPE 9 이상 → 하향(경사 −2%).';
+  else if (typeof last.rpe === 'number' && last.rpe >= 7) gate = '지난 회 RPE 7~8 → 유지(그대로 반복).';
+  else if (typeof last.rpe === 'number' && last.rpe <= 6) gate = '지난 회 완주 + RPE ≤ 6 → 우선순위(시간 → 빈도 → 경사 → 속도)에서 "한 축만" 소폭 상향.';
+  else gate = '지난 회 완주(RPE 미기록) → 유지하거나 시간 축만 아주 소폭 상향(보수적).';
+
+  return lines.join('\n') +
+    '\n\n최근 7일 걷기 세션 수: ' + weekCount + '회 (상한 주 4회)' +
+    '\n코드 판정(참고): ' + gate +
+    '\n코드가 계산한 안전 경사(하향 게이트 반영, 상향은 미포함): ' + c.anchorIncline + '%';
+}
+
+async function generateCardioWalk(totalMinutes) {
+  // 계약: API 키 없으면 null (상위 화면이 로컬 폴백으로 처리)
+  if (!state.apiKey) return null;
+
+  // 본 구간 33분 상한(§4-1) → 세션 총시간은 45분을 넘지 않는다. 더 요청해도 여기서 자른다.
+  var totalSec = cardioWalkClampTotalSec(Math.max(3, Math.min(180, Math.round(Number(totalMinutes) || 0))) * 60);
+  var mins = Math.round(totalSec / 60);
+
+  var ctx = cardioWalkContext();                             // 로그·부상·기준 경사를 한 번만 계산
+  var back = ctx.back;
+  var cap = ctx.cap;                                         // 허리 이력이면 10%, 아니면 12%
+  var anchorIncline = ctx.anchorIncline;                     // 하향 게이트까지 반영된 기준 경사
+
+  var DEFAULT_LABEL = { warmup: '몸풀기', walk: '본 구간', cooldown: '정리' };
+  var DEFAULT_SPEED = {
+    warmup: WALK_PRESCRIPTION.speedDefault,
+    walk: WALK_PRESCRIPTION.speedDefault,
+    cooldown: WALK_PRESCRIPTION.cooldownSpeed
+  };
+  function fitWalk(raw) {
+    return cardioFitToTotal(raw, totalSec, {
+      defaultSpeed: DEFAULT_SPEED, defaultLabel: DEFAULT_LABEL,
+      incline: true, inclineMax: cap,
+      allowedTypes: CARDIO_WALK_ALLOWED_TYPES,               // run 금지는 프롬프트가 아니라 코드가 강제
+      speedMin: WALK_PRESCRIPTION.speedMin, speedMax: WALK_PRESCRIPTION.speedMax
+    });
+  }
+
+  // 파싱 실패·네트워크 오류 시 폴백 — 화면의 로컬 폴백(buildFallbackWalk)과 같은 구성을 쓴다.
+  // (허리 자세 큐 같은 안내가 경로에 따라 달라지지 않도록 한 곳에서만 만든다.)
+  function fallbackPlan() {
+    if (typeof buildFallbackWalk === 'function') return buildFallbackWalk(mins, false);
+    var segs = fitWalk(buildWalkRawSegments(totalSec, anchorIncline));
+    if (!segs) return null;
+    return {
+      headline: mins + '분 · 경사 ' + anchorIncline + '% 정속 걷기',
+      totalSec: totalSec,
+      segments: segs,
+      note: '본 구간은 아무것도 바꾸지 않고 그대로 걷습니다. 손잡이는 놓고, 문장은 말할 수 있는 정도로 유지하세요.'
+    };
+  }
+
+  // 허리디스크 등록 시 주입되는 블록(§5-1) — 부상 없으면 토큰 0.
+  var backBlock = back ?
+`
+## ⚠️ 허리(디스크) 이력 있음 — 반드시 반영
+- 경사 상한을 한 단계 낮춘다: 이번 처방의 경사는 **${cap}% 를 절대 넘기지 않는다.**
+- 경사는 가장 늦게, 가장 조심스럽게 올리는 축이다. 시간·빈도를 먼저 다 쓴 뒤에만 경사를 건드린다.
+- note 에 자세 큐를 반드시 1개 넣는다: "가슴은 들고 허리는 곧게 — 접히는 곳은 허리가 아니라 고관절".
+- 다리로 내려가는 저림·방사통이 있었다면 경사를 절반으로 내린다.
+` : '';
+
+  var systemPrompt =
+`당신은 러닝머신 '경사 걷기(인클라인 워킹)' 세션을 설계하는 코치다. 목표는 체지방 감소이고, 수단은 무릎 부담이 적은 정속 유산소다. 사용자가 준 '운동 시간' 안에 몸풀기 + 준비(램프) + 본 구간 + 정리를 빠짐없이 채우되 그 시간을 절대 넘기지 않는다. 반드시 JSON으로만 응답한다(설명 문장 없이 JSON 하나).
+
+★앱은 러닝머신을 제어하지 못한다. 사용자가 화면 안내를 보고 직접 경사·속도 버튼을 누른다. 그래서 구간을 자주 바꾸면 안 된다.
+
+## ⏱️ 시간 규칙 (가장 중요)
+- 모든 구간 sec(초)의 합 = 정확히 ${totalSec}초 (= ${mins}분). 초과·미달 금지.
+- 각 구간 길이(sec)는 30초의 배수.
+
+## 🧱 구조 고정 (정확히 4구간, 순서 고정)
+1. warmup — 몸풀기, **경사 0%**, 속도 5.0, 약 5분(시간이 짧으면 2~3분)
+2. warmup — 준비 구간(램프), **경사 = 목표의 절반**, 속도 5.0, 2분
+3. walk — **본 구간(정속)**, 목표 경사, 목표 속도, 세션의 심장
+4. cooldown — 정리, **경사 0%**, 속도 ${WALK_PRESCRIPTION.cooldownSpeed}, 3~5분
+- ★본 구간을 여러 개로 쪼개지 말 것. 인터벌(경사·속도 오르내림)은 이 모드에서 금지다 — 이미 인터벌 모드가 따로 있다.
+- 경사 조작은 세션 전체에서 총 3회(램프 진입 / 본 구간 진입 / 정리 진입)뿐이어야 한다.
+- 본 구간은 최대 ${Math.round(WALK_PRESCRIPTION.mainMaxSec / 60)}분을 넘기지 않는다.
+
+## ⛰️ 경사 규칙
+- 이번 세션의 기준 경사(anchor) = **${anchorIncline}%** (지난 기록의 하향 게이트까지 반영된 값).
+- ★상한 **${cap}%** — 어떤 경우에도 초과 금지. (근거: 15~20%는 지방 산화 이득이 사라지고 즐거움·지속률이 무너진다)
+- 경사를 올릴 땐 한 번에 +1~2% 까지만.
+- 램프 구간 경사 = 본 구간 경사의 절반(반올림해 0.5% 단위).
+
+## 🚶 속도 규칙
+- 범위 ${WALK_PRESCRIPTION.speedMin}~${WALK_PRESCRIPTION.speedMax} km/h. 기본 ${WALK_PRESCRIPTION.speedDefault}.
+- ★경사가 오르면 속도는 올리지 않는다(오히려 내린다). 경사 11% 이상이면 4.8 권장.
+- 속도는 올릴 때 +0.2~0.3 km/h 씩만.
+
+## 📈 향상 우선순위 — **시간 → 빈도 → 경사 → 속도** (한 번에 "한 축만")
+1. 시간: 본 구간 +5분 (상한 ${Math.round(WALK_PRESCRIPTION.mainMaxSec / 60)}분) — 관절·허리 피크 부하를 전혀 안 올리는 가장 안전한 축
+2. 빈도: 주 +1회 (상한 주 4회) — 이번 응답에서 바꿀 수 없는 축이니 note 로만 제안
+3. 경사: +1~2% (상한 ${cap}%)
+4. 속도: +0.2~0.3 km/h (상한 ${WALK_PRESCRIPTION.speedMax})
+- 주간 총량은 이전 주 대비 +10% 이내. 같은 축을 3주 연속 올리지 않는다.
+
+## ✅ 향상 게이트 (지난 기록 기반)
+- 완주 O + RPE ≤ 6 + 허리·종아리 통증 없음 → 위 우선순위에서 한 축만 소폭 상향.
+- 완주 O + RPE 7~8 → 유지(그대로 반복).
+- 완주 O + RPE ≥ 9 → 하향(경사 −2% 또는 본 구간 −5분).
+- 미완주 → 하향(경사 −2% + 본 구간 −5분).
+- ★**손잡이 "계속 잡음" 기록이면 무조건 경사 −2%.** 잡고 뒤로 기대면 강도의 3분의 1이 사라지므로, 실제로는 기록보다 낮은 경사를 한 것이다.
+${backBlock}
+## 🗣️ 강도 지표
+- 대화 테스트가 1순위: "문장은 말할 수 있는데 노래는 안 되는" 정도가 딱 맞다.
+- RPE 4~6이 정상(인터벌 모드보다 낮다 — 30분을 균일하게 유지하는 운동이라 그렇다).
+- 손잡이를 놓을 수 없다면 경사가 너무 높다는 신호다.
+
+## 🙅 톤 (담백하게)
+- ★과장 금지: "지방 연소/지방 순삭/애프터번 폭발" 같은 표현을 절대 쓰지 않는다. 경사 걷기가 지방을 더 태운다는 근거는 연구가 서로 엇갈린다.
+- 장점은 정직하게 한 가지뿐: **평지 조깅에 가까운 열량을 무릎 부담 없이** 가져온다는 것.
+- 체지방은 총 에너지 적자와 식사가 정한다. 지방·다이어트 이야기는 사용자가 물었을 때만 짧게 사실을 정정한다.
+- note 에는 오늘 할 일과 그 이유만 1~2문장. 면책·주의 문구는 화면 배너가 이미 안내하니 반복하지 않는다.
+
+## 📒 사용자 지난 경사 걷기 기록
+${cardioWalkHistoryContext(ctx)}
+
+## 📤 응답 형식 (JSON만)
+{
+  "headline": "한 줄 요약 (예: 경사 6% · 본 구간 20분 / 또는 지난 회보다 본 구간 5분 증가)",
+  "note": "오늘의 포인트(왜 향상/유지/하향) 1~2문장. 담백하게.",
+  "segments": [
+    {"type":"warmup","sec":300,"speed":5,"incline":0,"label":"몸풀기"},
+    {"type":"warmup","sec":120,"speed":5,"incline":3,"label":"준비 구간"},
+    {"type":"walk","sec":1200,"speed":5,"incline":6,"label":"본 구간"},
+    {"type":"cooldown","sec":180,"speed":4.5,"incline":0,"label":"정리"}
+  ]
+}
+- type 은 warmup|walk|cooldown 만 쓴다(run 금지). sec 는 30초 배수, speed 는 km/h, incline 은 % 숫자(0~${cap}), label 은 짧은 한국어.
+- 구간 sec 의 합은 정확히 ${totalSec}.`;
+
+  try {
+    var response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': state.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5',
+        thinking: { type: 'disabled' }, // Sonnet 5 기본 생각모드가 max_tokens를 소진해 빈 응답이 오는 사고 방지
+        max_tokens: 1500,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: mins + '분(= ' + totalSec + '초)짜리 경사 걷기 세션을 만들어줘. 구간 sec 합이 정확히 ' + totalSec + '이 되게, JSON으로만.' }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      console.error('경사 걷기 세션 생성 실패:', response.status);
+      return fallbackPlan();                                // API 오류여도 기능은 동작하게
+    }
+
+    var data = await response.json();
+    if (!getResponseText(data)) return fallbackPlan();
+    var content = getResponseText(data);
+
+    var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    var parsed = null;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (e) {
+      var jsonStr = extractBalancedJson(cleaned);
+      if (jsonStr) { try { parsed = JSON.parse(jsonStr); } catch (e2) { parsed = null; } }
+    }
+
+    if (!parsed || !Array.isArray(parsed.segments) || parsed.segments.length === 0) return fallbackPlan();
+
+    var segments = fitWalk(parsed.segments);
+    if (!segments) return fallbackPlan();
+
+    return {
+      headline: (typeof parsed.headline === 'string' && parsed.headline.trim()) ? parsed.headline.trim() : (mins + '분 경사 걷기'),
+      totalSec: totalSec,
+      segments: segments,
+      note: (typeof parsed.note === 'string' && parsed.note.trim()) ? parsed.note.trim() : '본 구간은 그대로 유지하세요. 손잡이는 놓고, 문장은 말할 수 있는 정도로.'
+    };
+  } catch (error) {
+    console.error('경사 걷기 호출 실패:', error);
+    return fallbackPlan();                                  // 네트워크 예외에도 시작 가능하게
   }
 }
 
