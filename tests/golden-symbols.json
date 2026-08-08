@@ -1,5 +1,5 @@
 {
-  "functionCount": 422,
+  "functionCount": 431,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -13,6 +13,13 @@
     "adjustWeight",
     "advanceCycleIfWeekComplete",
     "advanceCycleOnSessionComplete",
+    "aiEnum",
+    "aiInt",
+    "aiNum",
+    "aiRange",
+    "aiText",
+    "aiTextList",
+    "aiTimeFactor",
     "analyzePlateauWithAI",
     "analyzeRoutineBalance",
     "animateSheetCloseThen",
@@ -280,6 +287,8 @@
     "muscleLabel",
     "muscleMapJsArg",
     "navBack",
+    "normalizeAIExercise",
+    "normalizeAIRoutineMeta",
     "normalizeMemoryKey",
     "noteBlock",
     "openApiKeyModal",
@@ -425,6 +434,9 @@
     "warnExerciseSafety"
   ],
   "objects": [
+    "AI_GRADES",
+    "AI_INTENSITY_LEVELS",
+    "AI_SEVERITIES",
     "ASSIST_EXCLUDE_KEYWORDS",
     "ASSIST_MOVEMENT_KEYWORDS",
     "ASSIST_NAME_KEYWORDS",

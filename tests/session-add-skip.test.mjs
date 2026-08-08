@@ -296,14 +296,16 @@ test('종목 고르기 시트는 모드에 따라 버튼 문구와 동작이 바
   assert.equal(app.state.exercisePickerMode, 'swap');
   const swapHtml = app.buildSwapListHtml('');
   assert.ok(swapHtml.includes('swapCurrentExercise('));
-  assert.ok(swapHtml.includes('교체 →'));
+  // #59에서 줄마다 붙던 '교체 →' 글자는 공용 chevron 아이콘 하나로 바뀌었다(그 글자가 목록의 배경이 돼서).
+  // 그래서 모드 차이는 이제 ① 누를 함수 ② "목록에 없는 이름" 카드의 문구에만 남는다 — 그 둘을 본다.
+  assert.ok(app.buildSwapListHtml('듣도보도못한종목').includes('이 이름 그대로 교체'));
 
   app.openExerciseAdd();
   assert.equal(app.state.exercisePickerMode, 'add');
   assert.equal(app.state.exerciseMenuOpen, false, '메뉴는 시트를 열면 닫힌다');
   const addHtml = app.buildSwapListHtml('');
   assert.ok(addHtml.includes('addExerciseAfterCurrent('));
-  assert.ok(addHtml.includes('추가 →'));
+  assert.ok(app.buildSwapListHtml('듣도보도못한종목').includes('이 이름 그대로 추가'));
   assert.ok(!addHtml.includes('swapCurrentExercise('));
 
   app.closeExerciseSwap();
