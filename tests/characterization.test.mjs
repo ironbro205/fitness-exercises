@@ -2044,3 +2044,76 @@ test('휴식 타이머 — 미등록 복합 종목도 부위 판정으로 150초
   const row = a.getExercisePart('머신 로우');
   assert.ok(row && row.compound === true, "'머신 로우'도 복합으로 잡혀야 한다");
 });
+
+// ═══════════════════════════════════════════════
+// XSS 회귀 — AI 응답 필드는 화면에 날것으로 들어가면 안 된다
+// ═══════════════════════════════════════════════
+// 배경: js/ai.js 는 모델 응답을 `parsed.X || 기본값` 으로만 받는다 — 타입 강제도 검증도 없다.
+// 그래서 reps/sets/weight/rir/totalSets/duration/grade 처럼 "숫자처럼 생긴" 칸에도
+// 모델이 임의 문자열을 넣을 수 있고, 그 값이 innerHTML 로 들어가면 그대로 실행된다.
+// (실제로 PR #53 리뷰에서 루틴 미리보기의 ex.reps/ex.sets 가 무이스케이프로 발견됐다.)
+// 계약: 렌더 결과에 페이로드가 **날것으로** 남아 있으면 안 된다. escapeHtml 이 유일한 방어선이다.
+test('XSS 회귀 — AI 루틴/주간리뷰의 숫자형 필드도 이스케이프된다', () => {
+  const PAYLOAD = '<img src=x onerror=alert(1)>';
+  const snapshot = {
+    tab: app.state.currentTab,
+    routine: app.state.generatedRoutine,
+    part: app.state.selectedBodyPart,
+    step: app.state.workoutWizardStep,
+    expanded: app.state.routinePreviewExpanded,
+    history: app.state.routineChatHistory,
+    review: app.state.weeklyReview,
+  };
+
+  // 모델이 모든 칸에 페이로드를 심어 돌려준 상황
+  app.state.selectedBodyPart = 'pull';
+  app.state.routineLoading = false;
+  app.state.routineChatHistory = [];
+  app.state.routineChatInput = '';
+  app.state.routinePreviewExpanded = true;
+  app.state.generatedRoutine = {
+    bodyPart: 'pull',
+    headline: PAYLOAD,
+    reason: PAYLOAD,
+    caution: PAYLOAD,
+    duration: PAYLOAD,
+    totalSets: PAYLOAD,
+    intensity: 'moderate',
+    exercises: [{
+      name: PAYLOAD, type: PAYLOAD, isMain: true,
+      sets: PAYLOAD, reps: PAYLOAD, weight: PAYLOAD, rir: PAYLOAD, rest: null, note: PAYLOAD,
+    }],
+  };
+
+  // STEP2(루틴 상세) · STEP3(대화 + 미리보기) 양쪽 다 검사한다 — 같은 필드를 서로 다르게 그린다
+  for (const [label, html] of [['step2', app.renderWorkoutStep2()], ['step3', app.renderWorkoutStep3()]]) {
+    assert.ok(!html.includes(PAYLOAD), label + ' 에 페이로드가 날것으로 남아 있다');
+    assert.ok(!html.includes('<img'), label + ' 에 살아 있는 <img> 태그가 만들어졌다');
+    assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'), label + ' 에 이스케이프된 형태가 안 보인다');
+  }
+
+  // 루틴 생성 실패 메시지(에러 문자열도 외부에서 온다)
+  app.state.generatedRoutine = { bodyPart: 'pull', error: PAYLOAD };
+  const errHtml = app.renderWorkoutStep2();
+  assert.ok(!errHtml.includes(PAYLOAD), '루틴 실패 메시지가 날것으로 들어간다');
+
+  // 주간 리뷰 등급 — 한 글자짜리 칸이라 놓치기 쉽다 (홈 카드 + 상세 화면 둘 다)
+  app.state.weeklyReview = {
+    weekId: '2026-W32', monday: '2026-08-03', sunday: '2026-08-09',
+    grade: PAYLOAD, headline: PAYLOAD, wins: [PAYLOAD], improvements: [], nextWeek: [],
+    coachNote: PAYLOAD, stats: { workoutCount: 3, weightChange: 0, prCount: 1 },
+  };
+  const reviewHtml = app.renderWeeklyReviewDetail();
+  assert.ok(!reviewHtml.includes(PAYLOAD), '주간 리뷰 상세에 페이로드가 날것으로 남아 있다');
+  app.state.currentTab = 'home';
+  const homeHtml = app.renderHome();
+  assert.ok(!homeHtml.includes(PAYLOAD), '홈의 주간 리뷰 카드에 페이로드가 날것으로 남아 있다');
+
+  app.state.currentTab = snapshot.tab;
+  app.state.generatedRoutine = snapshot.routine;
+  app.state.selectedBodyPart = snapshot.part;
+  app.state.workoutWizardStep = snapshot.step;
+  app.state.routinePreviewExpanded = snapshot.expanded;
+  app.state.routineChatHistory = snapshot.history;
+  app.state.weeklyReview = snapshot.review;
+});

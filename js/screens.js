@@ -180,7 +180,7 @@ function renderHome() {
               '<p class="text-[10px] font-mono text-stone-500">' + state.weeklyReview.monday.substring(5) + ' ~ ' + state.weeklyReview.sunday.substring(5) + '</p>' +
             '</div>' +
             '<div class="flex items-baseline gap-3 mb-2">' +
-              '<p class="font-bebas text-5xl" style="color: ' + ({S:'var(--accent)',A:'var(--accent)',B:'#a78bfa',C:'#fbbf24',D:'#ef4444'}[state.weeklyReview.grade] || '#a78bfa') + ';">' + state.weeklyReview.grade + '</p>' +
+              '<p class="font-bebas text-5xl" style="color: ' + ({S:'var(--accent)',A:'var(--accent)',B:'#a78bfa',C:'#fbbf24',D:'#ef4444'}[state.weeklyReview.grade] || '#a78bfa') + ';">' + escapeHtml(state.weeklyReview.grade) + '</p>' +
               '<p class="text-sm font-display font-bold leading-tight">' + escapeHtml(state.weeklyReview.headline) + '</p>' +
             '</div>' +
             '<p class="text-[11px] font-mono accent">자세히 보기 →</p>' +
@@ -764,7 +764,7 @@ function renderWorkoutStep3() {
   var previewExHtml = '';
   if (state.routinePreviewExpanded) {
     routine.exercises.forEach(function(ex, idx) {
-      var weight = ex.weight ? (isReverseProgression(ex.name) ? '보조 ' : '') + ex.weight + 'kg × ' : '';
+      var weight = ex.weight ? (isReverseProgression(ex.name) ? '보조 ' : '') + escapeHtml(ex.weight) + 'kg × ' : '';
       // 종목 줄을 누르면 그 종목의 자극 근육 인체도를 펼친다 (한 번에 한 종목만).
       // index + 종목명이 둘 다 맞아야 펼친다 — 루틴이 바뀌면 저절로 닫힌다.
       var mapOpen = isRoutineExerciseMapOpen(idx, ex.name);
@@ -772,7 +772,7 @@ function renderWorkoutStep3() {
       previewExHtml +=
         '<div class="routine-preview-ex" onclick="toggleRoutineExerciseMap(' + idx + ')">' +
           '<span class="flex-1"><strong>' + (idx + 1) + '. ' + escapeHtml(ex.name) + '</strong></span>' +
-          '<span class="text-stone-400 font-mono text-[10px]">' + weight + ex.reps + ' · ' + ex.sets + '세트</span>' +
+          '<span class="text-stone-400 font-mono text-[10px]">' + weight + escapeHtml(ex.reps) + ' · ' + escapeHtml(ex.sets) + '세트</span>' +
         '</div>' +
         (mapHtml ? '<div style="margin: -2px 0 6px;">' + mapHtml + '</div>' : '');
     });
@@ -922,7 +922,7 @@ function renderWorkoutStep3() {
             '<span class="ai-badge">' + partName + '</span>' +
             '<div>' +
               '<p class="text-xs font-display font-bold">' + (isEmpty ? '아직 종목이 없어요' : escapeHtml(routine.headline)) + '</p>' +
-              '<p class="text-[10px] font-mono text-stone-500">' + (isEmpty ? '대화로 종목을 추가해주세요' : exCount + '개 종목 · ' + routine.totalSets + '세트 · ' + routine.duration + '분' + (routine.wasModified ? ' · ✨수정됨' : '')) + '</p>' +
+              '<p class="text-[10px] font-mono text-stone-500">' + (isEmpty ? '대화로 종목을 추가해주세요' : exCount + '개 종목 · ' + escapeHtml(routine.totalSets) + '세트 · ' + escapeHtml(routine.duration) + '분' + (routine.wasModified ? ' · ✨수정됨' : '')) + '</p>' +
             '</div>' +
           '</div>' +
           (isEmpty ? '' : '<div class="chevron-icon ' + (state.routinePreviewExpanded ? 'expanded' : '') + '" style="color: var(--text-muted);">' + icon('chevron', 16) + '</div>') +
@@ -1072,7 +1072,7 @@ function renderWorkoutStep2() {
     return headerHtml +
       '<div class="card-warning text-center" style="padding: 40px 20px;">' +
         '<p class="font-bebas text-2xl mb-2" style="color: #fbbf24;">루틴 생성 실패</p>' +
-        '<p class="text-sm text-stone-400 mb-4">' + (routine ? routine.error : '알 수 없는 오류') + '</p>' +
+        '<p class="text-sm text-stone-400 mb-4">' + escapeHtml(routine ? routine.error : '알 수 없는 오류') + '</p>' +
         '<button class="routine-btn-modify" onclick="regenerateRoutine()">다시 시도</button>' +
       '</div>' +
       '</div>';
@@ -1107,19 +1107,19 @@ function renderWorkoutStep2() {
           (ex.weight !== null && ex.weight !== undefined ?
             '<div class="routine-ex-stat">' +
               '<p class="routine-ex-stat-label">' + (isReverseProgression(ex.name) ? '보조' : '무게') + '</p>' +
-              '<p class="routine-ex-stat-value">' + ex.weight + '<span class="text-[10px] text-stone-500">kg</span></p>' +
+              '<p class="routine-ex-stat-value">' + escapeHtml(ex.weight) + '<span class="text-[10px] text-stone-500">kg</span></p>' +
             '</div>' : '') +
           '<div class="routine-ex-stat">' +
             '<p class="routine-ex-stat-label">반복</p>' +
-            '<p class="routine-ex-stat-value regular">' + ex.reps + '</p>' +
+            '<p class="routine-ex-stat-value regular">' + escapeHtml(ex.reps) + '</p>' +
           '</div>' +
           '<div class="routine-ex-stat">' +
             '<p class="routine-ex-stat-label">세트</p>' +
-            '<p class="routine-ex-stat-value regular">' + ex.sets + '</p>' +
+            '<p class="routine-ex-stat-value regular">' + escapeHtml(ex.sets) + '</p>' +
           '</div>' +
           '<div class="routine-ex-stat">' +
             '<p class="routine-ex-stat-label">RIR</p>' +
-            '<p class="routine-ex-stat-value regular">' + ex.rir + '</p>' +
+            '<p class="routine-ex-stat-value regular">' + escapeHtml(ex.rir) + '</p>' +
           '</div>' +
           (ex.rest ? (
             '<div class="routine-ex-stat">' +
@@ -1152,11 +1152,11 @@ function renderWorkoutStep2() {
           '<p class="routine-meta-label">종목</p>' +
         '</div>' +
         '<div class="routine-meta-item">' +
-          '<p class="routine-meta-num">' + routine.totalSets + '</p>' +
+          '<p class="routine-meta-num">' + escapeHtml(routine.totalSets) + '</p>' +
           '<p class="routine-meta-label">세트</p>' +
         '</div>' +
         '<div class="routine-meta-item">' +
-          '<p class="routine-meta-num">' + routine.duration + '<span class="text-xs text-stone-500">분</span></p>' +
+          '<p class="routine-meta-num">' + escapeHtml(routine.duration) + '<span class="text-xs text-stone-500">분</span></p>' +
           '<p class="routine-meta-label">예상</p>' +
         '</div>' +
       '</div>' +
@@ -5267,7 +5267,7 @@ function renderWeeklyReviewDetail() {
         
         // 등급 + 헤드라인
         '<div class="text-center mb-6">' +
-          '<div style="display: inline-block; font-family: var(--font); font-weight: 800; font-size: 80px; line-height: 1; color: ' + gradeColor + '; text-shadow: 0 0 30px ' + gradeColor + '40;">' + review.grade + '</div>' +
+          '<div style="display: inline-block; font-family: var(--font); font-weight: 800; font-size: 80px; line-height: 1; color: ' + gradeColor + '; text-shadow: 0 0 30px ' + gradeColor + '40;">' + escapeHtml(review.grade) + '</div>' +
           '<p class="text-xs font-mono text-stone-500 uppercase tracking-widest mt-1 mb-3">이번 주 평가</p>' +
           '<p class="text-base font-display font-bold leading-relaxed">' + escapeHtml(review.headline) + '</p>' +
         '</div>' +
