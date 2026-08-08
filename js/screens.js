@@ -71,7 +71,7 @@ function renderHome() {
     
     weekBoxes += '<div class="text-center">' +
       '<div class="day-box ' + boxClass + '">' +
-        (completed ? '<p class="text-[9px] font-display font-bold accent">' + completed + '</p>' : '') +
+        (completed ? '<p class="text-[9px] font-display font-bold accent">' + escapeHtml(completed) + '</p>' : '') +
         (!completed && isToday ? '<div class="today-dot"></div>' : '') +
       '</div>' +
       '<p class="text-[9px] font-mono mt-1" style="color: ' + dayColor + '">' + day + '</p>' +
@@ -267,8 +267,8 @@ function renderWorkout() {
     var barHtml;
     if (dayWorkouts.length > 0) {
       var w = dayWorkouts[0];
-      var part = w.sessionKr ? w.sessionKr.toLowerCase() : 'free';
-      var heightPct = Math.min(90, 50 + (w.duration || 60) / 2);
+      var part = w.sessionKr ? escapeHtml(String(w.sessionKr).toLowerCase()) : 'free';
+      var heightPct = Math.min(90, 50 + (Number(w.duration) || 60) / 2);
       barHtml = '<div class="day-bar-shape ' + part + (isToday ? ' today' : '') + '" style="height: ' + heightPct + '%;"></div>';
     } else {
       var height = isFuture ? 6 : 8;

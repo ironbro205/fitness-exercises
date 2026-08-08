@@ -343,6 +343,69 @@ test('복원 — 악성 백업이 화면에서 실행되지 않고, 사용자 �
   assert.equal(fresh.parseBackupFile({ app: 'fitness', version: 1, data: { fitness_workout_log: { nope: 1 } } }).ok, false);
 });
 
+// 전면 점검(한 곳씩 놓치지 않게): 복원되는 모든 키에 태그를 심고 모든 화면을 그려본다.
+// 화면 문자열에 살아있는 <img/<script 가 하나라도 나오면 실패 — 새 화면이 생겨도 이 테스트가 잡는다.
+test('복원 — 모든 기록에 태그를 심어도 어떤 화면에서도 살아있는 태그가 안 나온다', () => {
+  const fresh = loadApp();
+  const P = '<img src=x onerror=eeek()>';
+  const today = fresh.getTodayStr();
+  fresh.localStorage.clear();
+  const poisoned = {
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: {
+      fitness_profile: { age: P, height: P, weight: P, workoutFreq: P, currentCycle: P, currentWeek: P, cyclePhase: P, weekSessionsDone: P, goal: P },
+      fitness_workout_log: [{
+        id: P, date: today, startTime: P, sessionKr: P, sessionName: P, sessionType: P, duration: P, sets: P,
+        exerciseCount: P, completed: true, note: P,
+        exercises: [{ name: P, weight: P, reps: P, note: P, setsDetail: [{ weight: P, reps: P, completed: true }] }],
+      }],
+      fitness_cardio_log: [{ id: P, date: today, totalSec: P, totalDistKm: P, rpe: P, segments: [{ type: P, label: P }] }],
+      fitness_body_log: [{ date: today, weight: 78.5, bodyFat: P, note: P }],
+      fitness_personal_records: [{ id: P, exerciseName: P, weight: P, reps: P, previousWeight: P, date: today }],
+      fitness_condition_log: [{ date: today, sleep: P, energy: P, soreness: P, note: P }],
+      fitness_cycle_history: [{ cycle: P, week: P, phase: P, endedAt: today }],
+      fitness_coach_memory: [{ id: P, category: P, text: P, source: P, date: today }],
+      fitness_one_rm_data: { [P]: P, '레그 프레스': P },
+      fitness_settings: { notifications: true, theme: P, unit: P },
+      fitness_chat_signals: [{ exName: P, pain: P, feel: P, date: today }],
+    },
+  };
+  assert.equal(fresh.restoreFromBackup(JSON.stringify(poisoned)).ok, true);
+
+  // 복원된 저장소를 앱 상태로 올린다 (init() 이 하는 일과 같은 경로)
+  fresh.state.profile = fresh.storage.get('fitness_profile', {});
+  fresh.state.data = {
+    workoutLog: fresh.storage.get('fitness_workout_log', []),
+    cardioLog: fresh.storage.get('fitness_cardio_log', []),
+    personalRecords: fresh.storage.get('fitness_personal_records', []),
+    bodyLog: fresh.storage.get('fitness_body_log', []),
+    conditionLog: fresh.storage.get('fitness_condition_log', []),
+    cycleHistory: fresh.storage.get('fitness_cycle_history', []),
+  };
+  fresh.state.coachMemory = fresh.storage.get('fitness_coach_memory', []);
+  fresh.state.settings = fresh.storage.get('fitness_settings', {});
+
+  // 인자 없이 부를 수 있는 화면 함수를 전부 그려본다
+  const screenFns = fresh.__APP_GLOBALS__
+    .filter((n) => /^render[A-Z]/.test(n) && typeof fresh[n] === 'function' && fresh[n].length === 0);
+  assert.ok(screenFns.length >= 8, '화면 함수를 찾지 못함: ' + screenFns.length);
+
+  const leaked = [];
+  for (const name of screenFns) {
+    let html;
+    try { html = fresh[name](); } catch (e) { continue; }   // 별도 상태가 필요한 화면은 건너뜀
+    if (typeof html !== 'string') continue;
+    if (html.includes('<img') || html.includes('<script')) leaked.push(name);   // 이스케이프되면 &lt;img 로만 나온다
+  }
+  assert.deepEqual(leaked, [], '이스케이프 안 된 화면: ' + leaked.join(', '));
+
+  // 기록 상세 시트(운동·체중)도 같은 기준으로 확인
+  const w = fresh.state.data.workoutLog[0];
+  fresh.state.itemDetailSheet = { type: 'workout', data: w };
+  const sheet = fresh.renderItemDetailSheet();
+  assert.ok(!sheet.includes('<img') && !sheet.includes('<script'), '기록 상세 시트에 살아있는 태그');
+});
+
 // 정상 백업 왕복 — 따옴표·꺾쇠가 든 사용자 글자가 내보내기→가져오기 후에도 완전히 같아야 한다.
 test('백업 왕복 — 사용자 글자가 글자 단위로 그대로 돌아온다', () => {
   const fresh = loadApp();
