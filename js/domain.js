@@ -40,9 +40,13 @@ function calculate1RM(weight, reps) {
 }
 
 // 종목명으로 1RM 조회 (별칭 자동 처리)
+// 어시스트 종목은 1RM 개념이 성립하지 않는다 — 보조 무게로 뽑은 e1RM은 "클수록 약하다"는
+// 뜻이라 부호가 뒤집힌 지표다(보조 40→30kg으로 강해지면 e1RM은 오히려 떨어진다).
+// 진행 지표는 getAssistProgressTrend(보조 무게 감소 추이)가 대신한다.
 function get1RM(exerciseName) {
+  if (isReverseProgression(exerciseName)) return null;
   var data = storage.get(KEYS.ONE_RM_DATA, {});
-  
+
   // 1. 직접 매칭
   if (data[exerciseName] !== undefined) return data[exerciseName];
   
@@ -126,6 +130,48 @@ function getRecentPerformances(exerciseName, n) {
 }
 
 // ═══════════════════════════════════════════════
+// 역방향 진행 (어시스트 보조 기구) — docs/research/assisted-progression.md
+// ═══════════════════════════════════════════════
+// 어시스트 풀업·딥스 머신의 스택 무게는 부하가 아니라 **체중을 상쇄하는 보조력**이다.
+// 순부하 = 체중 − 보조 무게 → 보조를 낮출수록 어려워진다. 진행 방향이 정반대라
+// "무게 증가 = 진행"을 전제한 엔진 전체가 이 종목에서는 거꾸로 동작한다.
+// 아래 한 개의 판정 함수를 단일 원천으로 삼아, 진행·세트구성·1RM·문구가 같은 방향을 본다.
+
+function isReverseProgression(exerciseName) {
+  var name = canonicalExerciseName(exerciseName || '');
+  if (REVERSE_PROGRESSION_EXERCISES.indexOf(name) !== -1) return true;
+  for (var i = 0; i < ASSIST_NAME_KEYWORDS.length; i++) {
+    if (name.indexOf(ASSIST_NAME_KEYWORDS[i]) !== -1) return true;
+  }
+  return false;
+}
+
+// 이 종목에서 "더 어려운 쪽" 무게. 정방향=최대, 역방향=최소(보조가 적을수록 어렵다).
+// 진행 판정의 기준 세트를 고르는 데 쓴다 (탑세트 = 가장 어려운 세트).
+function hardestWeight(exerciseName, weights) {
+  if (!weights || !weights.length) return null;
+  return isReverseProgression(exerciseName)
+    ? Math.min.apply(null, weights)
+    : Math.max.apply(null, weights);
+}
+
+// 한 칸 진행한 무게 (정방향 +inc / 역방향 −inc, 보조는 0kg에서 바닥).
+// 0kg = 맨몸. 그 아래로는 내려갈 수 없으므로 호출부가 "졸업" 안내로 전환한다.
+function progressedWeight(exerciseName, weight, inc) {
+  if (isReverseProgression(exerciseName)) {
+    return Math.max(0, snapWeightToEquipment(weight - inc, exerciseName));
+  }
+  return snapWeightToEquipment(weight + inc, exerciseName);
+}
+
+// 첫 시도 보조 무게 (기록·1RM 모두 없을 때). 프로필 체중이 없으면 추천을 생략한다.
+function suggestInitialAssistWeight(exerciseName) {
+  var bw = (state.profile && state.profile.weight) ? Number(state.profile.weight) : 0;
+  if (!bw || bw <= 0) return null;
+  return snapWeightToEquipment(bw * ASSIST_INITIAL_BW_RATIO, exerciseName);
+}
+
+// ═══════════════════════════════════════════════
 // 종목 클래스 + 반복범위 가드레일 (md 개편 Phase 5)
 // ═══════════════════════════════════════════════
 
@@ -202,16 +248,25 @@ function hasRecentPain(exerciseName, days) {
 // · compound_heavy / light_isolation: 상단 반복 2세션 연속 달성해야 증량 (경량 고립은 "아주 드물게")
 // · compound_moderate / isolation: 상단 1세션 달성 → 증량 (장비 최소 단위)
 // · rehab: 무게 진행 금지 — 진행 지표는 통증 감소
+// · **역방향(어시스트)**: 같은 더블 프로그레션이되 진행 = 보조 무게 **감소**. 0kg(맨몸)에서 바닥.
 // · 하드 가드레일: 반복은 클래스 범위로 클램프, 최근 2주 통증 기록 시 증량 금지
 // 기록이 없으면 1RM 기반 추천으로 폴백
 function getProgressiveRecommendation(exerciseName, targetReps) {
   var cls = getExerciseClass(exerciseName);
   var rules = EXERCISE_CLASS_RULES[cls];
   var range = clampRepsToClass(exerciseName, targetReps);
+  var reverse = isReverseProgression(exerciseName);
 
   var recent = getRecentPerformances(exerciseName, 2);
   var last = recent[0];
   if (!last || !last.sets.length) {
+    // 어시스트 종목은 1RM 추적 대상이 아니라 1RM 폴백을 쓸 수 없다 → 체중 기반 첫 보조 무게.
+    if (reverse) {
+      var a0 = suggestInitialAssistWeight(exerciseName);
+      if (a0 === null) return null;
+      return { weight: a0, source: 'rm_estimate', reverse: true, repRange: range, exClass: cls,
+               note: '첫 시도 — 체중의 약 ' + Math.round(ASSIST_INITIAL_BW_RATIO * 100) + '%를 보조로. 한 세트 해보고 조절하세요' };
+    }
     var w = suggestWorkingWeight(exerciseName, 0.7);
     if (w) return { weight: w, source: 'rm_estimate', note: '1RM 추정 기반 (첫 시도)', repRange: range, exClass: cls };
     return null;
@@ -221,13 +276,15 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
   // 드롭·마이오렙 세트는 **마지막 워킹세트의 연장**이지 독립 세트가 아니다. 진행 판정에서 뺀다 —
   // 특히 마이오렙 미니세트는 본 세트와 무게가 같고 반복이 5회라, 그대로 두면 아래 reachedTopAt이
   // "모든 세트가 상단 반복"을 영원히 만족하지 못해 증량이 통째로 막힌다.
+  // 역방향(어시스트)은 보조 0kg(= 맨몸)이 유효한 최종 목표값이라 재활과 같이 0을 허용한다.
   var workingSets = last.sets.filter(function(s) {
     if (s.role === 'drop' || s.role === 'myo') return false;
-    return (cls === 'rehab' ? s.weight >= 0 : s.weight > 0) && s.reps > 0;
+    return ((cls === 'rehab' || reverse) ? s.weight >= 0 : s.weight > 0) && s.reps > 0;
   });
   if (!workingSets.length) return null;
 
-  var maxW = Math.max.apply(null, workingSets.map(function(s) { return s.weight; }));
+  // 기준 세트 = 가장 **어려운** 세트. 정방향은 최대 무게, 역방향은 최소 보조.
+  var maxW = hardestWeight(exerciseName, workingSets.map(function(s) { return s.weight; }));
   var lastReps = workingSets.map(function(s) { return s.reps; });
 
   if (cls === 'rehab') {
@@ -251,11 +308,14 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
       weight: maxW,
       source: 'maintain',
       painGated: true,
+      reverse: reverse,
       previousWeight: maxW,
       previousReps: lastReps,
       repRange: range,
       exClass: cls,
-      note: '최근 2주 내 통증 기록 — 증량 대신 폼·그립·가동범위를 점검해요'
+      note: reverse
+        ? '최근 2주 내 통증 기록 — 보조를 줄이지 말고 폼·그립·가동범위를 점검해요'
+        : '최근 2주 내 통증 기록 — 증량 대신 폼·그립·가동범위를 점검해요'
     };
   }
 
@@ -277,20 +337,44 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
   var canProgress = lastReachedTop && (needSessions <= 1 || prevReachedTop);
 
   if (canProgress) {
-    var newW = snapWeightToEquipment(maxW + inc, exerciseName);
+    // 역방향에서 보조 0kg은 바닥이다 — 더 내릴 수 없으니 "맨몸 졸업" 안내로 전환한다.
+    if (reverse && maxW <= 0) {
+      return {
+        weight: 0,
+        source: 'maintain',
+        reverse: true,
+        graduated: true,
+        previousWeight: maxW,
+        previousReps: lastReps,
+        repRange: range,
+        exClass: cls,
+        note: '보조 0kg에서 상단 ' + topReps + '회 달성 — 이제 맨몸 풀업/딥스예요! 다음은 중량조끼·딥벨트로 무게를 더할 차례'
+      };
+    }
+    var newW = progressedWeight(exerciseName, maxW, inc);
     return {
       weight: newW,
       source: 'progress',
+      reverse: reverse,
       previousWeight: maxW,
       previousReps: lastReps,
       repRange: range,
       exClass: cls,
-      note: (needSessions > 1 ? '2세션 연속 ' : '지난 ') + maxW + 'kg × 상단 ' + topReps + '회 달성 → ' + newW + 'kg'
+      note: reverse
+        ? (needSessions > 1 ? '2세션 연속 ' : '지난 ') + '보조 ' + maxW + 'kg × 상단 ' + topReps + '회 달성 → 보조 ' + newW + 'kg (−' + (maxW - newW) + 'kg = 더 어려워져요)' + assistJumpWarning(exerciseName, maxW, newW)
+        : (needSessions > 1 ? '2세션 연속 ' : '지난 ') + maxW + 'kg × 상단 ' + topReps + '회 달성 → ' + newW + 'kg'
     };
   }
 
   var holdNote;
-  if (lastReachedTop && needSessions > 1) {
+  if (reverse) {
+    // 역방향의 "유지"는 보조 무게를 그대로 두고 반복을 쌓는 것 = 더블 프로그레션의 앞 단계.
+    if (lastReachedTop && needSessions > 1) {
+      holdNote = '보조 ' + maxW + 'kg × ' + topReps + '회 달성! 한 세션 더 유지하면 보조 −' + inc + 'kg';
+    } else {
+      holdNote = '지난 보조 ' + maxW + 'kg에서 ' + topReps + '회 도전 (상단 도달 시 보조 −' + inc + 'kg = 증량)';
+    }
+  } else if (lastReachedTop && needSessions > 1) {
     holdNote = maxW + 'kg × ' + topReps + '회 달성! 한 세션 더 유지하면 +' + inc + 'kg' +
       (cls === 'light_isolation' ? ' (경량 고립은 무게보다 반복·템포·컨트롤로 진행)' : '');
   } else if (cls === 'light_isolation') {
@@ -302,6 +386,7 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
   return {
     weight: maxW,
     source: 'maintain',
+    reverse: reverse,
     previousWeight: maxW,
     previousReps: lastReps,
     repRange: range,
@@ -310,8 +395,78 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
   };
 }
 
+// 보조를 한 칸 내렸을 때 **실질 부하(체중 − 보조)** 가 몇 % 뛰는지 경고.
+// 보조를 X kg 내리면 실질 부하는 정확히 X kg 늘어나는데, 남은 실질 부하가 작을수록
+// 같은 X kg이 훨씬 큰 상대 점프가 된다(체중 70·보조 45 → 실질 25kg에서 −5kg = +20%).
+// ACSM 권고 증량 폭은 2~10%이므로 그 상한을 넘으면 "반복이 떨어지는 게 정상"이라고 미리 알린다.
+// 근거: ACSM position stand(2009) · ExRx Calculating Actual Resistance — docs/research/assisted-progression.md
+var ASSIST_JUMP_WARN_PCT = 0.10;
+function assistJumpWarning(exerciseName, oldAssist, newAssist) {
+  var net = assistNetLoad(exerciseName, oldAssist);
+  if (net === null || net <= 0) return '';
+  var jump = (oldAssist - newAssist) / net;
+  if (jump <= ASSIST_JUMP_WARN_PCT) return '';
+  return ' ※ 실질 부하 +' + Math.round(jump * 100) + '% — 반복이 떨어져도 정상이에요';
+}
+
+// 실질 부하 = 체중 − 보조 무게 (어시스트 머신의 실제 저항. ExRx 공식).
+// 프로필 체중이 없으면 계산 불가 → null. 역방향 종목이 아니면 의미가 없으므로 null.
+function assistNetLoad(exerciseName, assistWeight) {
+  if (!isReverseProgression(exerciseName)) return null;
+  if (assistWeight === null || assistWeight === undefined) return null;
+  var bw = (state.profile && state.profile.weight) ? Number(state.profile.weight) : 0;
+  if (!bw || bw <= 0) return null;
+  return Math.round((bw - assistWeight) * 10) / 10;
+}
+
+// PR 표시 문구 — 정방향은 '+5kg', 역방향(어시스트)은 '보조 −5kg'이 신기록이다.
+// 화면 세 곳(홈 PR 카드·완료 화면·기록 PR 히스토리)이 같은 문구를 쓰도록 여기 하나로 모은다.
+function formatPRDelta(pr) {
+  if (!pr) return '';
+  if (pr.weight !== undefined && pr.previousWeight !== undefined && pr.previousWeight !== null) {
+    var diff = pr.weight - pr.previousWeight;
+    if (isReverseProgression(pr.exerciseName)) return '보조 −' + Math.abs(Math.round(diff * 10) / 10) + 'kg';
+    return '+' + diff.toFixed(1) + 'kg';
+  }
+  if (pr.reps !== undefined) return '+' + (pr.reps - (pr.previousReps || 0)) + '회';
+  return '';
+}
+
+// PR 변화 한 줄 ('35kg → 40kg (+5.0kg)' / '보조 40kg → 보조 35kg (보조 −5kg)').
+function formatPRChange(pr) {
+  if (!pr) return '';
+  if (pr.weight !== undefined && pr.previousWeight !== undefined && pr.previousWeight !== null) {
+    var p = isReverseProgression(pr.exerciseName) ? '보조 ' : '';
+    return p + pr.previousWeight + 'kg → ' + p + pr.weight + 'kg (' + formatPRDelta(pr) + ')';
+  }
+  return (pr.previousReps || 0) + '회 → ' + pr.reps + '회 (' + formatPRDelta(pr) + ')';
+}
+
+// 어시스트 종목의 진행 지표 = **보조 무게 감소 추이** (e1RM 대신 쓰는 값).
+// [0]=가장 최근. drop/myo는 본 세트의 연장이라 제외하고, 세션마다 가장 어려운(=최소) 보조를 뽑는다.
+// 반환: { values: [최근→과거 보조kg], delta: 최초 대비 감소량(양수=진행), sessions: n }
+function getAssistProgressTrend(exerciseName, n) {
+  if (!isReverseProgression(exerciseName)) return null;
+  var perfs = getRecentPerformances(exerciseName, n || RECENT_PERFORMANCES_KEEP);
+  var values = [];
+  for (var i = 0; i < perfs.length; i++) {
+    var ws = perfs[i].sets.filter(function(s) {
+      return s.role !== 'drop' && s.role !== 'myo' && !s.isWarmup && s.reps > 0 && s.weight >= 0;
+    });
+    if (!ws.length) continue;
+    values.push(Math.min.apply(null, ws.map(function(s) { return s.weight; })));
+  }
+  if (!values.length) return null;
+  return {
+    values: values,
+    delta: Math.round((values[values.length - 1] - values[0]) * 10) / 10, // 양수 = 보조가 줄었다 = 진행
+    sessions: values.length
+  };
+}
+
 // 1RM 갱신 (더 높으면). 고횟수는 e1RM 신뢰도가 낮아 제외 — rolling max 경로와 동일 규칙(클래스별 상한).
 function update1RM(exerciseName, weight, reps) {
+  if (isReverseProgression(exerciseName)) return false; // 보조 무게는 1RM 근거가 될 수 없다 (get1RM 주석)
   if (!weight || !reps) return false;
   if (reps > rolling1RMMaxReps(exerciseName)) return false;
 
@@ -361,6 +516,9 @@ function rolling1RMMaxReps(exerciseName) {
 }
 
 function calculateRollingMax1RM(exerciseName, windowSessions) {
+  // 어시스트 종목은 e1RM 추적 대상이 아니다. 그대로 두면 "세션별 최고 e1RM"이 곧
+  // "가장 많이 보조받은(=가장 쉬운) 세트"가 되어, 보조를 줄일수록 1RM이 떨어지는 역전이 생긴다.
+  if (isReverseProgression(exerciseName)) return null;
   var n = windowSessions || ROLLING_1RM_WINDOW;
   var log = (state.data && state.data.workoutLog) || [];
   var canonical = EXERCISE_ALIASES_1RM[exerciseName] || exerciseName;
@@ -441,6 +599,8 @@ function getSessionSetPlan(exerciseName, fallbackWeight, targetReps, opts) {
 // 탑+백오프·드롭이 성립하지 않는다 → 스트레이트로 접어서 **화면 표기와 실제 세트를 일치시킨다**.
 function effectiveSetScheme(exerciseName, weight) {
   var scheme = getSetScheme(exerciseName);
+  // 역방향(어시스트)은 보조 0kg에서도 "더 쉽게"가 가능하다(보조를 더 준다) → 스킴을 접지 않는다.
+  if (isReverseProgression(exerciseName)) return scheme;
   if ((!weight || weight <= 0) && (scheme === 'top_backoff' || scheme === 'drop')) return 'straight';
   return scheme;
 }
@@ -488,14 +648,19 @@ function getSetSchemeOptions(exerciseName) {
               current: true, suggested: true, warn: '' }];
   }
   var machineOrCable = isMachineOrCableExercise(exerciseName);
+  var reverse = isReverseProgression(exerciseName);
   return ['straight', 'top_backoff', 'drop', 'myo_reps'].map(function(id) {
     var warn = '';
     if (id === 'top_backoff' && cls !== 'compound_heavy') warn = '고중량 복합에 맞춘 방식이에요';
     if (id === 'drop' && !machineOrCable) warn = '프리웨이트에선 위험해요 — 마이오렙을 권해요';
     if (id === 'drop' && cls === 'compound_heavy') warn = '고중량 복합에는 권하지 않아요 (피로 대비 이득 없음)';
     if (id === 'myo_reps' && cls === 'compound_heavy') warn = '고중량 복합에는 권하지 않아요';
+    // 어시스트 종목은 "가볍게 = 보조를 더" 라서 기본 설명문(90% 무게 / −25%)이 정반대로 읽힌다.
+    var desc = SET_SCHEMES[id].desc;
+    if (reverse && id === 'top_backoff') desc = '가장 낮은 보조로 1세트 → 보조를 한 칸 올려 2세트';
+    if (reverse && id === 'drop') desc = '마지막 세트에서 보조를 두 칸씩 올려 이어서';
     return {
-      id: id, kr: SET_SCHEMES[id].kr, desc: SET_SCHEMES[id].desc,
+      id: id, kr: SET_SCHEMES[id].kr, desc: desc,
       current: id === current, suggested: id === rules.scheme, warn: warn
     };
   });
@@ -536,9 +701,11 @@ function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
   var wantWarmup = !opts || opts.warmup !== false;
   var classRest = getExerciseRestSec(exerciseName);
   var cls = getExerciseClass(exerciseName);
+  var reverse = isReverseProgression(exerciseName);
   var rows = [];
 
-  if (!weight || weight <= 0) {
+  // 역방향(어시스트)은 보조 0kg에서도 감량(=보조 증가)이 가능하므로 스킴을 접지 않는다.
+  if (!reverse && (!weight || weight <= 0)) {
     if (scheme === 'top_backoff' || scheme === 'drop') scheme = 'straight';
   }
 
@@ -546,7 +713,13 @@ function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
   //    고립 이하는 첫 워킹세트가 자체 워밍업 역할을 하므로 넣지 않는다.
   //    맨몸 복합(풀업 등)은 무게를 낮출 수 없으니 램프 대신 1세트만 (기존 동작 유지).
   if (wantWarmup && workingCount > 0) {
-    if (weight > 0 && cls === 'compound_heavy') {
+    if (reverse && (cls === 'compound_heavy' || cls === 'compound_moderate')) {
+      // 역방향: 워밍업 = 보조를 **더 준** 가벼운 세트 (보조 0kg에서도 성립한다)
+      var wstep = getWeightIncrement(exerciseName);
+      var base = weight > 0 ? weight : 0;
+      if (cls === 'compound_heavy') rows.push(warmupRow(base + wstep * 3, 8));
+      rows.push(warmupRow(base + wstep, cls === 'compound_heavy' ? 4 : 8));
+    } else if (weight > 0 && cls === 'compound_heavy') {
       rows.push(warmupRow(snapWeightToEquipment(weight * 0.50, exerciseName), 8));
       rows.push(warmupRow(snapWeightToEquipment(weight * 0.75, exerciseName), 4));
     } else if (weight > 0 && cls === 'compound_moderate') {
@@ -575,7 +748,7 @@ function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
   //    워킹세트가 0개여도(=본 세트를 이미 다 끝냈어도) 붙는다 — 그 경우 호출부가 들고 있는
   //    "완료된 마지막 세트"에 이어지므로, rows가 비어 있을 때는 rest 덮어쓰기만 건너뛴다.
   var lastIdx = rows.length - 1;
-  if (scheme === 'drop' && weight > 0) {
+  if (scheme === 'drop' && (reverse ? weight >= 0 : weight > 0)) {
     if (lastIdx >= 0) rows[lastIdx].rest = REST_DROP_SEC;   // 드롭 사이는 무게 바꾸는 시간뿐
     var d1 = reduceWeight(weight, DROP_PCT, exerciseName);
     var d2 = reduceWeight(d1, DROP_PCT, exerciseName);
@@ -784,6 +957,7 @@ function suggestIntensityTechnique(exerciseName, session) {
 // 후보(과거 로그 rolling max, 세션에 남은 완료 세트 최고 e1RM, 갱신 직전 값) 중
 // 최댓값이 현재 1RM보다 낮으면 그 값으로 내린다 — 잘못 입력한 세트로 부풀려진 1RM 교정.
 function recalc1RMAfterEdit(exerciseName, prevRM) {
+  if (isReverseProgression(exerciseName)) return; // 애초에 1RM을 올리지 않으므로 되돌릴 것도 없다
   var key = EXERCISE_ALIASES_1RM[exerciseName] || exerciseName;
   var data = storage.get(KEYS.ONE_RM_DATA, {});
   var cur = data[key];
@@ -846,7 +1020,13 @@ function getWeightIncrement(exerciseName) {
 }
 
 // 무게를 그 종목 장비가 실제로 낼 수 있는 단위로 스냅(반올림). .5kg 같은 실행 불가 무게 방지.
+// 역방향(어시스트)은 **보조 0kg = 맨몸**이 유효한 목표값이라 "최소 1스텝" 바닥을 적용하지 않는다.
 function snapWeightToEquipment(weight, exerciseName) {
+  if (isReverseProgression(exerciseName)) {
+    if (!weight || weight <= 0) return 0;
+    var s = getWeightIncrement(exerciseName);
+    return Math.max(0, Math.round(weight / s) * s);
+  }
   if (!weight || weight <= 0) return weight;
   var step = getWeightIncrement(exerciseName);
   return Math.max(step, Math.round(weight / step) * step); // 양수는 최소 1스텝 보장 (0kg 방지)
@@ -858,6 +1038,14 @@ function snapWeightToEquipment(weight, exerciseName) {
 // 백오프의 존재 이유가 "무게를 낮춰 반복을 지킨다"이므로 감량 0은 스킴 자체를 무효로 만든다.
 // (docs/research/set-schemes.md §2-B 반올림 함정 · §5-D 리스크표)
 function reduceWeight(top, pct, exerciseName) {
+  // 역방향(어시스트): "가볍게 한다" = 보조를 **더 준다**. 백오프(90%)는 한 칸, 드롭(75%)은 두 칸.
+  // 보조 무게에 0.9를 곱하면 오히려 더 어려워져 백오프·드롭의 존재 이유가 정반대로 뒤집힌다.
+  // 비율을 그대로 쓰지 않는 이유: 보조 무게의 %는 실질 부하와 아무 관계가 없다(실질 = 체중 − 보조).
+  if (isReverseProgression(exerciseName)) {
+    var rstep = getWeightIncrement(exerciseName);
+    var steps = pct >= 0.85 ? 1 : 2;
+    return (top || 0) + rstep * steps;
+  }
   if (!top || top <= 0) return top;              // 맨몸·무게 미정 종목은 그대로 (호출부가 스킴을 접는다)
   var step = getWeightIncrement(exerciseName);
   var w = Math.round(top * pct / step) * step;
@@ -880,6 +1068,9 @@ function suggestWorkingWeight(exerciseName, percentage) {
 // 1RM 없는 종목에 대해 같은 부위 종목의 1RM 평균으로 추정
 // 안전장치: 표본 2개 이상에서만 추정 (표본 1개 = 변동성 너무 큼)
 function estimate1RMFromPart(exerciseName) {
+  // 어시스트 종목: 같은 부위 종목(랫 풀 다운 등)의 1RM 평균은 '들어올리는 무게'라
+  // 보조 무게와 단위가 아예 다르다. 추정하면 안 된다.
+  if (isReverseProgression(exerciseName)) return null;
   // 이미 1RM 있으면 그거 사용
   var direct = get1RM(exerciseName);
   if (direct) return { weight: direct, source: 'direct', confidence: 'high' };
@@ -918,17 +1109,31 @@ function estimate1RMFromPart(exerciseName) {
 
 // 1RM 초기화 (첫 실행)
 function initializeOneRMData() {
-  var alreadyInit = storage.get(KEYS.ONE_RM_INITIALIZED);
-  if (alreadyInit) return;
-  
-  // INITIAL_1RM을 저장소에 복사
-  var data = {};
-  Object.keys(INITIAL_1RM).forEach(function(key) {
-    data[key] = INITIAL_1RM[key];
+  if (!storage.get(KEYS.ONE_RM_INITIALIZED)) {
+    // INITIAL_1RM을 저장소에 복사
+    var data = {};
+    Object.keys(INITIAL_1RM).forEach(function(key) {
+      data[key] = INITIAL_1RM[key];
+    });
+
+    storage.set(KEYS.ONE_RM_DATA, data);
+    storage.set(KEYS.ONE_RM_INITIALIZED, true);
+  }
+  // 매 실행 호출 — 기존 사용자 저장소에 남아 있는 어시스트 종목 1RM을 정리한다.
+  pruneReverseProgression1RM();
+}
+
+// 저장된 1RM에서 어시스트(역방향) 종목을 제거한다 (마이그레이션).
+// 예전 버전은 '어시스트 딥스'의 보조 무게를 1RM(66.67kg)으로 저장했는데, 이 값은
+// "보조를 많이 받을수록 큰 수"라 강해질수록 내려간다 — 화면·AI 프롬프트 어디에 써도 거짓말이 된다.
+function pruneReverseProgression1RM() {
+  var data = storage.get(KEYS.ONE_RM_DATA, {}) || {};
+  var changed = false;
+  Object.keys(data).forEach(function(name) {
+    if (isReverseProgression(name)) { delete data[name]; changed = true; }
   });
-  
-  storage.set(KEYS.ONE_RM_DATA, data);
-  storage.set(KEYS.ONE_RM_INITIALIZED, true);
+  if (changed) storage.set(KEYS.ONE_RM_DATA, data);
+  return changed;
 }
 
 // ═══════════════════════════════════════════════
