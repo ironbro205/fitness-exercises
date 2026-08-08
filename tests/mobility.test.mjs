@@ -63,9 +63,19 @@ test('expandMobilitySegments — 준비·기준이 구간까지 실려 화면에
   const [seg] = app.expandMobilitySegments(['ankle_wall_knee']);
   assert.equal(seg.prep, DRILLS.ankle_wall_knee.prep);
   assert.equal(seg.std, DRILLS.ankle_wall_knee.std);
-  const src = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
-  for (const label of ['준비', '동작', '기준']) {
-    assert.ok(src.includes(`mobilityStepLine('${label}'`), `${label} 줄이 화면에서 빠졌다`);
+
+  // 소스에 호출이 있는지가 아니라 **실제로 그려진 HTML**에 세 줄이 다 들어 있는지를 본다.
+  // (호출이 죽은 가지로 옮겨가도 통과하던 검사를 피하려고.)
+  const fresh = loadApp();
+  fresh.state.stretchGuide = null;
+  fresh.state.completedSession = null;
+  fresh.state.activeSession = null;
+  fresh.startSession('legs');
+  const first = fresh.expandMobilitySegments(fresh.state.activeSession.warmup.keys)[0];
+  const html = fresh.buildMobilityGuideHtml('warmup');
+  for (const [label, text] of [['준비', first.prep], ['동작', first.cue], ['기준', first.std]]) {
+    assert.ok(html.includes('>' + label + '</span>'), `${label} 라벨이 화면에서 빠졌다`);
+    assert.ok(html.includes(text), `${label} 본문이 화면에서 빠졌다: ${text}`);
   }
 });
 
@@ -230,6 +240,21 @@ test('expandMobilitySegments — 좌우 동작은 두 구간, 단일 동작은 �
   assert.deepEqual([segs[3].side, segs[4].side], ['left', 'right']);
   assert.equal(segs[3].mode, 'time');
   assert.equal(segs[3].sec, 30);
+});
+
+// 한쪽씩 하는 동작을 mode:'reps'로 두면 화면이 "15회"만 안내하고(실제로는 30회) 예상 시간도 반만 잡는다.
+// 되돌아가기 쉬운 한 글자짜리 실수라 이 동작 하나를 이름으로 못 박는다.
+test('band_external_rotation — 한쪽씩 하는 동작이라 좌우 두 구간으로 쪼개진다', () => {
+  assert.equal(DRILLS.band_external_rotation.mode, 'repsPerSide');
+  const segs = app.expandMobilitySegments(['band_external_rotation']);
+  assert.equal(segs.length, 2);
+  assert.deepEqual([segs[0].side, segs[1].side], ['left', 'right']);
+  segs.forEach((s) => {
+    assert.equal(s.mode, 'reps');                    // 타이머가 아니라 사용자가 완료를 누른다
+    assert.equal(app.mobilitySegmentAmount(s), '15회');
+    assert.equal(s.sec, 30);                         // 15회 × 2초 = 한쪽 30초(추정값)
+  });
+  assert.equal(app.mobilitySegmentsTotalSec(segs), 60);
 });
 
 test('expandMobilitySegments — 사전에 없는 키는 건너뛴다', () => {
