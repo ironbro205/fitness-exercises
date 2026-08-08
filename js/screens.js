@@ -3162,21 +3162,32 @@ window.executeResetAll = function() {
 };
 
 // 백업/내보내기 (복원 가능한 JSON 파일)
+// 파일 하나에 운동·유산소·체중·1RM·기억 노트 등 기록을 모아 담는다.
+// API 키(fitness_api_key)와 코치 대화는 보안·용량 때문에 담지 않는다 (BACKUP_LOCAL_ONLY_KEYS).
 window.exportData = function() {
-  var json = JSON.stringify(buildBackupObject(), null, 2);
-  var blob = new Blob([json], { type: 'application/json' });
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a');
-  a.href = url;
-  a.download = 'fitness-backup-' + getTodayStr() + '.json';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  showToast('백업 파일을 저장했어요');
+  var url = null;
+  try {
+    var json = JSON.stringify(buildBackupObject(), null, 2);
+    var blob = new Blob([json], { type: 'application/json' });
+    url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'fitness-backup-' + getTodayStr() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    markBackupDone();                       // 마지막 백업 일시 기록 → 더보기 화면 표시·리마인더 갱신
+    showToast('백업 파일을 저장했어요 (API 키 제외)');
+    render();
+  } catch (e) {
+    showAlert('백업 파일을 만들지 못했어요.\n잠시 뒤 다시 시도해 주세요.', { title: '백업 실패', danger: true });
+  } finally {
+    if (url) URL.revokeObjectURL(url);
+  }
 };
 
-// 가져오기: 파일 선택 → 복원 → 새로고침. (운동 데이터만 복원; API키·대화는 미포함)
+// 가져오기: 파일 선택 → 검사 → "덮어씁니다" 확인 → 복원 → 새로고침.
+// (운동 데이터만 복원. API 키·코치 대화는 백업에 없으므로 이 폰 값이 그대로 남는다.)
 window.openBackupImport = function() {
   var input = document.createElement('input');
   input.type = 'file';
@@ -3185,20 +3196,49 @@ window.openBackupImport = function() {
     var file = e.target.files && e.target.files[0];
     if (!file) return;
     var reader = new FileReader();
-    reader.onload = function(ev) {
-      var res = restoreFromBackup(ev.target.result);
-      if (res.ok) {
-        showToast('복원 완료 — 새로고침합니다');
-        setTimeout(function() { location.reload(); }, 1000);
-      } else {
-        alert('복원 실패: ' + (res.error || '알 수 없는 오류'));
-      }
+    reader.onload = function(ev) { applyBackupText(ev.target.result); };
+    reader.onerror = function() {
+      showAlert('파일을 열지 못했어요.\n파일이 지워졌거나 접근 권한이 없을 수 있습니다.', { title: '가져오기 실패', danger: true });
     };
-    reader.onerror = function() { alert('파일을 읽지 못했습니다.'); };
     reader.readAsText(file);
   };
   input.click();
 };
+
+// 읽어들인 백업 파일 내용(문자열) 처리: 검사 → 덮어쓰기 확인 → 복원 → 새로고침.
+// 파일 고르기(FileReader)와 분리해 둬서 브라우저 QA·테스트에서 이 경로를 그대로 확인할 수 있다.
+window.applyBackupText = function(text) {
+  var checked = parseBackupFile(text);
+  if (!checked.ok) {
+    showAlert(checked.error || '백업 파일을 읽지 못했어요.', { title: '가져오기 실패', danger: true });
+    return;
+  }
+  showConfirm(buildRestoreConfirmMessage(checked.summary), function() {
+    var res = restoreFromBackup(checked.backup);
+    if (!res.ok) {
+      showAlert(res.error || '복원하지 못했어요.', { title: '복원 실패', danger: true });
+      return;
+    }
+    showToast('복원 완료 — 새로고침합니다');
+    setTimeout(function() { location.reload(); }, 1000);
+  }, { confirmLabel: '덮어쓰기', danger: true });
+};
+
+// 덮어쓰기 확인 문구 — 백업 파일에 뭐가 들어있는지 먼저 보여주고 되돌릴 수 없음을 알린다.
+function buildRestoreConfirmMessage(s) {
+  s = s || {};
+  var when = s.exportedAt ? fmtDate(s.exportedAt) + ' 백업' : '날짜를 알 수 없는 백업';
+  var items = [];
+  if (s.workouts) items.push('운동 ' + s.workouts + '회');
+  if (s.cardio) items.push('유산소 ' + s.cardio + '회');
+  if (s.body) items.push('체중 ' + s.body + '개');
+  if (s.records) items.push('기록 ' + s.records + '개');
+  if (s.oneRM) items.push('1RM ' + s.oneRM + '종목');
+  if (s.memory) items.push('기억 노트 ' + s.memory + '개');
+  return when + '\n' + (items.length ? items.join(' · ') : '담긴 기록 없음') + '\n\n' +
+    '지금 이 폰에 있는 기록을 이 파일 내용으로 모두 바꿉니다. 되돌릴 수 없어요.\n' +
+    '(API 키와 코치 대화는 그대로 남습니다)';
+}
 
 // ═══════════════════════════════════════════════
 // 더보기 화면 - 렌더
@@ -3207,7 +3247,59 @@ function renderMore() {
   var profile = state.profile;
   var apiKey = state.apiKey;
   var settings = state.settings;
-  
+
+  // ── 데이터 백업 섹션 (마지막 백업 표시 + 오래되면 부드러운 리마인더) ──
+  var backupStatus = getBackupStatus();
+  var backupWhenText = backupStatus.never
+    ? '아직 백업한 적이 없어요'
+    : daysAgo(backupStatus.at) + ' · ' + fmtDate(backupStatus.at);
+  var backupReminderHtml = '';
+  if (backupStatus.stale) {
+    var reminderText = backupStatus.never
+      ? '아직 백업 파일을 만든 적이 없어요. 지금 한 번 저장해 두면 폰을 바꿔도 기록을 그대로 옮길 수 있어요.'
+      : '마지막 백업이 ' + backupStatus.daysSince + '일 전이에요. 그 뒤로 쌓인 기록은 아직 저장돼 있지 않아요.';
+    backupReminderHtml =
+      '<div class="backup-reminder">' +
+        '<div class="backup-reminder-icon">' + icon('info', 16) + '</div>' +
+        '<div class="flex-1">' +
+          '<p class="text-xs leading-relaxed" style="color: var(--text-soft);">' + escapeHtml(reminderText) + '</p>' +
+          '<button class="backup-reminder-btn" onclick="exportData()">지금 백업하기</button>' +
+        '</div>' +
+      '</div>';
+  }
+  var backupSectionHtml =
+    '<div>' +
+      '<p class="section-label">데이터 백업</p>' +
+      backupReminderHtml +
+      '<div class="section-group">' +
+        '<div class="menu-row" onclick="exportData()">' +
+          '<div class="menu-icon-sm accent-bg-soft">' + icon('download', 18) + '</div>' +
+          '<div class="menu-row-content">' +
+            '<p class="text-sm font-display font-bold">백업 파일 저장 (내보내기)' + (backupStatus.stale ? ' <span class="backup-dot"></span>' : '') + '</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">지금까지의 기록을 파일 하나(.json)로 내려받기</p>' +
+          '</div>' +
+          '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
+        '</div>' +
+        '<div class="menu-row" onclick="openBackupImport()">' +
+          '<div class="menu-icon-sm">' + icon('upload', 18) + '</div>' +
+          '<div class="menu-row-content">' +
+            '<p class="text-sm font-display font-bold">백업 파일 불러오기 (가져오기)</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">저장해 둔 파일로 되돌리기 · 지금 기록은 덮어써져요</p>' +
+          '</div>' +
+          '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
+        '</div>' +
+        '<div class="menu-row" style="cursor: default;">' +
+          '<div class="menu-icon-sm">' + icon('calendar', 18) + '</div>' +
+          '<div class="menu-row-content">' +
+            '<p class="text-sm font-display font-bold">마지막 백업</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + escapeHtml(backupWhenText) + '</p>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<p class="backup-hint">폰을 바꾸거나 브라우저 데이터를 지우면 기록이 모두 사라져요. 백업 파일을 저장해 두면 그대로 되살릴 수 있습니다. ' +
+        '안전을 위해 <b>API 키</b>(AI 코치를 쓰기 위한 비밀번호 같은 값)는 백업 파일에 담지 않으니, 새 폰에서는 한 번 더 입력해 주세요.</p>' +
+    '</div>';
+
   // API 키 모달
   var apiModalHtml = '';
   if (state.apiKeyModalOpen) {
@@ -3393,26 +3485,13 @@ function renderMore() {
         '</div>' +
       '</div>' +
       
+      // 데이터 백업 (내보내기 / 가져오기 / 마지막 백업)
+      backupSectionHtml +
+
       // 데이터
       '<div>' +
         '<p class="section-label">데이터</p>' +
         '<div class="section-group">' +
-          '<div class="menu-row" onclick="exportData()">' +
-            '<div class="menu-icon-sm">' + icon('download', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">백업 / 내보내기</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">운동 데이터 백업 파일 (.json)</p>' +
-            '</div>' +
-            '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
-          '</div>' +
-          '<div class="menu-row" onclick="openBackupImport()">' +
-            '<div class="menu-icon-sm">' + icon('upload', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">가져오기</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">백업 파일에서 복원</p>' +
-            '</div>' +
-            '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
-          '</div>' +
           '<div class="menu-row" onclick="resetAllData()">' +
             '<div class="menu-icon-sm danger-bg-soft">' + icon('trash', 18) + '</div>' +
             '<div class="menu-row-content">' +

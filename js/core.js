@@ -28,7 +28,8 @@ var KEYS = {
   CYCLE_HISTORY: 'fitness_cycle_history',
   COACH_MEMORY: 'fitness_coach_memory',
   AI_RECOMMENDATION_HISTORY: 'fitness_ai_recommendation_history',
-  CHAT_SIGNALS: 'fitness_chat_signals'
+  CHAT_SIGNALS: 'fitness_chat_signals',
+  LAST_BACKUP: 'fitness_last_backup'
 };
 
 var storage = {
@@ -140,46 +141,131 @@ var BACKUP_TRANSIENT_KEYS = [
   KEYS.PLATEAU_CHECK
 ];
 // 참고: COACH_MEMORY(기억 노트)는 제외 목록에 없음 → 백업에 포함(새 폰 복원). 사용자가 큐레이션한 개인 정보.
-var BACKUP_EXCLUDE_KEYS = BACKUP_LOCAL_ONLY_KEYS.concat(BACKUP_TRANSIENT_KEYS);
+// 이 기기에서만 의미 있는 기록용 값 → 파일에 담지 않는다. 복원 시에는 "파일이 만들어진 시각"으로 다시 세팅.
+var BACKUP_META_KEYS = [
+  KEYS.LAST_BACKUP          // 마지막 백업 일시(기기별 메모)
+];
+var BACKUP_EXCLUDE_KEYS = BACKUP_LOCAL_ONLY_KEYS.concat(BACKUP_TRANSIENT_KEYS, BACKUP_META_KEYS);
+
+// 이 일수 이상 백업을 안 했으면 더보기 화면에 부드러운 리마인더를 띄운다.
+var BACKUP_REMINDER_DAYS = 30;
+
+// 백업/복원 대상 키 목록 (KEYS 중 제외 목록에 없는 것) — 내보내기·덮어쓰기가 같은 목록을 쓴다.
+function getBackupKeys() {
+  return Object.keys(KEYS).map(function(k) { return KEYS[k]; }).filter(function(key) {
+    return BACKUP_EXCLUDE_KEYS.indexOf(key) === -1;
+  });
+}
 
 // 현재 저장소를 복원 가능한 백업 객체로 직렬화
 function buildBackupObject() {
   var data = {};
-  Object.keys(KEYS).forEach(function(k) {
-    var key = KEYS[k];
-    if (BACKUP_EXCLUDE_KEYS.indexOf(key) !== -1) return;
+  getBackupKeys().forEach(function(key) {
     var val = storage.get(key, undefined);
     if (val !== undefined && val !== null) data[key] = val;
   });
   return { app: 'fitness', version: BACKUP_VERSION, exportedAt: new Date().toISOString(), data: data };
 }
 
-// 백업 JSON(문자열 또는 객체)을 저장소로 복원. 알려진 키만, 민감키는 절대 복원 안 함.
-// 반환: { ok: true } 또는 { ok: false, error }. 절대 throw 하지 않음.
-function restoreFromBackup(input) {
+// 백업 파일에 무엇이 들어있는지 사람이 읽을 수 있게 요약 — 덮어쓰기 확인 창에 보여준다.
+function summarizeBackup(parsed) {
+  var d = (parsed && parsed.data) || {};
+  function count(key) { return Array.isArray(d[key]) ? d[key].length : 0; }
+  var oneRM = d[KEYS.ONE_RM_DATA];
+  return {
+    exportedAt: (parsed && typeof parsed.exportedAt === 'string') ? parsed.exportedAt : null,
+    workouts: count(KEYS.WORKOUT_LOG),
+    cardio: count(KEYS.CARDIO_LOG),
+    body: count(KEYS.BODY_LOG),
+    records: count(KEYS.PERSONAL_RECORDS),
+    memory: count(KEYS.COACH_MEMORY),
+    oneRM: (oneRM && typeof oneRM === 'object' && !Array.isArray(oneRM)) ? Object.keys(oneRM).length : 0
+  };
+}
+
+// 백업 파일(문자열 또는 객체)을 "검사만" 한다 — 저장소는 건드리지 않음.
+// 덮어쓰기 확인 창을 띄우기 전에 먼저 부르는 용도.
+// 반환: { ok: true, backup, summary } 또는 { ok: false, error }. 절대 throw 하지 않음.
+function parseBackupFile(input) {
+  var parsed;
   try {
-    var parsed = typeof input === 'string' ? JSON.parse(input) : input;
-    if (!parsed || typeof parsed !== 'object' || !parsed.data || typeof parsed.data !== 'object') {
-      return { ok: false, error: '헬스앱 백업 파일이 아닙니다.' };
-    }
-    if (parsed.data[KEYS.PROFILE] === undefined && parsed.data[KEYS.WORKOUT_LOG] === undefined) {
-      return { ok: false, error: '복원할 운동 데이터가 없습니다.' };
-    }
-    var knownKeys = Object.keys(KEYS).map(function(k) { return KEYS[k]; });
-    Object.keys(parsed.data).forEach(function(key) {
-      if (knownKeys.indexOf(key) === -1) return;                 // 모르는 키 무시
-      if (BACKUP_EXCLUDE_KEYS.indexOf(key) !== -1) return;        // 민감키 복원 안 함
-      storage.set(key, parsed.data[key]);
+    parsed = typeof input === 'string' ? JSON.parse(input) : input;
+  } catch (e) {
+    return { ok: false, error: '파일 내용이 깨져 있어요.\n헬스앱에서 내보낸 .json 백업 파일이 맞는지 확인해 주세요.' };
+  }
+  if (!parsed || typeof parsed !== 'object' || !parsed.data || typeof parsed.data !== 'object' || Array.isArray(parsed.data)) {
+    return { ok: false, error: '헬스앱 백업 파일이 아니에요.\n더보기 → 백업 내보내기로 만든 .json 파일을 골라 주세요.' };
+  }
+  if (parsed.app && parsed.app !== 'fitness') {
+    return { ok: false, error: '헬스앱 백업 파일이 아니에요.\n다른 앱에서 만든 파일 같아요.' };
+  }
+  var version = Number(parsed.version);
+  if (!version || version < 1) {
+    return { ok: false, error: '백업 파일의 형식(버전)을 알 수 없어요.\n파일이 손상됐을 수 있습니다.' };
+  }
+  if (version > BACKUP_VERSION) {
+    return { ok: false, error: '이 백업 파일은 더 새로운 버전의 앱에서 만들었어요.\n앱을 최신으로 새로고침한 뒤 다시 시도해 주세요.' };
+  }
+  if (parsed.data[KEYS.PROFILE] === undefined && parsed.data[KEYS.WORKOUT_LOG] === undefined) {
+    return { ok: false, error: '복원할 운동 데이터가 없어요.\n빈 백업 파일이거나 형식이 다릅니다.' };
+  }
+  return { ok: true, backup: parsed, summary: summarizeBackup(parsed) };
+}
+
+// 백업 JSON(문자열 또는 객체)을 저장소로 복원. 알려진 키만, 민감키는 절대 복원 안 함.
+// "덮어쓰기"이므로 백업에 없는 항목은 지운다 — 옛 기록이 섞여 남지 않도록.
+// 반환: { ok: true, summary } 또는 { ok: false, error }. 절대 throw 하지 않음.
+function restoreFromBackup(input) {
+  var checked = parseBackupFile(input);
+  if (!checked.ok) return checked;
+  try {
+    var parsed = checked.backup;
+    getBackupKeys().forEach(function(key) {
+      var val = parsed.data[key];
+      if (val === undefined || val === null) {
+        try { localStorage.removeItem(key); } catch (e) {}   // 백업에 없는 항목 → 지움(진짜 덮어쓰기)
+      } else {
+        storage.set(key, val);
+      }
     });
     // 기존 임시 진행상태·파생 캐시 정리 (옛 세션/캐시가 새 데이터와 충돌하지 않도록).
     // API 키·코치 대화 같은 로컬 전용 값은 그대로 둔다.
     BACKUP_TRANSIENT_KEYS.forEach(function(key) {
       try { localStorage.removeItem(key); } catch (e) {}
     });
-    return { ok: true };
+    // 첫 실행 플래그는 항상 세워 둔다 — 없으면 다음 로드에서 데모 데이터가 다시 깔린다.
+    storage.set(KEYS.INITIALIZED, true);
+    // 1RM을 복원했으면 '초기화됨' 플래그도 함께 세운다 — 없으면 다음 로드의 initializeOneRMData()가
+    // 복원한 1RM을 기본값(INITIAL_1RM)으로 덮어쓴다.
+    if (storage.get(KEYS.ONE_RM_DATA, null)) storage.set(KEYS.ONE_RM_INITIALIZED, true);
+    // 마지막 백업 일시는 "파일이 만들어진 시각" 기준으로 다시 세팅 (새 폰에서도 백업 주기가 이어지도록)
+    markBackupDone(parsed.exportedAt);
+    return { ok: true, summary: checked.summary };
   } catch (e) {
-    return { ok: false, error: '파일을 읽을 수 없습니다.' };
+    return { ok: false, error: '복원 중 문제가 생겼어요.\n저장 공간이 가득 찼는지 확인해 주세요.' };
   }
+}
+
+// 마지막 백업 일시 기록 (이 기기 전용 메모 — 백업 파일에는 안 담김)
+function markBackupDone(atIso) {
+  var t = atIso ? new Date(atIso).getTime() : NaN;
+  var iso = isNaN(t) ? new Date().toISOString() : new Date(t).toISOString();
+  storage.set(KEYS.LAST_BACKUP, { at: iso });
+  return iso;
+}
+
+// 마지막 백업 상태 — 더보기 화면 표시 + 오래된 백업 리마인더 판단용.
+// nowMs 를 넣어 기준 시각을 바꿀 수 있다(테스트용). 반환:
+//   { at: ISO|null, daysSince: 숫자|null, never: 한 번도 안 함, stale: 리마인더 필요 }
+function getBackupStatus(nowMs) {
+  var rec = storage.get(KEYS.LAST_BACKUP, null);
+  var at = (rec && typeof rec.at === 'string') ? rec.at : null;
+  var t = at ? new Date(at).getTime() : NaN;
+  if (!at || isNaN(t)) return { at: null, daysSince: null, never: true, stale: true };
+  var now = (typeof nowMs === 'number') ? nowMs : Date.now();
+  var days = Math.floor((now - t) / 86400000);
+  if (days < 0) days = 0;   // 기기 시계가 뒤로 간 경우 방어
+  return { at: at, daysSince: days, never: false, stale: days >= BACKUP_REMINDER_DAYS };
 }
 
 // ═══════════════════════════════════════════════
@@ -388,6 +474,41 @@ function showConfirm(message, onConfirm, opts) {
   btnRow.appendChild(okBtn);
   card.appendChild(msg);
   card.appendChild(btnRow);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+}
+
+// 앱 스타일 안내 팝업 (버튼 1개 — 크롬 기본 alert 대체).
+// 여러 줄 안내(\n)를 그대로 보여주므로 오류 안내처럼 설명이 필요한 곳에 쓴다.
+function showAlert(message, opts) {
+  opts = opts || {};
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 9998; display: flex; align-items: center; justify-content: center; padding: 28px; animation: fadeIn 0.15s ease;';
+
+  var card = document.createElement('div');
+  card.style.cssText = 'background: var(--bg-1); border: 1px solid var(--bg-3); border-radius: 16px; padding: 20px; width: 100%; max-width: 320px; box-shadow: 0 20px 60px rgba(var(--black-rgb), 0.5);';
+
+  if (opts.title) {
+    var title = document.createElement('p');
+    title.style.cssText = 'font-family: var(--font); font-size: 14px; font-weight: 800; color: ' + (opts.danger ? 'var(--danger)' : 'var(--accent)') + '; margin-bottom: 8px;';
+    title.textContent = opts.title;
+    card.appendChild(title);
+  }
+
+  var msg = document.createElement('p');
+  msg.style.cssText = 'font-family: var(--font); font-size: 14px; line-height: 1.55; color: var(--text-soft); margin-bottom: 18px; white-space: pre-line; word-break: keep-all;';
+  msg.textContent = message;
+
+  var okBtn = document.createElement('button');
+  okBtn.textContent = opts.confirmLabel || '확인';
+  okBtn.style.cssText = 'width: 100%; padding: 12px; border-radius: 10px; border: none; background: var(--accent); color: var(--bg-0); font-family: var(--font); font-weight: 800; font-size: 13px;';
+
+  function close() { overlay.remove(); if (typeof opts.onClose === 'function') opts.onClose(); }
+  okBtn.onclick = close;
+  overlay.onclick = function(e) { if (e.target === overlay) close(); };
+
+  card.appendChild(msg);
+  card.appendChild(okBtn);
   overlay.appendChild(card);
   document.body.appendChild(overlay);
 }

@@ -219,8 +219,143 @@ test('buildBackupObject / restoreFromBackup — 왕복 복원, API키·대화 �
 });
 
 // ═══════════════════════════════════════════════
+// 데이터 백업 확장 — 파일 검증 / 덮어쓰기 / 마지막 백업 일시
+// ═══════════════════════════════════════════════
+
+// 백업 파일을 "적용 전에" 검사한다 — 깨진 파일·남의 파일·미래 버전은 저장소를 건드리지 않고 거절.
+test('parseBackupFile — 손상/타앱/미래버전/빈파일 거절, 정상 파일은 요약 반환', () => {
+  const fresh = loadApp();
+  const ok = (r) => r.ok;
+
+  assert.equal(fresh.parseBackupFile('쓰레기{').ok, false);                      // JSON 아님
+  assert.equal(fresh.parseBackupFile(null).ok, false);                           // 빈 입력
+  assert.equal(fresh.parseBackupFile({ app: 'fitness', version: 1 }).ok, false);  // data 없음
+  assert.equal(fresh.parseBackupFile({ app: 'other', version: 1, data: { fitness_profile: {} } }).ok, false); // 다른 앱
+  assert.equal(fresh.parseBackupFile({ app: 'fitness', version: 999, data: { fitness_profile: {} } }).ok, false); // 미래 버전
+  assert.equal(fresh.parseBackupFile({ app: 'fitness', data: { fitness_profile: {} } }).ok, false); // 버전 없음
+  assert.equal(fresh.parseBackupFile({ app: 'fitness', version: 1, data: { fitness_settings: {} } }).ok, false); // 운동 데이터 없음
+
+  // 오류 문구는 한국어 안내 (사용자가 읽고 뭘 해야 할지 알 수 있어야 함)
+  assert.match(fresh.parseBackupFile('쓰레기{').error, /백업 파일|파일/);
+
+  const good = {
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: {
+      fitness_profile: { age: 40 },
+      fitness_workout_log: [{ id: 'a' }, { id: 'b' }],
+      fitness_cardio_log: [{ id: 'c' }],
+      fitness_body_log: [{ date: '2026-08-01' }],
+      fitness_personal_records: [{ id: 'p' }],
+      fitness_coach_memory: [{ id: 'm' }],
+      fitness_one_rm_data: { '레그 프레스': 200, '벤치': 80 }
+    }
+  };
+  const res = fresh.parseBackupFile(JSON.stringify(good));
+  assert.equal(ok(res), true);
+  assert.deepEqual(plain(res.summary), {
+    exportedAt: '2026-08-01T00:00:00.000Z',
+    workouts: 2, cardio: 1, body: 1, records: 1, memory: 1, oneRM: 2
+  });
+});
+
+// 확인 문구: 뭐가 들어있는지 + 되돌릴 수 없다는 경고 + API키/대화는 안 건드림
+test('buildRestoreConfirmMessage — 백업 내용 요약 + 덮어쓰기 경고', () => {
+  const fresh = loadApp();
+  const msg = fresh.buildRestoreConfirmMessage({ exportedAt: '2026-08-01T00:00:00.000Z', workouts: 12, body: 30, oneRM: 5 });
+  assert.match(msg, /2026\.08\.01/);
+  assert.match(msg, /운동 12회/);
+  assert.match(msg, /체중 30개/);
+  assert.match(msg, /되돌릴 수 없/);
+  assert.match(msg, /API 키/);
+  // 빈 백업도 문구가 깨지지 않는다
+  assert.match(fresh.buildRestoreConfirmMessage({}), /담긴 기록 없음/);
+});
+
+// 복원은 "덮어쓰기" — 백업에 없는 항목은 남기지 않는다(옛 기록이 섞이면 통계가 틀어짐).
+test('restoreFromBackup — 백업에 없는 기록은 지우고, 데모 재생성·1RM 초기화는 막는다', () => {
+  const fresh = loadApp();
+  fresh.localStorage.clear();
+  fresh.localStorage.setItem('fitness_condition_log', JSON.stringify([{ date: '2026-01-01' }])); // 백업엔 없는 옛 기록
+  fresh.localStorage.setItem('fitness_api_key', JSON.stringify('sk-keep'));
+
+  const backup = {
+    app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
+    data: { fitness_profile: { age: 40 }, fitness_workout_log: [{ id: 'a' }], fitness_one_rm_data: { '벤치': 80 } }
+  };
+  const res = fresh.restoreFromBackup(JSON.stringify(backup));
+  assert.equal(res.ok, true);
+  assert.equal(fresh.localStorage.getItem('fitness_condition_log'), null, '백업에 없는 기록은 지워짐');
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_api_key')), 'sk-keep', 'API키는 그대로');
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_initialized')), true, '데모 데이터 재생성 방지');
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_one_rm_initialized')), true, '복원한 1RM이 기본값에 덮이지 않도록');
+  assert.equal(plain(res.summary).workouts, 1);
+});
+
+// 마지막 백업 일시: 내보내면 기록, 복원하면 "그 파일을 만든 시각"으로 이어받는다. 파일에는 담기지 않는다.
+test('markBackupDone / getBackupStatus — 없음·최근·오래됨(30일) 판정', () => {
+  const fresh = loadApp();
+  fresh.localStorage.clear();
+
+  const none = fresh.getBackupStatus();
+  assert.equal(none.never, true);
+  assert.equal(none.at, null);
+  assert.equal(none.stale, true, '한 번도 백업 안 했으면 리마인더 대상');
+
+  const now = Date.UTC(2026, 7, 8);                                   // 2026-08-08 기준
+  fresh.markBackupDone(new Date(now - 3 * 86400000).toISOString());   // 3일 전
+  const recent = fresh.getBackupStatus(now);
+  assert.equal(recent.never, false);
+  assert.equal(recent.daysSince, 3);
+  assert.equal(recent.stale, false);
+
+  fresh.markBackupDone(new Date(now - 31 * 86400000).toISOString());  // 31일 전
+  const old = fresh.getBackupStatus(now);
+  assert.equal(old.daysSince, 31);
+  assert.equal(old.stale, true, '30일 넘으면 리마인더');
+
+  // 기기 시계가 뒤로 간 경우에도 음수 일수가 나오지 않는다
+  assert.equal(fresh.getBackupStatus(now - 40 * 86400000).daysSince, 0);
+
+  // 마지막 백업 일시는 기기별 메모 → 백업 파일에 담기지 않음
+  fresh.localStorage.setItem('fitness_profile', JSON.stringify({ age: 40 }));
+  assert.equal(fresh.buildBackupObject().data.fitness_last_backup, undefined);
+
+  // 복원하면 파일이 만들어진 시각으로 세팅된다 (새 폰에서도 백업 주기가 이어짐)
+  const res = fresh.restoreFromBackup({
+    app: 'fitness', version: 1, exportedAt: '2026-07-01T00:00:00.000Z',
+    data: { fitness_profile: { age: 40 }, fitness_workout_log: [] }
+  });
+  assert.equal(res.ok, true);
+  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_last_backup')).at, '2026-07-01T00:00:00.000Z');
+});
+
+// ═══════════════════════════════════════════════
 // 묶음1/2 UI 회귀 (fresh app — 격리)
 // ═══════════════════════════════════════════════
+
+// 더보기 화면의 '데이터 백업' 섹션 — 내보내기/가져오기/마지막 백업 + 오래되면 리마인더
+test('renderMore — 데이터 백업 섹션 + 마지막 백업 표시 + 오래된 백업 리마인더', () => {
+  const fresh = loadApp();
+  fresh.localStorage.removeItem('fitness_last_backup');
+  const never = fresh.renderMore();
+  assert.ok(never.includes('데이터 백업'), '백업 섹션 제목');
+  assert.ok(never.includes('exportData()') && never.includes('openBackupImport()'), '내보내기/가져오기 연결');
+  assert.ok(never.includes('마지막 백업') && never.includes('아직 백업한 적이 없어요'), '백업 이력 없음 표시');
+  assert.ok(never.includes('backup-reminder'), '백업 이력이 없으면 리마인더 노출');
+  assert.ok(never.includes('API 키'), 'API 키 제외 안내');
+
+  // 최근 백업 → 리마인더 없음
+  fresh.markBackupDone(new Date(Date.now() - 2 * 86400000).toISOString());
+  const recent = fresh.renderMore();
+  assert.ok(!recent.includes('backup-reminder'), '최근 백업이면 리마인더 없음');
+  assert.ok(recent.includes('마지막 백업'), '마지막 백업 줄 유지');
+
+  // 31일 전 백업 → 리마인더 노출
+  fresh.markBackupDone(new Date(Date.now() - 31 * 86400000).toISOString());
+  const stale = fresh.renderMore();
+  assert.ok(stale.includes('backup-reminder') && stale.includes('지금 백업하기'), '오래되면 리마인더 + 바로 백업 버튼');
+});
+
 test('renderMore — 껍데기 메뉴 7개 삭제 + 백업/프로필 반영', () => {
   const fresh = loadApp();
   const more = fresh.renderMore();

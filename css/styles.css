@@ -1619,6 +1619,53 @@ button {
   padding-left: 4px;
 }
 
+/* 데이터 백업 — 오래된 백업 리마인더 배너 + 안내 문구 */
+.backup-reminder {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  border-radius: 14px;
+  background: rgba(var(--warn-rgb), 0.10);
+  border: 1px solid rgba(var(--warn-rgb), 0.32);
+}
+.backup-reminder-icon {
+  color: var(--warn);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.backup-reminder-btn {
+  margin-top: 8px;
+  padding: 7px 14px;
+  border-radius: 100px;
+  background: rgba(var(--warn-rgb), 0.18);
+  border: 1px solid rgba(var(--warn-rgb), 0.45);
+  color: var(--warn);
+  font-family: var(--font);
+  font-weight: 800;
+  font-size: 12px;
+}
+.backup-reminder-btn:active { background: rgba(var(--warn-rgb), 0.3); }
+/* 백업이 오래됐을 때 '백업 파일 저장' 줄에 붙는 작은 점 */
+.backup-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  vertical-align: middle;
+  margin-left: 2px;
+}
+.backup-hint {
+  margin: 8px 4px 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  word-break: keep-all;
+}
+.backup-hint b { color: var(--text-muted); font-weight: 700; }
+
 .toggle-switch-sm {
   position: relative;
   width: 40px;
