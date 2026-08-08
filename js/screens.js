@@ -4532,7 +4532,7 @@ function renderMore() {
               '<p>API 키</p>' +
               '<p>console.anthropic.com</p>' +
             '</div>' +
-            '<input type="password" class="api-key-input" id="api-key-field" placeholder="sk-ant-..." value="' + (state.apiKeyInput || '') + '" oninput="updateApiKeyInput(this.value)" />' +
+            '<input type="password" class="api-key-input" id="api-key-field" placeholder="sk-ant-..." value="' + escapeHtml(state.apiKeyInput || '') + '" oninput="updateApiKeyInput(this.value)" />' +
             '<p class="text-[10px] font-mono text-stone-500 mt-2 px-1">키는 본인 기기에만 저장되며 외부로 전송되지 않습니다.</p>' +
           '</div>' +
           
@@ -4592,7 +4592,7 @@ function renderMore() {
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold">Anthropic API 키</p>' +
               '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + 
-                (apiKey ? maskApiKey(apiKey) : 'AI 코치·맞춤 루틴·주간 리뷰 켜기') +
+                (apiKey ? escapeHtml(maskApiKey(apiKey)) : 'AI 코치·맞춤 루틴·주간 리뷰 켜기') +
               '</p>' +
             '</div>' +
             '<span class="api-status-badge ' + (apiKey ? 'active' : 'inactive') + '">' +
@@ -4605,7 +4605,7 @@ function renderMore() {
               '<div class="menu-icon-sm accent-bg-soft">' + icon('chart', 18) + '</div>' +
               '<div class="menu-row-content">' +
                 '<p class="text-sm font-display font-bold">주간 리뷰</p>' +
-                '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + (state.weeklyReview ? '이번 주 ' + state.weeklyReview.grade + '등급 리뷰' : '이번 주 종합 분석') + '</p>' +
+                '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + (state.weeklyReview ? '이번 주 ' + escapeHtml(state.weeklyReview.grade) + '등급 리뷰' : '이번 주 종합 분석') + '</p>' +
               '</div>' +
               '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
             '</div>'

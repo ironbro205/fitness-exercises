@@ -2063,6 +2063,8 @@ test('XSS 회귀 — AI 루틴/주간리뷰의 숫자형 필드도 이스케이�
     expanded: app.state.routinePreviewExpanded,
     history: app.state.routineChatHistory,
     review: app.state.weeklyReview,
+    loading: app.state.routineLoading,
+    chatInput: app.state.routineChatInput,
   };
 
   // 모델이 모든 칸에 페이로드를 심어 돌려준 상황
@@ -2109,6 +2111,26 @@ test('XSS 회귀 — AI 루틴/주간리뷰의 숫자형 필드도 이스케이�
   const homeHtml = app.renderHome();
   assert.ok(!homeHtml.includes(PAYLOAD), '홈의 주간 리뷰 카드에 페이로드가 날것으로 남아 있다');
 
+  // 더보기 화면의 주간 리뷰 진입 줄에도 같은 등급이 들어간다 (API 키가 있어야 그 줄이 그려진다)
+  const snapKey = app.state.apiKey;
+  app.state.apiKey = 'sk-ant-' + PAYLOAD;
+  const moreHtml = app.renderMore();
+  assert.ok(!moreHtml.includes(PAYLOAD), '더보기의 주간 리뷰 줄에 페이로드가 날것으로 남아 있다');
+  // 마스킹된 API 키도 사용자가 친 글자다 — 앞 10자만 남지만 그 안에 태그 시작이 들어갈 수 있다
+  assert.ok(!moreHtml.includes('sk-ant-<im'), '마스킹된 API 키가 날것으로 들어간다');
+
+  // 속성(attribute) 자리 — 따옴표가 살아 있으면 value="..." 를 탈출해 새 속성을 붙일 수 있다
+  const ATTR_PAYLOAD = '" autofocus onfocus=alert(1) x="';
+  const snapModal = { open: app.state.apiKeyModalOpen, input: app.state.apiKeyInput };
+  app.state.apiKeyModalOpen = true;
+  app.state.apiKeyInput = ATTR_PAYLOAD;
+  const keyHtml = app.renderMore();
+  assert.ok(!keyHtml.includes(ATTR_PAYLOAD), 'API 키 입력칸이 속성을 탈출당한다');
+  assert.ok(keyHtml.includes('&quot;'), 'API 키 입력칸의 따옴표가 이스케이프되지 않았다');
+  app.state.apiKeyModalOpen = snapModal.open;
+  app.state.apiKeyInput = snapModal.input;
+  app.state.apiKey = snapKey;
+
   app.state.currentTab = snapshot.tab;
   app.state.generatedRoutine = snapshot.routine;
   app.state.selectedBodyPart = snapshot.part;
@@ -2116,4 +2138,6 @@ test('XSS 회귀 — AI 루틴/주간리뷰의 숫자형 필드도 이스케이�
   app.state.routinePreviewExpanded = snapshot.expanded;
   app.state.routineChatHistory = snapshot.history;
   app.state.weeklyReview = snapshot.review;
+  app.state.routineLoading = snapshot.loading;
+  app.state.routineChatInput = snapshot.chatInput;
 });
