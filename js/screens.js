@@ -3166,6 +3166,7 @@ window.executeResetAll = function() {
 // API 키(fitness_api_key)와 코치 대화는 보안·용량 때문에 담지 않는다 (BACKUP_LOCAL_ONLY_KEYS).
 window.exportData = function() {
   var url = null;
+  // 파일 만들기 + 내려받기 시작까지만 try 로 감싼다 (뒤의 화면 갱신이 실패해도 '백업 실패'로 보이지 않게)
   try {
     var json = JSON.stringify(buildBackupObject(), null, 2);
     var blob = new Blob([json], { type: 'application/json' });
@@ -3176,14 +3177,18 @@ window.exportData = function() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    markBackupDone();                       // 마지막 백업 일시 기록 → 더보기 화면 표시·리마인더 갱신
-    showToast('백업 파일을 저장했어요 (API 키 제외)');
-    render();
   } catch (e) {
-    showAlert('백업 파일을 만들지 못했어요.\n잠시 뒤 다시 시도해 주세요.', { title: '백업 실패', danger: true });
-  } finally {
     if (url) URL.revokeObjectURL(url);
+    showAlert('백업 파일을 만들지 못했어요.\n잠시 뒤 다시 시도해 주세요.', { title: '백업 실패', danger: true });
+    return;
   }
+  // 링크 주소는 조금 뒤에 해제한다 — 클릭 직후 바로 해제하면 브라우저가 내려받기를 취소할 수 있다.
+  if (url) setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+  // 주의: 브라우저는 "실제로 저장됐는지"를 알려주지 않는다(공유 시트 취소 등도 감지 불가).
+  // 그래서 여기 기록은 "저장을 시도한 시각"이다 — 그래서 화면에서도 파일 확인을 권한다.
+  markBackupDone();                         // 마지막 백업 일시 기록 → 더보기 화면 표시·리마인더 갱신
+  showToast('백업 파일을 저장했어요 (API 키 제외)');
+  render();
 };
 
 // 가져오기: 파일 선택 → 검사 → "덮어씁니다" 확인 → 복원 → 새로고침.
@@ -3250,9 +3255,11 @@ function renderMore() {
 
   // ── 데이터 백업 섹션 (마지막 백업 표시 + 오래되면 부드러운 리마인더) ──
   var backupStatus = getBackupStatus();
+  // 경과일은 getBackupStatus 한 곳에서만 계산한다(리마인더와 같은 값) — daysAgo 는 기기 시계가
+  // 앞서 있을 때 '-3일 전' 같은 음수를 그대로 보여주므로 0일일 때는 쓰지 않는다.
   var backupWhenText = backupStatus.never
     ? '아직 백업한 적이 없어요'
-    : daysAgo(backupStatus.at) + ' · ' + fmtDate(backupStatus.at);
+    : (backupStatus.daysSince === 0 ? '오늘' : daysAgo(backupStatus.at)) + ' · ' + fmtDate(backupStatus.at);
   var backupReminderHtml = '';
   if (backupStatus.stale) {
     var reminderText = backupStatus.never

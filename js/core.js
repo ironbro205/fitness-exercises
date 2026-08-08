@@ -206,24 +206,68 @@ function parseBackupFile(input) {
   if (version > BACKUP_VERSION) {
     return { ok: false, error: '이 백업 파일은 더 새로운 버전의 앱에서 만들었어요.\n앱을 최신으로 새로고침한 뒤 다시 시도해 주세요.' };
   }
-  if (parsed.data[KEYS.PROFILE] === undefined && parsed.data[KEYS.WORKOUT_LOG] === undefined) {
-    return { ok: false, error: '복원할 운동 데이터가 없어요.\n빈 백업 파일이거나 형식이 다릅니다.' };
-  }
   // 모양 확인 — 프로필은 객체, 기록들은 목록이어야 한다.
   // (엉뚱한 모양이 들어오면 복원 뒤 화면이 하얗게 뜨므로, 저장하기 전에 막는다.)
   var prof = parsed.data[KEYS.PROFILE];
   if (prof !== undefined && (prof === null || typeof prof !== 'object' || Array.isArray(prof))) {
     return { ok: false, error: '백업 파일의 프로필 정보가 손상됐어요.\n다른 백업 파일을 골라 주세요.' };
   }
-  var listKeys = [KEYS.WORKOUT_LOG, KEYS.CARDIO_LOG, KEYS.BODY_LOG, KEYS.PERSONAL_RECORDS,
-                  KEYS.CONDITION_LOG, KEYS.CYCLE_HISTORY, KEYS.COACH_MEMORY];
-  for (var i = 0; i < listKeys.length; i++) {
-    var v = parsed.data[listKeys[i]];
+  for (var i = 0; i < BACKUP_LIST_KEYS.length; i++) {
+    var v = parsed.data[BACKUP_LIST_KEYS[i]];
     if (v !== undefined && v !== null && !Array.isArray(v)) {
       return { ok: false, error: '백업 파일의 기록 형식이 손상됐어요.\n다른 백업 파일을 골라 주세요.' };
     }
   }
-  return { ok: true, backup: parsed, summary: summarizeBackup(parsed) };
+  // 저장해도 안전한 형태로 미리 정리한다 → 확인 창에 보여줄 개수와 실제로 저장될 내용이 같아진다.
+  var safeData = sanitizeBackupData(parsed.data);
+  if (!backupHasRecords(safeData)) {
+    // 덮어쓰기는 되돌릴 수 없으므로, 알맹이가 없는 파일로는 기존 기록을 지우지 않는다.
+    return { ok: false, error: '복원할 기록이 없어요.\n기록이 하나도 담기지 않은 백업 파일입니다.' };
+  }
+  var safeBackup = { app: 'fitness', version: version, exportedAt: parsed.exportedAt, data: safeData };
+  return { ok: true, backup: safeBackup, summary: summarizeBackup(safeBackup) };
+}
+
+// 백업에 담기는 "목록형" 키 (모양 검사·빈 파일 판단에 함께 쓴다)
+var BACKUP_LIST_KEYS = [KEYS.WORKOUT_LOG, KEYS.CARDIO_LOG, KEYS.BODY_LOG, KEYS.PERSONAL_RECORDS,
+                        KEYS.CONDITION_LOG, KEYS.CYCLE_HISTORY, KEYS.COACH_MEMORY];
+
+// 파일 안의 값들을 저장해도 안전한 형태로 정리 (알려진 키만, 종류별 규칙 적용)
+function sanitizeBackupData(raw) {
+  var out = {};
+  getBackupKeys().forEach(function(key) {
+    var val = raw[key];
+    if (val === undefined || val === null) return;
+    if (key === KEYS.PROFILE) {
+      var p = sanitizeRestoredProfile(val);
+      if (p) out[key] = p;
+      return;
+    }
+    var safe = sanitizeRestoredValue(val, 0);
+    if (key === KEYS.ONE_RM_DATA) { out[key] = sanitizeRestoredOneRM(safe); return; }
+    safe = sanitizeRestoredList(safe);
+    // 체중 기록은 숫자가 없으면 그래프·통계 계산이 멈추므로 그런 줄은 버린다.
+    if (key === KEYS.BODY_LOG && Array.isArray(safe)) {
+      safe = safe.filter(function(entry) {
+        return entry && typeof entry === 'object' && typeof entry.weight === 'number' && isFinite(entry.weight);
+      });
+    }
+    out[key] = safe;
+  });
+  return out;
+}
+
+// 정리된 백업에 실제로 복원할 알맹이가 있는가 (빈 목록만 든 파일 = 없음)
+function backupHasRecords(data) {
+  if (!data) return false;
+  var hasList = BACKUP_LIST_KEYS.some(function(key) {
+    return Array.isArray(data[key]) && data[key].length > 0;
+  });
+  if (hasList) return true;
+  var prof = data[KEYS.PROFILE];
+  if (prof && typeof prof === 'object' && Object.keys(prof).length > 0) return true;
+  var oneRM = data[KEYS.ONE_RM_DATA];
+  return !!(oneRM && typeof oneRM === 'object' && Object.keys(oneRM).length > 0);
 }
 
 // 식별자(id·date)만 앱이 만드는 형식으로 제한한다.
@@ -263,9 +307,11 @@ function sanitizeRestoredList(list) {
   if (!Array.isArray(list)) return list;
   return list.map(function(item) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
-    ['id', 'date', 'startTime'].forEach(function(f) {
+    ['id', 'startTime'].forEach(function(f) {
       if (item[f] !== undefined && item[f] !== null) item[f] = sanitizeIdentifier(item[f]);
     });
+    // date 는 반드시 글자여야 한다 — 숫자(에폭 ms)가 들어오면 기록 탭 정렬(date.localeCompare)에서 멈춘다.
+    if (item.date !== undefined && item.date !== null) item.date = String(sanitizeIdentifier(String(item.date)));
     NUMERIC_RECORD_FIELDS.forEach(function(f) {
       if (item[f] === undefined || item[f] === null || typeof item[f] === 'number') return;
       var n = Number(item[f]);
@@ -285,6 +331,14 @@ function sanitizeRestoredOneRM(map) {
     if (isFinite(n) && n > 0) out[name] = n;
   });
   return out;
+}
+
+// 기본 프로필 "복사본" — 전역 DEFAULT_PROFILE 을 그대로 state 에 물리면 사이클 정규화가
+// 전역 기본값을 통째로 바꿔버린다(그 뒤로는 앱 어디서든 오염된 기본값을 쓰게 됨).
+function cloneDefaultProfile() {
+  var copy = {};
+  Object.keys(DEFAULT_PROFILE).forEach(function(k) { copy[k] = DEFAULT_PROFILE[k]; });
+  return copy;
 }
 
 // 프로필은 숫자 칸(나이·키·몸무게…)이 화면에 그대로 찍히므로 숫자로 못 읽는 값은 기본값으로 되돌린다.
@@ -317,13 +371,16 @@ function restoreFromBackup(input) {
   } catch (e) {
     return { ok: false, error: '저장소를 읽지 못했어요.\n브라우저의 사이트 데이터 설정을 확인해 주세요.' };
   }
+  // 되돌리기 — 한 곳이라도 못 되돌리면 false (사용자에게 사실대로 알리기 위해)
   function rollback() {
+    var allBack = true;
     keys.forEach(function(key) {
       try {
         if (snapshot[key] === null || snapshot[key] === undefined) localStorage.removeItem(key);
         else localStorage.setItem(key, snapshot[key]);
-      } catch (e) {}
+      } catch (e) { allBack = false; }
     });
+    return allBack;
   }
 
   var failed = false;
@@ -331,27 +388,37 @@ function restoreFromBackup(input) {
     keys.forEach(function(key) {
       if (failed) return;
       var val = parsed.data[key];
-      if (val === undefined || val === null) {
-        localStorage.removeItem(key);                      // 백업에 없는 항목 → 지움(진짜 덮어쓰기)
+      if (val === undefined) {
+        // 백업에 없는 항목 → 지움(진짜 덮어쓰기). 단 프로필은 비워두면 안 된다 —
+        // 저장된 프로필이 없으면 앱이 기본값을 물고 돌면서 나이·키·사이클이 매번 초기화된다.
+        if (key === KEYS.PROFILE) {
+          if (!storage.set(key, cloneDefaultProfile())) failed = true;
+          return;
+        }
+        localStorage.removeItem(key);
         return;
       }
-      var safe = (key === KEYS.PROFILE) ? sanitizeRestoredProfile(val)
-                                        : sanitizeRestoredList(sanitizeRestoredValue(val, 0));
-      if (key === KEYS.ONE_RM_DATA) safe = sanitizeRestoredOneRM(safe);
-      // 체중 기록은 숫자가 없으면 그래프·통계 계산이 멈추므로 그런 줄은 버린다.
-      if (key === KEYS.BODY_LOG && Array.isArray(safe)) {
-        safe = safe.filter(function(entry) {
-          return entry && typeof entry === 'object' && typeof entry.weight === 'number' && isFinite(entry.weight);
-        });
-      }
-      if (!storage.set(key, safe)) failed = true;          // 저장 실패(용량 초과 등)
+      if (!storage.set(key, val)) failed = true;           // 저장 실패(용량 초과 등)
     });
+    // 아래 두 플래그도 같은 실패 감시 안에서 쓴다 — 이것만 실패해도 복원은 반쪽이 된다.
+    // 첫 실행 플래그: 없으면 다음 로드에서 데모 데이터가 복원한 기록 위에 다시 깔린다.
+    if (!failed && !storage.set(KEYS.INITIALIZED, true)) failed = true;
+    // 1RM을 실제로 복원했을 때만 '초기화됨' 플래그를 세운다 — 빈 표({})에 세우면
+    // 다음 로드의 initializeOneRMData()가 기본 1RM(INITIAL_1RM)을 영영 못 심는다.
+    if (!failed) {
+      var restoredOneRM = parsed.data[KEYS.ONE_RM_DATA];
+      if (restoredOneRM && Object.keys(restoredOneRM).length > 0) {
+        if (!storage.set(KEYS.ONE_RM_INITIALIZED, true)) failed = true;
+      }
+    }
   } catch (e) {
     failed = true;
   }
   if (failed) {
-    rollback();
-    return { ok: false, error: '저장 공간이 부족해 복원을 끝내지 못했어요.\n원래 기록은 그대로 되돌려 놨습니다. 기기 저장 공간을 정리한 뒤 다시 시도해 주세요.' };
+    var restored = rollback();
+    return { ok: false, error: restored
+      ? '저장 공간이 부족해 복원을 끝내지 못했어요.\n원래 기록은 그대로 되돌려 놨습니다. 기기 저장 공간을 정리한 뒤 다시 시도해 주세요.'
+      : '저장 공간이 부족해 복원을 끝내지 못했고, 일부 기록은 되돌리지도 못했어요.\n기기 저장 공간을 정리한 뒤 백업 파일로 다시 복원해 주세요.' };
   }
 
   // 기존 임시 진행상태·파생 캐시 정리 (옛 세션/캐시가 새 데이터와 충돌하지 않도록).
@@ -359,11 +426,6 @@ function restoreFromBackup(input) {
   BACKUP_TRANSIENT_KEYS.forEach(function(key) {
     try { localStorage.removeItem(key); } catch (e) {}
   });
-  // 첫 실행 플래그는 항상 세워 둔다 — 없으면 다음 로드에서 데모 데이터가 다시 깔린다.
-  storage.set(KEYS.INITIALIZED, true);
-  // 1RM을 복원했으면 '초기화됨' 플래그도 함께 세운다 — 없으면 다음 로드의 initializeOneRMData()가
-  // 복원한 1RM을 기본값(INITIAL_1RM)으로 덮어쓴다.
-  if (storage.get(KEYS.ONE_RM_DATA, null)) storage.set(KEYS.ONE_RM_INITIALIZED, true);
   // 마지막 백업 일시는 "파일이 만들어진 시각" 기준으로 다시 세팅 (새 폰에서도 백업 주기가 이어지도록)
   markBackupDone(parsed.exportedAt);
   return { ok: true, summary: checked.summary };
@@ -739,7 +801,9 @@ function init() {
     storage.set(KEYS.INITIALIZED, true);
   }
 
-  state.profile = storage.get(KEYS.PROFILE, DEFAULT_PROFILE);
+  // 저장된 프로필이 없으면 기본값을 "복사해서" 쓴다 — 전역 DEFAULT_PROFILE 을 그대로 물면
+  // 바로 아래 사이클 정규화가 전역 기본값을 오염시킨다.
+  state.profile = storage.get(KEYS.PROFILE, null) || cloneDefaultProfile();
   state.data = {
     workoutLog: storage.get(KEYS.WORKOUT_LOG, []),
     cardioLog: storage.get(KEYS.CARDIO_LOG, []),
