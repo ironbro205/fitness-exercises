@@ -1,5 +1,5 @@
 {
-  "functionCount": 277,
+  "functionCount": 278,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -224,6 +224,7 @@
     "restoreFromBackup",
     "sanitizeIdentifier",
     "sanitizeRestoredList",
+    "sanitizeRestoredOneRM",
     "sanitizeRestoredProfile",
     "sanitizeRestoredValue",
     "saveActiveCardio",

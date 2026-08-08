@@ -275,6 +275,18 @@ function sanitizeRestoredList(list) {
   });
 }
 
+// 1RM 표는 "종목명 → 무게(숫자)" 지도다. 무게 자리에 글자가 들어오면 화면에 그대로 찍히고
+// 작업무게 계산(rm * 0.75)도 깨지므로, 숫자로 못 읽는 종목은 통째로 버린다.
+function sanitizeRestoredOneRM(map) {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return {};
+  var out = {};
+  Object.keys(map).forEach(function(name) {
+    var n = Number(map[name]);
+    if (isFinite(n) && n > 0) out[name] = n;
+  });
+  return out;
+}
+
 // 프로필은 숫자 칸(나이·키·몸무게…)이 화면에 그대로 찍히므로 숫자로 못 읽는 값은 기본값으로 되돌린다.
 function sanitizeRestoredProfile(profile) {
   var p = sanitizeRestoredValue(profile, 0);
@@ -325,6 +337,7 @@ function restoreFromBackup(input) {
       }
       var safe = (key === KEYS.PROFILE) ? sanitizeRestoredProfile(val)
                                         : sanitizeRestoredList(sanitizeRestoredValue(val, 0));
+      if (key === KEYS.ONE_RM_DATA) safe = sanitizeRestoredOneRM(safe);
       // 체중 기록은 숫자가 없으면 그래프·통계 계산이 멈추므로 그런 줄은 버린다.
       if (key === KEYS.BODY_LOG && Array.isArray(safe)) {
         safe = safe.filter(function(entry) {

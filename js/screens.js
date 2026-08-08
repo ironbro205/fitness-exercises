@@ -3070,10 +3070,10 @@ function renderOneRMList() {
       var w75 = snapWeightToEquipment(rm * 0.75, name);
       return '<div class="menu-row" style="cursor: default;">' +
         '<div class="flex-1">' +
-          '<p class="text-sm font-display font-bold">' + name + '</p>' +
-          '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">75% 작업무게 ' + w75 + 'kg</p>' +
+          '<p class="text-sm font-display font-bold">' + escapeHtml(name) + '</p>' +
+          '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">75% 작업무게 ' + escapeHtml(w75) + 'kg</p>' +
         '</div>' +
-        '<p class="font-bebas text-xl" style="color: #fbbf24;">' + rm + '<span class="text-xs text-stone-400">kg</span></p>' +
+        '<p class="font-bebas text-xl" style="color: #fbbf24;">' + escapeHtml(rm) + '<span class="text-xs text-stone-400">kg</span></p>' +
       '</div>';
     }).join('');
     

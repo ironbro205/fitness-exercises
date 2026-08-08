@@ -305,6 +305,7 @@ test('복원 — 악성 백업이 화면에서 실행되지 않고, 사용자 �
       fitness_workout_log: [{ id: "&#39;);alert(1);//", sessionKr: '<img src=x onerror=steal()>', date: '2026-08-01', duration: 30, sets: 10 }],
       fitness_body_log: [{ date: "&#39;);alert(2);//", weight: '<script>x</script>' }],
       fitness_coach_memory: [{ id: 'mem_1', category: 'injury', text: memoText }],
+      fitness_one_rm_data: { '레그 프레스': 200, '벤치프레스': '<img src=x onerror=alert(1)>' },
       __proto__: { polluted: true },
     },
   };
@@ -322,6 +323,10 @@ test('복원 — 악성 백업이 화면에서 실행되지 않고, 사용자 �
 
   // 3-1) 숫자칸에 글자가 들어오면 화면 계산이 멈추므로(weight.toFixed) 버리거나 숫자로 맞춘다
   assert.deepEqual(plain(JSON.parse(fresh.localStorage.getItem('fitness_body_log'))), [], '숫자 아닌 체중 기록은 제외');
+  // 1RM 표(종목→무게)도 숫자만 남는다 — 글자면 "내 1RM" 화면에 그대로 찍히고 작업무게 계산도 깨진다
+  assert.deepEqual(plain(JSON.parse(fresh.localStorage.getItem('fitness_one_rm_data'))), { '레그 프레스': 200 });
+  fresh.state.oneRMListOpen = true;
+  assert.ok(!fresh.renderOneRMList().includes('<img'), '1RM 화면에 주입 태그 없음');
 
   // 4) 화면 문자열에 살아있는 태그·핸들러가 없다 (기록/체중/프로필 모두)
   fresh.state.profile = JSON.parse(fresh.localStorage.getItem('fitness_profile'));
