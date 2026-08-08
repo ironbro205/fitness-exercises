@@ -702,6 +702,233 @@ test('[불변식] 전 스킴 × 전 클래스 × 무게 3~200kg × 세트 1~6 �
   assert.equal(bad.slice(0, 5).join(' | '), '', `${bad.length}건 위반 (앞 5건만 표시)`);
 });
 
+// ═══ 3-C. 코드리뷰에서 나온 회귀 (Codex) ═══
+
+test('[리뷰] 한 스텝 아래가 없는 최저 중량은 감량 스킴을 접는다 (탑 5 / 백오프 5 / 백오프 5 방지)', () => {
+  resetOverrides();
+  const range = { low: 5, high: 8 };
+  // 5kg 격자의 5kg · 덤벨 2kg 격자의 2kg = 아래가 0kg뿐 → 백오프가 탑과 같은 무게가 된다
+  assert.equal(app.canReduceWeight('핵 스쿼트', 5), false);
+  assert.equal(app.canReduceWeight('핵 스쿼트', 10), true);
+  assert.equal(app.canReduceWeight('덤벨 벤치 프레스', 2), false);
+  assert.equal(app.canReduceWeight('덤벨 벤치 프레스', 4), true);
+  assert.equal(app.canReduceWeight('어시스트 풀업', 0), true, '보조는 늘리는 방향이라 바닥이 없다');
+
+  const roles = (name, w) => app.buildSchemeSets(name, w, 8, range, 'top_backoff', { sets: 3, warmup: false })
+    .map((s) => s.role + ':' + s.weight).join(' ');
+  assert.equal(roles('핵 스쿼트', 5), 'work:5 work:5 work:5', '접혀서 스트레이트가 되어야 한다');
+  assert.equal(roles('핵 스쿼트', 10), 'top:10 backoff:5 backoff:5');
+  assert.equal(roles('덤벨 벤치 프레스', 2), 'work:2 work:2 work:2');
+  assert.equal(roles('덤벨 벤치 프레스', 4), 'top:4 backoff:2 backoff:2');
+  assert.equal(app.effectiveSetScheme('핵 스쿼트', 5), 'straight', '표기도 같이 접힌다 (표 = 세션)');
+});
+
+test('[리뷰] 어시스트 감량도 격자 위에 떨어지고, 보조 무게를 모르면 만들어내지 않는다', () => {
+  // 기록에 격자 밖 보조(32kg)가 남아 있어도 결과는 5kg 격자여야 실행 가능하다
+  const ladder = app.buildWeightLadder('어시스트 풀업', 32, [1, 0.9, 0.8]);
+  assert.equal(ladder[0.9] % 5, 0, `보조 ${ladder[0.9]}kg 이 격자 밖`);
+  assert.equal(ladder[0.8] % 5, 0);
+  assert.ok(ladder[0.9] > 32 && ladder[0.8] > ladder[0.9], '보조는 단마다 늘어난다');
+
+  // 보조를 모르면(null) 감량도 null — 탑은 '—' 인데 백오프만 5kg으로 뜨면 안 된다
+  assert.equal(app.reduceWeight(null, 0.9, '어시스트 풀업'), null);
+  const rows = app.buildSchemeSets('어시스트 풀업', null, 8, { low: 5, high: 8 }, 'top_backoff', { sets: 3, warmup: false });
+  assert.ok(rows.every((s) => s.weight === null), '전 세트가 무게 미정이어야 한다: ' + JSON.stringify(rows.map((s) => s.weight)));
+});
+
+test('[리뷰] 처방 표 반복 열이 클래스 범위 밖 목표를 감추지 않는다', () => {
+  heavySeed();
+  const repsCol = (sc) => {
+    app.setSetSchemeOverride('핵 스쿼트', sc);
+    const plan = app.getRoutinePreviewPlan({ name: '핵 스쿼트', reps: '5-8', sets: 3 });
+    return { shown: app.buildPrescriptionValues({ name: '핵 스쿼트' }, plan).reps, plan: plan };
+  };
+  // 클래스 범위(5-8) 안에서 끝나는 스킴은 기존 표기 그대로
+  assert.equal(repsCol('straight').shown, '5-8');
+  assert.equal(repsCol('top_backoff').shown, '5-8');
+  // 피라미드(+4)·백다운(12~15)은 5-8 이라 써 놓으면 실제 세트를 하나도 안 담는다
+  assert.equal(repsCol('pyramid').shown, '8-12');
+  assert.equal(repsCol('rpt').shown, '8-12');
+  assert.equal(repsCol('top_backdown').shown, '8-15');
+
+  // 적힌 폭이 실제 워킹세트를 전부 담는지 (표 = 세션)
+  ['pyramid', 'rpt', 'top_backdown'].forEach((sc) => {
+    const r = repsCol(sc);
+    const bounds = r.shown.split('-').map(Number);
+    r.plan.sets.filter((s) => !s.isWarmup && !app.isSetExtension(s)).forEach((s) => {
+      const hi = s.amrap && s.repsMax ? s.repsMax : s.reps;
+      assert.ok(s.reps >= bounds[0] && hi <= bounds[1], `${sc}: ${s.reps}회 세트가 표기 ${r.shown} 밖`);
+    });
+  });
+  resetOverrides();
+});
+
+test('[리뷰] 휴식 자가조절이 백다운의 자기 목표(12회)를 기준으로 본다', () => {
+  const ex = { name: '핵 스쿼트', targetReps: '5-8' };
+  // 클래스 하한(5회)으로 보면 백다운 4회도 "달성"으로 잡혀 +30초가 안 붙는다
+  assert.equal(app.resolveRestSec(ex, { reps: 4, rest: 120, role: 'backdown', repsMin: 12 }), 150);
+  assert.equal(app.resolveRestSec(ex, { reps: 13, rest: 120, role: 'backdown', repsMin: 12 }), 120);
+  // 드롭·마이오렙의 짧은 휴식은 그 스킴의 정의라 여전히 자가조절 대상이 아니다
+  assert.equal(app.resolveRestSec({ name: '머신 레그 익스텐션', targetReps: '12-15' }, { reps: 5, rest: 10, role: 'drop' }), 10);
+  // repsMin 이 없는 옛 세션은 클래스 하한으로 되돌아간다 (하위호환)
+  assert.equal(app.resolveRestSec(ex, { reps: 4, role: 'backoff' }), 210);
+});
+
+test('[리뷰] 자가조절은 클래스 상한이 아니라 **그 세트에 처방된 목표**와 비교한다', () => {
+  resetOverrides();
+  const mk = (topReps) => ({
+    name: '핵 스쿼트', scheme: 'top_backoff', targetReps: '5-8',
+    sets: [
+      { role: 'top', weight: 100, reps: topReps, repsTarget: 5, completed: true, isWarmup: false },
+      { role: 'backoff', weight: 90, reps: 5, completed: false, isWarmup: false },
+      { role: 'backoff', weight: 90, reps: 5, completed: false, isWarmup: false }
+    ]
+  });
+  // 증량 직후 탑세트 처방은 범위 하단(5회)이다. 상한(8)과 비교하면 목표를 채운 날에도 감량이 발동한다.
+  const hit = mk(5);
+  assert.equal(app.applyTopSetAutoDeload(hit), 0, '처방 5회를 채웠는데 감량이 발동했다');
+  assert.equal(hit.sets.map((s) => s.weight).join(','), '100,90,90');
+
+  const missed = mk(3);
+  assert.equal(app.applyTopSetAutoDeload(missed), 2);
+  assert.equal(missed.sets.map((s) => s.weight).join(','), '100,85,85');
+
+  // repsTarget 이 없는 옛 세션은 클래스 상한으로 되돌아간다 (하위호환)
+  const old = mk(8);
+  delete old.sets[0].repsTarget;
+  assert.equal(app.applyTopSetAutoDeload(old), 0);
+});
+
+test('[리뷰] 자가조절은 양방향 — 반복 수를 고쳐 저장하면 감량도 되돌아온다', () => {
+  resetOverrides();
+  const ex = {
+    name: '핵 스쿼트', scheme: 'top_backoff', targetReps: '5-8',
+    sets: [
+      { role: 'top', weight: 100, reps: 3, repsTarget: 5, completed: true, isWarmup: false },
+      { role: 'backoff', weight: 90, reps: 5, completed: false, isWarmup: false },
+      { role: 'backoff', weight: 90, reps: 5, completed: false, isWarmup: false }
+    ]
+  };
+  assert.equal(app.applyTopSetAutoDeload(ex), 2);
+  assert.equal(ex.sets[1].weight, 85);
+  assert.equal(ex.sets[1].autoDeloaded, true);
+
+  ex.sets[0].reps = 5;                                   // 잘못 입력한 걸 고쳐 저장
+  assert.equal(app.applyTopSetAutoDeload(ex), 2, '되돌릴 길이 없으면 남은 세트 내내 가볍게 든다');
+  assert.equal(ex.sets.map((s) => s.weight).join(','), '100,90,90');
+  assert.equal(ex.sets[1].autoDeloaded, undefined);
+
+  // 사용자가 직접 고친 무게는 자동 조정이 건드리지 않는다
+  const manual = {
+    name: '핵 스쿼트', scheme: 'top_backoff', targetReps: '5-8',
+    sets: [
+      { role: 'top', weight: 100, reps: 3, repsTarget: 5, completed: true, isWarmup: false },
+      { role: 'backoff', weight: 80, reps: 5, completed: false, isWarmup: false }
+    ]
+  };
+  app.applyTopSetAutoDeload(manual);
+  assert.equal(manual.sets[1].weight, 80, '손으로 정한 무게를 덮어쓰면 안 된다');
+});
+
+test('[리뷰] 덤벨 격자는 종목표에 정확히 등록된 이름에서만 온다 (퍼지 매칭 금지)', () => {
+  // getExerciseEquipment 는 미등록 이름을 부분 문자열로 추정한다 — 그 경로를 타면
+  // '케이블 풀오버'가 덤벨 종목 '풀오버'에 걸려 5kg 스택 머신이 2kg 격자가 된다.
+  assert.equal(app.getWeightIncrement('풀오버'), 2, '등록된 덤벨 종목');
+  assert.equal(app.getWeightIncrement('케이블 풀오버'), 5, '케이블은 5kg 격자여야 한다');
+  assert.equal(app.getWeightIncrement('머신 풀오버'), 5);
+  assert.equal(app.getWeightIncrement('케이블 해머 컬'), 5);
+  assert.equal(app.getWeightIncrement('덤벨 해머 컬'), 2, "이름에 '덤벨'이 있으면 그대로 덤벨");
+  assert.equal(app.getWeightIncrement('랫 풀 다운'), 5);
+});
+
+test('[리뷰] 고중량 복합은 어떤 세트법이든 워밍업 램프를 잃지 않는다', () => {
+  resetOverrides();
+  const range = { low: 5, high: 8 };
+  [20, 30, 40, 60, 100].forEach((w) => {
+    ['top_backoff', 'top_backdown', 'pyramid', 'rpt'].forEach((sc) => {
+      const rows = app.buildSchemeSets('핵 스쿼트', w, 8, range, sc, { sets: 3, warmup: true });
+      const warm = rows.filter((s) => s.isWarmup);
+      const work = rows.filter((s) => !s.isWarmup);
+      assert.ok(warm.length >= 1, `${sc} ${w}kg: 워밍업이 통째로 사라졌다`);
+      warm.forEach((s) => assert.ok(s.weight < work[0].weight,
+        `${sc} ${w}kg: 워밍업 ${s.weight} 이 첫 워킹세트 ${work[0].weight} 보다 안 가볍다`));
+    });
+  });
+});
+
+test('[리뷰] 사다리 단이 격자에 다 안 들어가면 그 스킴을 접는다 (10,5,5 피라미드 방지)', () => {
+  resetOverrides();
+  const range = { low: 5, high: 8 };
+  // 피라미드는 85%·92.5% 두 단이 필요하다 → 5kg 격자에서 최소 15kg
+  assert.equal(app.schemeReductionRungs('pyramid'), 2);
+  assert.equal(app.schemeReductionRungs('top_backoff'), 1, '백오프는 한 단만 필요');
+  const w = (weight, sc) => app.buildSchemeSets('핵 스쿼트', weight, 8, range, sc, { sets: 3, warmup: false })
+    .map((s) => s.weight).join(',');
+  assert.equal(w(10, 'pyramid'), '10,10,10', '단이 안 들어가면 스트레이트로 접힌다');
+  assert.equal(w(15, 'pyramid'), '5,10,15');
+  assert.equal(w(10, 'top_backoff'), '10,5,5', '백오프는 한 단이면 되니 10kg에서도 성립');
+});
+
+test('[리뷰] "세트 추가"가 연장 세트의 짧은 휴식을 물려받지 않는다', () => {
+  resetOverrides();
+  seedLog([{ date: daysAgo(3), exercises: [{ name: '머신 레그 익스텐션', setsDetail: [set(40, 13), set(40, 13)] }] }]);
+  ['drop', 'myo_reps'].forEach((sc) => {
+    app.setSetSchemeOverride('머신 레그 익스텐션', sc);
+    const plan = app.getSessionSetPlan('머신 레그 익스텐션', null, '12-15', { sets: 3, warmup: false });
+    app.state.activeSession = {
+      currentExerciseIdx: 0,
+      exercises: [{ name: '머신 레그 익스텐션', targetReps: '12-15', scheme: plan.scheme, sets: plan.sets }]
+    };
+    app.addSetToExercise(0);
+    const added = app.state.activeSession.exercises[0].sets.filter((s) => !s.completed && s.role === 'work').pop();
+    assert.equal(added.rest, 120, `${sc}: 추가한 본 세트가 연장 간격(10~20초)을 물려받았다`);
+  });
+  app.state.activeSession = null;
+  resetOverrides();
+});
+
+test('[리뷰] "세트 추가"가 스킴의 repsDelta 를 반영한다 (역피라미드 +2)', () => {
+  heavySeed();
+  app.setSetSchemeOverride('핵 스쿼트', 'rpt');
+  const plan = app.getSessionSetPlan('핵 스쿼트', null, '5-8', { sets: 3, warmup: false });
+  app.state.activeSession = {
+    currentExerciseIdx: 0,
+    exercises: [{ name: '핵 스쿼트', targetReps: '5-8', scheme: plan.scheme, sets: [plan.sets[0]] }]
+  };
+  app.state.activeSession.exercises[0].sets[0].reps = 8;   // 탑세트 실제 수행
+  app.addSetToExercise(0);
+  const added = app.state.activeSession.exercises[0].sets[1];
+  assert.equal(added.weight, 55, '역피라미드 2세트는 탑의 90%');
+  assert.equal(added.reps, 10, '무게가 내려가면 횟수는 올라간다 (+2) — 그게 RPT의 전부다');
+  app.state.activeSession = null;
+  resetOverrides();
+});
+
+test('[리뷰] 처방 표 한 줄이 전부 같은 기준 세트를 가리킨다', () => {
+  heavySeed();
+  app.SET_SCHEME_ORDER.forEach((sc) => {
+    app.setSetSchemeOverride('핵 스쿼트', sc);
+    const plan = app.getRoutinePreviewPlan({ name: '핵 스쿼트', reps: '5-8', sets: 3 });
+    const p = app.buildPrescriptionValues({ name: '핵 스쿼트' }, plan);
+    const working = plan.sets.filter((s) => !s.isWarmup);
+    const anchor = working.reduce((a, s) => (s.weight > a.weight ? s : a), working[0]);
+    assert.equal(p.weight, anchor.weight, `${sc}: '무게' 열이 기준 세트와 다르다`);
+    assert.equal(p.rir, anchor.rir, `${sc}: 'RIR' 열이 다른 세트를 가리킨다`);
+    assert.equal(p.rest, app.restSecToMin(anchor.rest), `${sc}: '휴식' 열이 다른 세트를 가리킨다`);
+  });
+  resetOverrides();
+});
+
+test('[리뷰] 마지막 백오프의 RIR 0~1 처방이 화면에 드러난다', () => {
+  heavySeed();
+  app.setSetSchemeOverride('핵 스쿼트', 'top_backoff');
+  const plan = app.getRoutinePreviewPlan({ name: '핵 스쿼트', reps: '5-8', sets: 3 });
+  const line = app.describeSetStructure(plan.sets, '핵 스쿼트');
+  assert.ok(line.indexOf('0-1') >= 0, `마지막 백오프 처방이 어디에도 안 뜬다: "${line}"`);
+  assert.equal(line, '탑세트 1 + 백오프 2 (90% · RIR 2-3→0-1)');
+  resetOverrides();
+});
+
 // ═══ 4. 휴식시간 (§3-B 권장표 · §3-C 자가조절) ═══
 
 test('휴식 기본값: 180 / 150 / 120 / 90 / 60초 (클래스별 새 권장치)', () => {

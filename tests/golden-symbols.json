@@ -1,5 +1,5 @@
 {
-  "functionCount": 445,
+  "functionCount": 448,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -78,6 +78,7 @@
     "calculateRollingMax1RM",
     "callCoachAPI",
     "callSessionCoachAPI",
+    "canReduceWeight",
     "canSupersetExercise",
     "cancelDeleteConfirm",
     "cancelMemoryDelete",
@@ -386,6 +387,8 @@
     "saveRestTimer",
     "saveWizard",
     "schemeNeedsWeight",
+    "schemeReductionRungs",
+    "schemeRestForRole",
     "scrollChatToBottom",
     "scrollCoachToBottom",
     "scrollRoutineChatToBottom",

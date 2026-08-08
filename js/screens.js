@@ -1964,13 +1964,17 @@ window.addSetToExercise = function(exerciseIdx) {
   // 탑+백다운이면 백다운(82.5% · 12~15회). 역할·무게·반복·휴식을 스킴 표에서 그대로 가져온다.
   var addedRole = (lastSet && lastSet.role) || 'work';
   var addedWeight = lastSet ? lastSet.weight : null;
-  var addedReps = lastSet ? lastSet.reps : clampRepsToClass(exercise.name, exercise.targetReps).low;
-  // 같은 역할을 이어 붙이는 경우엔 휴식·배율·한계반복 표기까지 그대로 물려받는다 —
-  // 백다운을 하나 더 붙였는데 "12~15회"가 사라지고 휴식만 180초로 튀면 같은 세트가 아니게 된다.
-  var addedRest = (lastSet && lastSet.rest > 0) ? lastSet.rest : getExerciseRestSec(exercise.name);
+  // 목표 반복은 **처방값**(repsTarget)에서 이어받는다. lastSet.reps 는 완료되면 실제 수행 횟수로
+  // 덮어써지므로, 그걸 쓰면 "8회 하려다 5회 한 날"의 다음 세트 목표가 5회로 주저앉는다.
+  var addedReps = lastSet ? (lastSet.repsTarget || lastSet.reps)
+                          : clampRepsToClass(exercise.name, exercise.targetReps).low;
+  // 휴식은 **스킴이 정한 값**을 다시 읽는다. buildSchemeSets 는 드롭·마이오렙을 붙일 때
+  // 마지막 워킹세트의 휴식을 10~20초 연장 간격으로 덮어쓰므로, 그 값을 물려받으면
+  // 새로 추가한 본 세트의 휴식 타이머가 10초로 시작한다.
+  var addedRest = schemeRestForRole(sessionSchemeOf(exercise), addedRole, exercise.name);
   var addedPct = lastSet ? lastSet.pct : undefined;
   var addedSet = (lastSet && lastSet.amrap && lastSet.repsMax)
-    ? { amrap: true, repsMax: lastSet.repsMax } : null;
+    ? { amrap: true, repsMax: lastSet.repsMax, repsMin: lastSet.repsMin } : null;
   if (lastSet && lastSet.role === 'top') {
     // 스킴이 탑 다음에 두는 단. 없으면(스트레이트·피라미드 등) 기존 동작대로 백오프로 이어 붙인다.
     var afterTop = nextStepAfterTop(sessionSchemeOf(exercise))
@@ -1978,18 +1982,26 @@ window.addSetToExercise = function(exerciseIdx) {
     addedRole = afterTop.role;
     addedPct = afterTop.pct;
     addedWeight = reduceWeight(lastSet.weight, afterTop.pct, exercise.name);
-    if (afterTop.rest) addedRest = afterTop.rest;
+    addedRest = afterTop.rest || getExerciseRestSec(exercise.name);
     if (Array.isArray(afterTop.repsAbs)) {
       addedReps = afterTop.repsAbs[0];
-      addedSet = { amrap: !!afterTop.amrap, repsMax: afterTop.repsAbs[1] };
+      addedSet = { amrap: !!afterTop.amrap, repsMin: afterTop.repsAbs[0], repsMax: afterTop.repsAbs[1] };
+    } else {
+      // 역피라미드처럼 단마다 반복이 늘어나는 스킴은 repsDelta 를 반영해야 그 스킴이 성립한다.
+      addedReps = Math.max(1, addedReps + (afterTop.repsDelta || 0));
+      addedSet = null;
     }
   }
   var row = {
-    weight: addedWeight, reps: addedReps, isWarmup: false, completed: false,
-    role: addedRole, rest: addedRest
+    weight: addedWeight, reps: addedReps, repsTarget: addedReps,
+    isWarmup: false, completed: false, role: addedRole, rest: addedRest
   };
   if (typeof addedPct === 'number') row.pct = addedPct;
-  if (addedSet) { row.amrap = addedSet.amrap; row.repsMax = addedSet.repsMax; }
+  if (addedSet) {
+    row.amrap = addedSet.amrap;
+    if (addedSet.repsMin) row.repsMin = addedSet.repsMin;
+    row.repsMax = addedSet.repsMax;
+  }
   exercise.sets.push(row);
   saveActiveSession();
   render();
@@ -3202,9 +3214,11 @@ function buildSetSchemeNoticeHtml(session, exercise) {
       ? '뒤 세트에서 반복이 1~2회 줄어드는 건 정상이에요. 보조를 늘리지 말고 그대로 하세요.'
       : '뒤 세트에서 반복이 1~2회 줄어드는 건 정상이에요. 무게를 낮추지 말고 그대로 하세요.';
   } else if (scheme === 'top_backoff') {
-    notice = rev
-      ? '탑세트 1개를 <b>가장 낮은 보조</b>로, 백오프 2세트는 보조를 한 칸 올려 <b>같은 횟수</b>를 노려요 (볼륨 보존).'
-      : '탑세트 1개를 가장 무겁게, 백오프 2세트는 90% 무게로 <b>같은 횟수</b>를 노려요 (볼륨 보존).';
+    // 마지막 백오프만 RIR 0~1 이라는 처방(v2 §2-E②)은 세트 목록에 안 나오므로 여기서 말해 준다.
+    notice = (rev
+      ? '탑세트 1개를 <b>가장 낮은 보조</b>로, 백오프는 보조를 한 칸 올려 <b>같은 횟수</b>를 노려요.'
+      : '탑세트 1개를 가장 무겁게, 백오프는 90% 무게로 <b>같은 횟수</b>를 노려요.') +
+      ' <b>마지막 백오프</b>만 더 못 할 때까지 밀어요.';
   } else if (scheme === 'top_backdown') {
     notice = rev
       ? '탑세트 뒤 백다운은 보조를 크게 올려요. 대신 <b>더 못 할 때까지</b> 밀어요.'
