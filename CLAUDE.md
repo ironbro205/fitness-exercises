@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 헬스앱 ("Health App") — a Korean-language, mobile-first **AI fitness coach PWA**. It tracks workouts, nutrition, and body metrics, and uses the Anthropic API for food analysis, routine generation, a coach chat, weekly reviews, and plateau detection.
 
-The app is **plain static files, no build step** — a thin `index.html` shell plus `css/styles.css` and five `js/*.js` files. No framework, no package manager, no backend in this repo. Logic is guarded by a small zero-dependency test harness (see Running & testing).
+The app is **plain static files, no build step** — a thin `index.html` shell plus `css/styles.css` and six `js/*.js` files. No framework, no package manager, no backend in this repo. Logic is guarded by a small zero-dependency test harness (see Running & testing).
 
 ## 개발 원칙 — 근성장(근비대) 근거 기반 (최우선)
 
@@ -19,9 +19,9 @@ The app is **plain static files, no build step** — a thin `index.html` shell p
 
 ## Repository layout
 
-- `index.html` — thin HTML shell: `<head>`, a `<link>` to the stylesheet, `<div id="app">`, and 5 `<script src>` tags loaded in order.
+- `index.html` — thin HTML shell: `<head>`, a `<link>` to the stylesheet, `<div id="app">`, and 6 `<script src>` tags loaded in order.
 - `css/styles.css` — all styles.
-- `js/*.js` — app logic as plain (non-module) scripts sharing one global scope, loaded `data → core → domain → ai → screens` (see **Code map**). ES5-style `var`/function declarations; each file starts with `'use strict'`.
+- `js/*.js` — app logic as plain (non-module) scripts sharing one global scope, loaded `data → core → domain → bodymap → ai → screens` (see **Code map**). ES5-style `var`/function declarations; each file starts with `'use strict'`.
 - `service-worker.js` — offline caching (Network-First).
 - `manifest.json` — PWA manifest (standalone, portrait, Korean); `icon-*.png` — PWA icons.
 - `tests/` — zero-dependency characterization tests (see Running & testing).
@@ -110,6 +110,8 @@ js/core.js      → KEYS, storage, state, save*/clearWizard, generateDemoData, K
                   helpers (icon/showToast/renderMarkdown), init()
 js/domain.js    → pure logic: food parsing, 1RM / progressive overload, exercise GIF lookup,
                   volume & balance analysis
+js/bodymap.js   → 자극 근육 인체도: 앞/뒤 전신 SVG(자체 제작 원본) + 근육키→영역 매핑,
+                  buildMuscleMapSvg / buildMuscleMapBlock (순수 함수) — docs/muscle-map-assets.md
 js/ai.js        → buildUserContext, prompts, all Anthropic API calls + load…IfNeeded gates
 js/screens.js   → renderX() builders + render() + window.* onclick handlers +
                   workout-session logic + swipe/touch init + the init() call (load tail)

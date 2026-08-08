@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const JS_ORDER = ['data', 'core', 'domain', 'ai', 'screens'];
+const JS_ORDER = ['data', 'core', 'domain', 'bodymap', 'ai', 'screens'];
 
 // 앱 JS 소스를 가져온다. 분리됐으면 js/*.js, 아니면 index.html 인라인 스크립트.
 export function readAppSource() {

@@ -595,6 +595,9 @@ var state = {
   routineChatInput: '',
   routineChatThinking: false,
   routinePreviewExpanded: false,
+  routineExMapIdx: null,      // 루틴 미리보기에서 자극 근육 인체도를 펼친 종목 index (null=없음)
+  // 자극 근육 인체도 (js/bodymap.js)
+  muscleMapZoom: null,        // 확대해서 보는 중인 종목명 (null=닫힘)
   // 기록 항목 상세 시트 (삭제용)
   itemDetailSheet: null,
   itemDeleteConfirming: false,  // 2단계 삭제 확인

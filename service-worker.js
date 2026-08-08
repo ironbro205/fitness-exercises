@@ -10,6 +10,7 @@ const CORE_ASSETS = [
   '/js/data.js',
   '/js/core.js',
   '/js/domain.js',
+  '/js/bodymap.js',
   '/js/ai.js',
   '/js/screens.js',
   '/manifest.json',

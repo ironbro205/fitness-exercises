@@ -39,7 +39,7 @@ test("strict 모드 보존 — 각 스크립트가 'use strict'로 시작", () =
     return false;
   };
   if (readAppSource().mode === 'split') {
-    for (const f of ['data', 'core', 'domain', 'ai', 'screens']) {
+    for (const f of ['data', 'core', 'domain', 'bodymap', 'ai', 'screens']) {
       const src = fs.readFileSync(path.join(DIR, '..', 'js', `${f}.js`), 'utf8');
       assert.ok(firstStmtIsStrict(src), `js/${f}.js 는 'use strict'로 시작해야 함`);
     }
