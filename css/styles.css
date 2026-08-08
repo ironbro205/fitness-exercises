@@ -3085,10 +3085,27 @@ button {
   font-size: 15px;
 }
 
-.mobility-cue {
+/* 설명 세 줄 — 준비 / 동작 / 기준. 라벨을 왼쪽에 고정해 어디를 읽는지 바로 보이게 한다. */
+.mobility-step {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 9px;
+}
+.mobility-step:first-child { margin-top: 0; }
+.mobility-step-label {
+  flex: 0 0 auto;
+  width: 26px;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+.mobility-step-text {
+  flex: 1;
   font-family: var(--font);
   font-size: 14px;
-  line-height: 1.7;
+  line-height: 1.65;
   color: #fff;
   word-break: keep-all;
 }
@@ -3111,6 +3128,17 @@ button {
   word-break: keep-all;
 }
 
+/* 진행 버튼 줄 — 설명이 길어 접힘선 아래로 내려가도 화면 아래에 붙어 항상 누를 수 있게 한다.
+   position:sticky 라 화면에 다 들어오는 경우엔 아무 일도 일어나지 않는다. */
+.mobility-actions {
+  position: sticky;
+  bottom: 8px;
+  z-index: 5;
+  margin-top: 14px;
+  padding: 6px 0;
+  background: var(--bg-0);
+  border-radius: 20px;
+}
 .mobility-btn { flex: 1; text-align: center; padding: 15px 0; }
 .mobility-btn-primary { border-color: rgba(var(--accent-rgb), 0.45); }
 

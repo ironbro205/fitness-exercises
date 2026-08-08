@@ -2413,7 +2413,11 @@ function expandMobilitySegments(keys) {
         // time: 실제로 세는 초 / reps: 총시간 추정에만 쓰는 참고값(타이머 아님)
         sec: isTime ? (d.sec || 30) : Math.round((d.reps || 10) * (d.secPerRep || 3)),
         reps: isTime ? null : (d.reps || 10),
+        // 설명은 준비(prep) → 동작(cue) → 기준(std) 세 줄로 나눠 화면에 그대로 얹는다.
+        // 처음 보는 동작을 글만 읽고 따라하려면 "어디에 어떻게 자리 잡는지"가 먼저 있어야 한다.
+        prep: d.prep || '',
         cue: d.cue || '',
+        std: d.std || '',
         why: d.why || '',
         warn: d.warn || '',
         gear: d.gear || 'none',

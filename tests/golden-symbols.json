@@ -1,5 +1,5 @@
 {
-  "functionCount": 435,
+  "functionCount": 436,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -283,6 +283,7 @@
     "mobilitySegsOf",
     "mobilitySkipAll",
     "mobilitySkipStep",
+    "mobilityStepLine",
     "mobilityStopRuntime",
     "mobilitySubstituteUnsafe",
     "mobilityTick",

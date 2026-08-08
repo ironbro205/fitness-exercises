@@ -47,6 +47,48 @@ test('모든 드릴이 필수 필드(kr·mode·cue·why·discSafe)를 갖는다'
   }
 });
 
+// 설명은 "준비(어디에 어떻게) → 동작(뭘 어떻게) → 기준(얼마나·어디까지)" 세 조각이 다 있어야 한다.
+// 이 동작을 처음 보는 사람이 글만 읽고 따라할 수 있어야 하기 때문이다.
+// (discSafe:false 는 화면에 안 나오는 배제 동작이라 문서용 cue 한 줄만 둔다.)
+test('화면에 나오는 드릴은 준비·동작·기준 세 줄을 다 갖는다', () => {
+  for (const [key, d] of Object.entries(DRILLS)) {
+    if (d.discSafe === false) continue;
+    assert.ok(d.prep && d.prep.length > 0, `${key}.prep 이 비어 있다 — 준비 자세가 없으면 따라할 수 없다`);
+    assert.ok(d.cue && d.cue.length > 0, `${key}.cue`);
+    assert.ok(d.std && d.std.length > 0, `${key}.std 가 비어 있다 — 얼마나·어디까지가 없다`);
+  }
+});
+
+test('expandMobilitySegments — 준비·기준이 구간까지 실려 화면에 그려진다', () => {
+  const [seg] = app.expandMobilitySegments(['ankle_wall_knee']);
+  assert.equal(seg.prep, DRILLS.ankle_wall_knee.prep);
+  assert.equal(seg.std, DRILLS.ankle_wall_knee.std);
+  const src = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
+  for (const label of ['준비', '동작', '기준']) {
+    assert.ok(src.includes(`mobilityStepLine('${label}'`), `${label} 줄이 화면에서 빠졌다`);
+  }
+});
+
+// 디자인 규칙(문구·크기): 해요체 통일 · 한 문장 40자 이내 · 느낌표 금지.
+// 동작 이름은 28px 큰 글씨로 나오고 좌우 동작은 뒤에 ' · 왼쪽'이 붙어서 길면 세 줄로 깨진다.
+test('디자인 규칙 — 드릴 이름 18자 이내, 설명은 해요체·한 문장 40자 이내', () => {
+  for (const [key, d] of Object.entries(DRILLS)) {
+    assert.ok([...d.kr].length <= 18, `${key}.kr 이 18자를 넘는다: ${d.kr}`);
+    if (d.discSafe === false) continue;
+    for (const field of ['prep', 'cue', 'std']) {
+      const text = d[field];
+      assert.ok([...text].length <= 75, `${key}.${field} 가 75자를 넘는다`);
+      assert.ok(!/[!]/.test(text), `${key}.${field} 에 느낌표가 있다`);
+      assert.ok(!/(다\.|니다\.|한다$|합니다|됩니다)/.test(text),
+        `${key}.${field} 가 해요체가 아니다: ${text}`);
+      for (const sentence of text.split(/(?<=[.?])\s+/)) {
+        assert.ok([...sentence].length <= 40,
+          `${key}.${field} 의 한 문장이 40자를 넘는다: ${sentence}`);
+      }
+    }
+  }
+});
+
 // §4-A: 요추 굴곡 동작은 "왜 없는지"를 남기려고 사전에만 두고, 목록에는 절대 넣지 않는다.
 test('요추 굴곡 동작(discSafe:false)은 어떤 기본 목록에도 없다', () => {
   const unsafeInLists = ALL_LIST_KEYS.filter((k) => DRILLS[k] && DRILLS[k].discSafe === false);
@@ -197,11 +239,11 @@ test('expandMobilitySegments — 사전에 없는 키는 건너뛴다', () => {
 
 test('mobilitySegmentLabel / Amount — 좌우와 분량 표기', () => {
   const [l, r] = app.expandMobilitySegments(['supine_hamstring_strap']);
-  assert.equal(app.mobilitySegmentLabel(l), '누워서 스트랩 햄스트링 · 왼쪽');
-  assert.equal(app.mobilitySegmentLabel(r), '누워서 스트랩 햄스트링 · 오른쪽');
+  assert.equal(app.mobilitySegmentLabel(l), '허벅지 뒤 — 누워서 다리 올리기 · 왼쪽');
+  assert.equal(app.mobilitySegmentLabel(r), '허벅지 뒤 — 누워서 다리 올리기 · 오른쪽');
   assert.equal(app.mobilitySegmentAmount(l), '30초');
   const [squat] = app.expandMobilitySegments(['bw_squat']);
-  assert.equal(app.mobilitySegmentLabel(squat), '맨몸 스쿼트');
+  assert.equal(app.mobilitySegmentLabel(squat), '하체 풀기 — 맨몸 스쿼트');
   assert.equal(app.mobilitySegmentAmount(squat), '12회');
 });
 
@@ -222,7 +264,7 @@ test('표준 웜업은 5~9분, 스트레칭은 4~6분 안에 들어온다', () =
 test('드릴 설명(cue/why)이 근비대·근육통·부상예방 효과를 약속하지 않는다', () => {
   const banned = ['근육이 커', '근성장에 도움', '근비대에 도움', '근육통이 줄', '내일 안 아프', '부상을 예방', '부상 예방에'];
   for (const [key, d] of Object.entries(DRILLS)) {
-    const text = `${d.cue} ${d.why} ${d.warn || ''}`;
+    const text = `${d.prep || ''} ${d.cue} ${d.std || ''} ${d.why} ${d.warn || ''}`;
     for (const phrase of banned) {
       assert.ok(!text.includes(phrase), `${key}: 금지 문구 "${phrase}"`);
     }
