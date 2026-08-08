@@ -1,5 +1,5 @@
 {
-  "functionCount": 276,
+  "functionCount": 277,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -222,7 +222,8 @@
     "resetCardioPlan",
     "resetOneRM",
     "restoreFromBackup",
-    "sanitizeBackupText",
+    "sanitizeIdentifier",
+    "sanitizeRestoredList",
     "sanitizeRestoredProfile",
     "sanitizeRestoredValue",
     "saveActiveCardio",
@@ -301,6 +302,7 @@
     "LIGHT_ISOLATION_PARTS",
     "MEMORY_CATEGORIES",
     "MEMORY_CATEGORY_META",
+    "NUMERIC_RECORD_FIELDS",
     "REHAB_NAME_KEYWORDS",
     "SESSIONS",
     "WEAK_PART_EXERCISE_MAP",

@@ -226,31 +226,53 @@ function parseBackupFile(input) {
   return { ok: true, backup: parsed, summary: summarizeBackup(parsed) };
 }
 
-// 남의 파일에서 온 글자를 화면에 그려도 안전하게 만든다.
-// 앱 화면은 문자열을 innerHTML 로 조립하므로(예: 프로필의 나이·키), 백업 파일에 태그를 심어두면
-// 복원 직후 그 태그가 실행될 수 있다. 위험한 기호를 "보기엔 같은" 전각/따옴표 문자로 바꿔
-// 뜻은 남기고 태그·속성 탈출만 막는다. (지우지 않으므로 사용자 글이 사라지지 않음)
-function sanitizeBackupText(s) {
-  return String(s)
-    .replace(/</g, '＜').replace(/>/g, '＞')
-    .replace(/"/g, '”').replace(/'/g, '’');
+// 식별자(id·date)만 앱이 만드는 형식으로 제한한다.
+// 이 값들은 화면의 onclick="openItemDetail('workout','<여기>')" 처럼 **속성 안**에 들어가는데,
+// 남의 파일이 따옴표나 HTML 엔티티(&#39; 등)를 심으면 코드로 해석될 수 있기 때문.
+// 앱이 만드는 id/날짜(d1, mem_demo1, 1749..., 2026-08-01)는 이 범위 안이라 정상 백업은 그대로 보존된다.
+// 사용자가 쓴 글(기억 노트 등)은 건드리지 않는다 — 글자는 화면에서 escapeHtml 로 막는다.
+function sanitizeIdentifier(v) {
+  if (typeof v === 'number' && isFinite(v)) return v;
+  return String(v).replace(/[^A-Za-z0-9_.:\-]/g, '').slice(0, 64);
 }
 
-// 복원 값 전체(객체·배열 안쪽까지)를 훑어 문자열을 안전하게 만든다.
+// 복원 값의 "구조"만 손본다 — 글자 내용은 그대로 둔다(정상 백업이 글자 하나 안 바뀌고 돌아오도록).
+// 프로토타입을 건드리는 위험한 키를 버리고, 비정상적으로 깊은 파일을 잘라낸다.
 function sanitizeRestoredValue(v, depth) {
   depth = depth || 0;
-  if (typeof v === 'string') return sanitizeBackupText(v);
-  if (typeof v !== 'object' || v === null) return v;          // 숫자·불리언·null 은 그대로
-  if (depth > 12) return Array.isArray(v) ? [] : {};          // 비정상적으로 깊은 파일 방어
+  if (typeof v !== 'object' || v === null) return v;           // 문자열·숫자·불리언·null 은 그대로
+  if (depth > 12) return Array.isArray(v) ? [] : {};           // 비정상적으로 깊은 파일 방어
   if (Array.isArray(v)) {
     return v.map(function(item) { return sanitizeRestoredValue(item, depth + 1); });
   }
   var out = {};
   Object.keys(v).forEach(function(k) {
     if (k === '__proto__' || k === 'constructor' || k === 'prototype') return;
-    out[sanitizeBackupText(k)] = sanitizeRestoredValue(v[k], depth + 1);
+    out[k] = sanitizeRestoredValue(v[k], depth + 1);
   });
   return out;
+}
+
+// 숫자로 계산에 쓰이는 칸 — 글자가 들어오면 화면이 통째로 멈춘다(예: weight.toFixed).
+var NUMERIC_RECORD_FIELDS = ['weight', 'reps', 'sets', 'duration', 'bodyFat', 'exerciseCount',
+                             'previousWeight', 'previousReps', 'totalDistKm', 'totalSec', 'rpe'];
+
+// 기록 목록(운동·체중·기억 노트…)의 모양을 맞춘다: id·날짜는 안전한 형식으로, 숫자칸은 숫자로.
+// 사용자가 쓴 글(text·메모 등)은 손대지 않는다 — 화면에서 escapeHtml 로 막는다.
+function sanitizeRestoredList(list) {
+  if (!Array.isArray(list)) return list;
+  return list.map(function(item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    ['id', 'date', 'startTime'].forEach(function(f) {
+      if (item[f] !== undefined && item[f] !== null) item[f] = sanitizeIdentifier(item[f]);
+    });
+    NUMERIC_RECORD_FIELDS.forEach(function(f) {
+      if (item[f] === undefined || item[f] === null || typeof item[f] === 'number') return;
+      var n = Number(item[f]);
+      item[f] = isFinite(n) ? n : null;
+    });
+    return item;
+  });
 }
 
 // 프로필은 숫자 칸(나이·키·몸무게…)이 화면에 그대로 찍히므로 숫자로 못 읽는 값은 기본값으로 되돌린다.
@@ -301,7 +323,14 @@ function restoreFromBackup(input) {
         localStorage.removeItem(key);                      // 백업에 없는 항목 → 지움(진짜 덮어쓰기)
         return;
       }
-      var safe = (key === KEYS.PROFILE) ? sanitizeRestoredProfile(val) : sanitizeRestoredValue(val, 0);
+      var safe = (key === KEYS.PROFILE) ? sanitizeRestoredProfile(val)
+                                        : sanitizeRestoredList(sanitizeRestoredValue(val, 0));
+      // 체중 기록은 숫자가 없으면 그래프·통계 계산이 멈추므로 그런 줄은 버린다.
+      if (key === KEYS.BODY_LOG && Array.isArray(safe)) {
+        safe = safe.filter(function(entry) {
+          return entry && typeof entry === 'object' && typeof entry.weight === 'number' && isFinite(entry.weight);
+        });
+      }
       if (!storage.set(key, safe)) failed = true;          // 저장 실패(용량 초과 등)
     });
   } catch (e) {

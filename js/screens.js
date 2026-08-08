@@ -112,7 +112,7 @@ function renderHome() {
             '<p class="text-xs font-mono accent">' + profile.currentWeek + '주차 / ' + CYCLE_LENGTH + '</p>' +
           '</div>' +
           '<div class="flex items-end justify-between mb-4">' +
-            '<h2 class="font-bebas text-4xl">' + profile.cyclePhase + (isDeloadWeek ? '' : ' ' + profile.currentWeek + '주차') + '</h2>' +
+            '<h2 class="font-bebas text-4xl">' + escapeHtml(profile.cyclePhase) + (isDeloadWeek ? '' : ' ' + escapeHtml(profile.currentWeek) + '주차') + '</h2>' +
             '<p class="text-xs text-stone-500 font-mono">' + phaseHint + '</p>' +
           '</div>' +
           '<div class="flex items-center gap-1\\.5">' + weekDots + '</div>' +
@@ -145,12 +145,12 @@ function renderHome() {
             thisWeekWorkouts.slice(-3).reverse().map(function(w) {
               var d = new Date(w.date);
               var dStr = ['일','월','화','수','목','금','토'][d.getDay()];
-              return '<div class="workout-history-row" onclick="openItemDetail(\'workout\', \'' + (w.startTime || w.id) + '\')">' +
+              return '<div class="workout-history-row" onclick="openItemDetail(\'workout\', \'' + escapeHtml(w.startTime || w.id) + '\')">' +
                 '<div class="flex items-center gap-3">' +
                   '<div class="workout-history-dot"></div>' +
                   '<div>' +
-                    '<p class="text-xs font-display font-bold">' + (w.sessionKr || w.sessionName) + '</p>' +
-                    '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + w.date.substring(5) + ' (' + dStr + ') · ' + (w.duration || 0) + '분 · ' + (w.sets || 0) + '세트</p>' +
+                    '<p class="text-xs font-display font-bold">' + escapeHtml(w.sessionKr || w.sessionName) + '</p>' +
+                    '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + escapeHtml(String(w.date).substring(5)) + ' (' + dStr + ') · ' + escapeHtml(w.duration || 0) + '분 · ' + escapeHtml(w.sets || 0) + '세트</p>' +
                   '</div>' +
                 '</div>' +
                 '<div style="color: var(--text-muted);">' + icon('chevron', 14) + '</div>' +
@@ -1229,8 +1229,8 @@ function renderItemDetailSheet() {
     var exCount = (data.exercises && data.exercises.length) || data.exerciseCount || 0;
     var totalSets = data.sets || 0;
     var dateObj = new Date(data.date);
-    var dateStr = data.date + ' (' + ['일','월','화','수','목','금','토'][dateObj.getDay()] + ')';
-    var sessionLabel = data.sessionKr || data.sessionName || data.sessionType || data.session || 'WORKOUT';
+    var dateStr = escapeHtml(data.date) + ' (' + ['일','월','화','수','목','금','토'][dateObj.getDay()] + ')';
+    var sessionLabel = escapeHtml(data.sessionKr || data.sessionName || data.sessionType || data.session || 'WORKOUT');
     
     var exercisesList = '';
     if (data.exercises && Array.isArray(data.exercises) && data.exercises.length > 0) {
@@ -1241,10 +1241,10 @@ function renderItemDetailSheet() {
           var completedSets = ex.sets.filter(function(s) { return s.completed && !s.isWarmup; });
           if (completedSets.length > 0) {
             var lastSet = completedSets[completedSets.length - 1];
-            setSummary = (lastSet.weight ? lastSet.weight + 'kg × ' : '') + lastSet.reps + ' · ' + completedSets.length + '세트';
+            setSummary = (lastSet.weight ? escapeHtml(lastSet.weight) + 'kg × ' : '') + escapeHtml(lastSet.reps) + ' · ' + completedSets.length + '세트';
           }
         } else if (ex.weight) {
-          setSummary = ex.weight + 'kg × ' + (ex.reps || '?') + ' · ' + (ex.completedSets || ex.setsCount || '?') + '세트';
+          setSummary = escapeHtml(ex.weight) + 'kg × ' + escapeHtml(ex.reps || '?') + ' · ' + escapeHtml(ex.completedSets || ex.setsCount || '?') + '세트';
         }
         return '<div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--bg-3); font-size: 12px;">' +
           '<span><strong>' + (idx + 1) + '.</strong> ' + escapeHtml(exName) + '</span>' +
@@ -1284,8 +1284,8 @@ function renderItemDetailSheet() {
     headerLabel = '체중 기록';
     bodyHtml = 
       '<div class="text-center mb-5">' +
-        '<p class="font-bebas text-5xl mb-1" style="color: var(--accent);">' + data.weight + '<span class="text-lg text-stone-400">kg</span></p>' +
-        '<p class="text-xs font-mono text-stone-400">' + data.date + '</p>' +
+        '<p class="font-bebas text-5xl mb-1" style="color: var(--accent);">' + escapeHtml(data.weight) + '<span class="text-lg text-stone-400">kg</span></p>' +
+        '<p class="text-xs font-mono text-stone-400">' + escapeHtml(data.date) + '</p>' +
       '</div>';
   }
   
@@ -3361,7 +3361,7 @@ function renderMore() {
         '<div class="flex items-center gap-3">' +
           '<div class="flex-1">' +
             '<p class="font-display font-bold text-base">사용자</p>' +
-            '<p class="text-[10px] font-mono text-stone-500 mt-1">' + profile.age + '세 · ' + profile.height + 'cm · ' + profile.weight + 'kg</p>' +
+            '<p class="text-[10px] font-mono text-stone-500 mt-1">' + escapeHtml(profile.age) + '세 · ' + escapeHtml(profile.height) + 'cm · ' + escapeHtml(profile.weight) + 'kg</p>' +
             '<div class="flex items-center gap-2 mt-1">' +
               '<span class="text-[10px] font-mono text-stone-500">주 ' + (profile.workoutFreq || 4) + '회 운동</span>' +
             '</div>' +
@@ -3445,7 +3445,7 @@ function renderMore() {
             '<div class="menu-icon-sm accent-bg-soft">' + icon('refresh', 18) + '</div>' +
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold">현재 사이클</p>' +
-              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">Cycle ' + profile.currentCycle + ' · ' + profile.cyclePhase + ' · ' + profile.currentWeek + '/' + CYCLE_LENGTH + '주</p>' +
+              '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">Cycle ' + escapeHtml(profile.currentCycle) + ' · ' + escapeHtml(profile.cyclePhase) + ' · ' + escapeHtml(profile.currentWeek) + '/' + CYCLE_LENGTH + '주</p>' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -3791,7 +3791,7 @@ function renderCoachMemory() {
             '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">정말 삭제할까요?</p></div>' +
           '<div style="display:flex; gap:6px;">' +
             '<button onclick="cancelMemoryDelete()" style="padding:6px 12px; border-radius:10px; background:transparent; border:1px solid var(--bg-4); color:var(--text-soft); font-size:12px;">취소</button>' +
-            '<button class="btn-danger" style="padding:6px 12px; width:auto;" onclick="executeDeleteMemory(\'' + m.id + '\')">삭제</button>' +
+            '<button class="btn-danger" style="padding:6px 12px; width:auto;" onclick="executeDeleteMemory(\'' + escapeHtml(m.id) + '\')">삭제</button>' +
           '</div>' +
         '</div>';
       }
@@ -3799,11 +3799,11 @@ function renderCoachMemory() {
         ? '<span class="accent">자동</span>'
         : '<span class="text-stone-500">직접</span>';
       return '<div class="menu-row">' +
-        '<div class="flex-1" onclick="editMemoryNote(\'' + m.id + '\')" style="cursor:pointer;">' +
+        '<div class="flex-1" onclick="editMemoryNote(\'' + escapeHtml(m.id) + '\')" style="cursor:pointer;">' +
           '<p class="text-sm">' + escapeHtml(m.text) + '</p>' +
           '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + srcBadge + ' · ' + (m.date || '') + ' · 탭하여 수정</p>' +
         '</div>' +
-        '<button class="session-header-btn" onclick="deleteMemoryNote(\'' + m.id + '\')">' + icon('trash', 16) + '</button>' +
+        '<button class="session-header-btn" onclick="deleteMemoryNote(\'' + escapeHtml(m.id) + '\')">' + icon('trash', 16) + '</button>' +
       '</div>';
     }).join('');
     groups += '<p class="section-label">' + meta.emoji + ' ' + meta.kr + '</p><div class="section-group" style="margin-bottom:16px;">' + rows + '</div>';
@@ -4565,12 +4565,12 @@ function renderStats() {
             workoutLog.slice(-10).reverse().map(function(w) {
               var d = new Date(w.date);
               var dStr = ['일','월','화','수','목','금','토'][d.getDay()];
-              return '<div class="workout-history-row" onclick="openItemDetail(\'workout\', \'' + (w.startTime || w.id) + '\')">' +
+              return '<div class="workout-history-row" onclick="openItemDetail(\'workout\', \'' + escapeHtml(w.startTime || w.id) + '\')">' +
                 '<div class="flex items-center gap-3">' +
                   '<div class="workout-history-dot"></div>' +
                   '<div>' +
-                    '<p class="text-xs font-display font-bold">' + (w.sessionKr || w.sessionName) + '</p>' +
-                    '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + w.date + ' (' + dStr + ') · ' + (w.duration || 0) + '분 · ' + (w.sets || 0) + '세트</p>' +
+                    '<p class="text-xs font-display font-bold">' + escapeHtml(w.sessionKr || w.sessionName) + '</p>' +
+                    '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + escapeHtml(w.date) + ' (' + dStr + ') · ' + escapeHtml(w.duration || 0) + '분 · ' + escapeHtml(w.sets || 0) + '세트</p>' +
                   '</div>' +
                 '</div>' +
                 '<div style="color: var(--text-muted);">' + icon('chevron', 14) + '</div>' +
@@ -4590,12 +4590,12 @@ function renderStats() {
           '<p class="text-[10px] font-mono text-stone-500 mb-3">클릭하여 상세 보기 / 삭제</p>' +
           '<div>' +
             state.data.bodyLog.slice(-10).reverse().map(function(b) {
-              return '<div class="workout-history-row" onclick="openItemDetail(\'body\', \'' + b.date + '\')">' +
+              return '<div class="workout-history-row" onclick="openItemDetail(\'body\', \'' + escapeHtml(b.date) + '\')">' +
                 '<div class="flex items-center gap-3">' +
                   '<div class="workout-history-dot" style="background: var(--text-muted); box-shadow: 0 0 6px rgba(var(--muted-rgb), 0.45);"></div>' +
                   '<div>' +
-                    '<p class="text-xs font-display font-bold">' + b.weight + 'kg</p>' +
-                    '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + b.date + '</p>' +
+                    '<p class="text-xs font-display font-bold">' + escapeHtml(b.weight) + 'kg</p>' +
+                    '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + escapeHtml(b.date) + '</p>' +
                   '</div>' +
                 '</div>' +
                 '<div style="color: var(--text-muted);">' + icon('chevron', 14) + '</div>' +
@@ -4612,7 +4612,7 @@ function renderStats() {
           '<p class="text-xs font-mono accent">' + profile.currentWeek + ' / ' + CYCLE_LENGTH + ' 주</p>' +
         '</div>' +
         '<div class="progress-bg mb-2"><div class="progress-fill" style="width: ' + Math.round((profile.currentWeek / CYCLE_LENGTH) * 100) + '%;"></div></div>' +
-        '<p class="text-[10px] font-mono text-stone-500">' + profile.cyclePhase + ' · ' + (profile.currentWeek >= CYCLE_LENGTH ? '디로드 주간' : (CYCLE_LENGTH - profile.currentWeek) + '주 후 디로드') + '</p>' +
+        '<p class="text-[10px] font-mono text-stone-500">' + escapeHtml(profile.cyclePhase) + ' · ' + (profile.currentWeek >= CYCLE_LENGTH ? '디로드 주간' : (CYCLE_LENGTH - profile.currentWeek) + '주 후 디로드') + '</p>' +
       '</div>' +
       
     '</div>';
