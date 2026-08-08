@@ -128,7 +128,7 @@ var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v50';
+var APP_VERSION = 'v51';
 // 백업에 담지 않는 키. 두 부류:
 // (1) 로컬 전용·민감 → 복원해도 그대로 보존 (API 키·코치 대화)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
@@ -738,6 +738,10 @@ function scrollChatToBottom() {
 }
 
 // HTML 이스케이프 (innerHTML/속성 값에 사용자·AI 텍스트 넣을 때)
+// ⚠ onclick="fn('...')" 처럼 **JS 문자열** 자리에는 이것만으로 부족하다 —
+//   &#39; 를 HTML 파서가 ' 로 되돌린 뒤 JS 가 읽으므로 문자열을 탈출할 수 있다.
+//   그런 자리에는 sanitizeIdentifier 로 좁혀진 식별자만 넣거나(현재 코드가 그렇다),
+//   자유 텍스트는 state 에 담고 핸들러에서 읽어라 (swapCurrentExercise 방식).
 function escapeHtml(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

@@ -1,5 +1,5 @@
 {
-  "functionCount": 419,
+  "functionCount": 420,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -227,6 +227,7 @@
     "goToExercise",
     "goToStep3",
     "goToWorkout",
+    "gradeColor",
     "groupVolumeBy",
     "hardestWeight",
     "hasRecentPain",
@@ -443,6 +444,7 @@
     "EXERCISE_CLASS_OVERRIDES",
     "EXERCISE_CLASS_RULES",
     "EXERCISE_SAFETY",
+    "GRADE_COLORS",
     "GYM_EQUIPMENT",
     "HEAVY_COMPOUND_KEYWORDS",
     "ICONS",

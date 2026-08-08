@@ -2044,3 +2044,116 @@ test('휴식 타이머 — 미등록 복합 종목도 부위 판정으로 150초
   const row = a.getExercisePart('머신 로우');
   assert.ok(row && row.compound === true, "'머신 로우'도 복합으로 잡혀야 한다");
 });
+
+
+// ═══════════════════════════════════════════════
+// XSS 회귀 — AI 응답 필드는 화면에 날것으로 들어가면 안 된다
+// ═══════════════════════════════════════════════
+// 배경: js/ai.js 는 모델 응답을 `parsed.X || 기본값` 으로만 받는다 — 타입 강제도 검증도 없다.
+// 그래서 reps/sets/weight/rir/totalSets/duration/grade/type 처럼 "숫자·라벨처럼 생긴" 칸에도
+// 모델이 임의 문자열을 넣을 수 있고, 그 값이 innerHTML 로 들어가면 그대로 실행된다.
+// (실제로 PR #53 리뷰에서 루틴 미리보기의 ex.reps/ex.sets 가 무이스케이프로 발견됐다.)
+//
+// 위쪽 '복원 — 모든 기록에 태그를 심어도…' 테스트와 **같은 방식**을 쓴다: 격리된 loadApp() 인스턴스에
+// 페이로드를 심고 인자 없이 부를 수 있는 화면을 전부 그려 본다. 공유 state 를 건드리지 않으므로
+// 어서션이 중간에 실패해도 뒤 테스트가 오염되지 않고, 새 화면이 생기면 저절로 검사 대상이 된다.
+// 그 테스트가 "저장된 기록"을 심는다면, 이 테스트는 "AI 응답과 사용자 입력"을 심는다.
+test('XSS 회귀 — AI 응답·사용자 입력을 심어도 어떤 화면에서도 살아있는 태그·속성이 안 나온다', () => {
+  const fresh = loadApp();
+  const P = '<img src=x onerror=eeek()>';
+  const ATTR = '" autofocus onfocus=eeek() x="';   // 속성 자리 탈출용 (P 에는 따옴표가 없다)
+
+  fresh.state.apiKey = 'sk-ant-' + P;
+  fresh.state.apiKeyModalOpen = true;
+  fresh.state.apiKeyInput = ATTR;
+
+  // 루틴 마법사 — selectedBodyPart 를 비워 partName 이 routine.bodyPart 로 폴백하는 경로까지 태운다
+  fresh.state.selectedBodyPart = null;
+  fresh.state.workoutWizardStep = 2;
+  fresh.state.routineLoading = false;
+  fresh.state.routinePreviewExpanded = true;
+  fresh.state.routineChatHistory = [{ role: 'assistant', content: P, changes: [{ type: 'add', exercise: P, detail: P }], approvalStatus: 'pending' }];
+  fresh.state.routineChatInput = ATTR;
+  fresh.state.generatedRoutine = {
+    bodyPart: P, headline: P, reason: P, caution: P, duration: P, totalSets: P, intensity: P,
+    exercises: [{ name: P, type: P, isMain: true, sets: P, reps: P, weight: P, rir: P, rest: null, note: P }],
+  };
+
+  // 주간 리뷰 · 정체기 · 오늘의 추천
+  fresh.state.weeklyReview = {
+    weekId: '2026-W32', monday: '2026-08-03', sunday: '2026-08-09',
+    grade: P, headline: P, wins: [P], improvements: [P], nextWeek: [P], coachNote: P,
+    stats: { workoutCount: 1, weightChange: 0, prCount: 0 },
+  };
+  fresh.state.plateauCheck = { detectedAt: fresh.getTodayStr(), signals: [P], severity: P, diagnosis: P, primary_cause: P, recommendations: [P], encouragement: P };
+  fresh.state.aiRecommendation = { session: P, title: P, reason: P, caution: P, suggestion: P, intensity: P };
+
+  // 진행 중 세션 — AI 루틴의 type·lastWeight 가 세션 종목으로 그대로 복사돼 들어온다
+  fresh.storage.set(fresh.KEYS.ONE_RM_DATA, { '랫 풀 다운': 70, '풀업': 50 });   // 지난 기록 줄(prevText)이 그려지는 조건
+  fresh.state.activeSession = {
+    sessionType: 'pull', sessionName: P, startTime: Date.now(), currentExerciseIdx: 0,
+    exercises: [{ name: '랫 풀 다운', type: P, targetReps: '8-12', lastWeight: P, lastReps: null, scheme: 'straight',
+                  sets: [{ weight: 40, reps: 10, isWarmup: false, completed: false, role: 'work' }] },
+                // 무게가 없는 종목은 lastReps 쪽 분기를 탄다 (prevText 의 다른 갈래)
+                { name: '풀업', type: P, targetReps: '5-8', lastWeight: null, lastReps: P, scheme: 'straight',
+                  sets: [{ weight: null, reps: 8, isWarmup: false, completed: false, role: 'work' }] }],
+  };
+
+  // 코치 기억 노트 — 사용자가 쓴 글이 그대로 화면에 남는 목록
+  fresh.state.coachMemory = [{ id: 'm_1', category: 'other', text: P, source: P, date: P }];
+
+  // 완료 화면 (세션과 배타적이지 않다 — render 우선순위상 completedSession 이 위)
+  fresh.state.completedSession = {
+    workoutId: 'w_1', sessionName: P, duration: 42, exerciseCount: 1, setCount: 3,
+    exercises: [{ name: P, type: P, sets: 3, setsCount: 3, setsDetail: [], weights: [40], reps: [10], maxWeight: 40, lastWeight: null, lastReps: null }],
+    newPRs: [], date: new Date('2026-08-08T00:00:00Z'),
+  };
+
+  // 프로필 편집 · 유산소 시간 입력 (둘 다 value="..." 속성 자리)
+  fresh.state.profileEditModalOpen = true;
+  fresh.state.profileEdit = { age: ATTR, height: 170, weight: 77.5, workoutFreq: 4 };
+  fresh.state.cardio = { mode: 'interval', phase: 'idle', inputMin: ATTR, loading: false, error: null, plan: null, run: null, reqId: 0 };
+
+  // 인자 없이 부를 수 있는 화면 함수를 전부 그려본다 (새 화면이 생겨도 자동으로 포함된다)
+  const screenFns = fresh.__APP_GLOBALS__
+    .filter((n) => /^render[A-Z]/.test(n) && typeof fresh[n] === 'function' && fresh[n].length === 0);
+  assert.ok(screenFns.length >= 8, '화면 함수를 찾지 못함: ' + screenFns.length);
+
+  const leakedTag = [];
+  const leakedAttr = [];
+  let rendered = 0;
+  for (const name of screenFns) {
+    let html;
+    try { html = fresh[name](); } catch (e) { continue; }   // 별도 상태가 필요한 화면은 건너뜀
+    if (typeof html !== 'string') continue;
+    rendered++;
+    if (html.includes('<img') || html.includes('<script')) leakedTag.push(name);
+    if (html.includes(ATTR)) leakedAttr.push(name);         // 따옴표가 살아 있으면 속성 탈출
+  }
+  // 지금 23개가 실제로 그려진다. 화면이 throw 하면 위에서 조용히 건너뛰므로,
+  // 하한을 넉넉히 잡아 두면 "예외 때문에 검사가 통째로 비는" 상황을 이 줄이 잡는다.
+  assert.ok(rendered >= 20, '실제로 그려진 화면이 너무 적다(예외로 건너뛴 화면 의심): ' + rendered + '/' + screenFns.length);
+  assert.deepEqual(leakedTag, [], '태그가 살아있는 화면: ' + leakedTag.join(', '));
+  assert.deepEqual(leakedAttr, [], '속성 탈출이 가능한 화면: ' + leakedAttr.join(', '));
+
+  // '지난 기록' 줄은 현재 종목 하나만 그린다 → 무게 있는 종목/맨몸 종목 두 갈래를 각각 태운다
+  for (const idx of [0, 1]) {
+    fresh.state.activeSession.currentExerciseIdx = idx;
+    assert.ok(!fresh.renderWorkoutSession().includes('<img'), '세션 화면 종목 ' + idx + ' 에서 태그가 살아있다');
+  }
+  fresh.state.activeSession.currentExerciseIdx = 0;
+
+  // 루틴 생성 실패 화면은 정상 루틴과 배타적인 분기라 따로 그려 본다 (에러 문구도 외부에서 온다)
+  const okRoutine = fresh.state.generatedRoutine;
+  fresh.state.generatedRoutine = { bodyPart: 'pull', error: P };
+  assert.ok(!fresh.renderWorkoutStep2().includes('<img'), '루틴 생성 실패 메시지가 날것으로 들어간다');
+  fresh.state.generatedRoutine = okRoutine;
+
+  // 마스킹된 API 키는 앞 10자만 남아 '<img' 가 통째로 안 나온다 → 태그 검사가 못 잡는 사각지대라 따로 본다
+  const moreHtml = fresh.renderMore();
+  assert.ok(!moreHtml.includes('sk-ant-<im'), '마스킹된 API 키가 날것으로 들어간다');
+
+  // 이스케이프가 "값을 지운" 게 아니라 "무해하게 바꾼" 것인지도 확인한다
+  const step2 = fresh.renderWorkoutStep2();
+  assert.ok(step2.includes('&lt;img src=x onerror=eeek()&gt;'), '이스케이프된 형태가 화면에 보이지 않는다');
+});

@@ -180,7 +180,7 @@ function renderHome() {
               '<p class="text-[10px] font-mono text-stone-500">' + state.weeklyReview.monday.substring(5) + ' ~ ' + state.weeklyReview.sunday.substring(5) + '</p>' +
             '</div>' +
             '<div class="flex items-baseline gap-3 mb-2">' +
-              '<p class="font-bebas text-5xl" style="color: ' + ({S:'var(--accent)',A:'var(--accent)',B:'#a78bfa',C:'#fbbf24',D:'#ef4444'}[state.weeklyReview.grade] || '#a78bfa') + ';">' + state.weeklyReview.grade + '</p>' +
+              '<p class="font-bebas text-5xl" style="color: ' + ({S:'var(--accent)',A:'var(--accent)',B:'#a78bfa',C:'#fbbf24',D:'#ef4444'}[state.weeklyReview.grade] || '#a78bfa') + ';">' + escapeHtml(state.weeklyReview.grade) + '</p>' +
               '<p class="text-sm font-display font-bold leading-tight">' + escapeHtml(state.weeklyReview.headline) + '</p>' +
             '</div>' +
             '<p class="text-[11px] font-mono accent">자세히 보기 →</p>' +
@@ -225,6 +225,14 @@ function renderHome() {
 // 상태 4가지: API 키 없음 / 로딩 / 오늘 실패 / 결과
 // CSS는 이미 있는 .ai-rec-card 계열을 그대로 쓴다 (css/styles.css:1978~2029)
 // ═══════════════════════════════════════════════
+// 주간 리뷰 등급 → 색상. AI가 준 grade 를 **객체 키로 그냥 조회하면** 프로토타입까지 훑는다
+// (grade='__proto__' 면 [object Object], 'constructor' 면 함수 소스가 색상 자리에 들어가 CSS가 깨진다).
+// 소유 속성일 때만 인정하고 아니면 기본색 — S/A/B/C/D 외에는 전부 기본색이라는 뜻이다.
+var GRADE_COLORS = { S: 'var(--accent)', A: 'var(--accent)', B: '#a78bfa', C: '#fbbf24', D: '#ef4444' };
+function gradeColor(grade) {
+  return Object.prototype.hasOwnProperty.call(GRADE_COLORS, grade) ? GRADE_COLORS[grade] : '#a78bfa';
+}
+
 function renderAIRecommendationCard() {
   // API 키 없음 — 키 모달은 더보기 화면에서만 렌더되므로 탭 이동으로 유도
   if (!state.apiKey) {
@@ -764,7 +772,7 @@ function renderWorkoutStep3() {
   var previewExHtml = '';
   if (state.routinePreviewExpanded) {
     routine.exercises.forEach(function(ex, idx) {
-      var weight = ex.weight ? (isReverseProgression(ex.name) ? '보조 ' : '') + ex.weight + 'kg × ' : '';
+      var weight = ex.weight ? (isReverseProgression(ex.name) ? '보조 ' : '') + escapeHtml(ex.weight) + 'kg × ' : '';
       // 종목 줄을 누르면 그 종목의 자극 근육 인체도를 펼친다 (한 번에 한 종목만).
       // index + 종목명이 둘 다 맞아야 펼친다 — 루틴이 바뀌면 저절로 닫힌다.
       var mapOpen = isRoutineExerciseMapOpen(idx, ex.name);
@@ -772,7 +780,7 @@ function renderWorkoutStep3() {
       previewExHtml +=
         '<div class="routine-preview-ex" onclick="toggleRoutineExerciseMap(' + idx + ')">' +
           '<span class="flex-1"><strong>' + (idx + 1) + '. ' + escapeHtml(ex.name) + '</strong></span>' +
-          '<span class="text-stone-400 font-mono text-[10px]">' + weight + ex.reps + ' · ' + ex.sets + '세트</span>' +
+          '<span class="text-stone-400 font-mono text-[10px]">' + weight + escapeHtml(ex.reps) + ' · ' + escapeHtml(ex.sets) + '세트</span>' +
         '</div>' +
         (mapHtml ? '<div style="margin: -2px 0 6px;">' + mapHtml + '</div>' : '');
     });
@@ -903,7 +911,7 @@ function renderWorkoutStep3() {
           '<button onclick="backToStep2()" class="session-header-btn" title="뒤로">' + icon('arrowLeft', 18) + '</button>' +
           '<div class="text-center">' +
             '<p class="text-[10px] font-mono text-stone-500" style="letter-spacing: 0.2em;">' + (isFree ? 'FREE · 자유 구성' : 'STEP 3 · 대화 수정') + '</p>' +
-            '<p class="text-[10px] font-mono text-stone-600 mt-0\\.5">' + partName + '</p>' +
+            '<p class="text-[10px] font-mono text-stone-600 mt-0\\.5">' + escapeHtml(partName) + '</p>' +
           '</div>' +
           '<div style="width: 36px;"></div>' +
         '</div>' +
@@ -919,10 +927,10 @@ function renderWorkoutStep3() {
       '<div class="routine-preview">' +
         '<div class="routine-preview-collapsed" onclick="' + (isEmpty ? '' : 'toggleRoutinePreview()') + '">' +
           '<div class="flex items-center gap-2">' +
-            '<span class="ai-badge">' + partName + '</span>' +
+            '<span class="ai-badge">' + escapeHtml(partName) + '</span>' +
             '<div>' +
               '<p class="text-xs font-display font-bold">' + (isEmpty ? '아직 종목이 없어요' : escapeHtml(routine.headline)) + '</p>' +
-              '<p class="text-[10px] font-mono text-stone-500">' + (isEmpty ? '대화로 종목을 추가해주세요' : exCount + '개 종목 · ' + routine.totalSets + '세트 · ' + routine.duration + '분' + (routine.wasModified ? ' · ✨수정됨' : '')) + '</p>' +
+              '<p class="text-[10px] font-mono text-stone-500">' + (isEmpty ? '대화로 종목을 추가해주세요' : exCount + '개 종목 · ' + escapeHtml(routine.totalSets) + '세트 · ' + escapeHtml(routine.duration) + '분' + (routine.wasModified ? ' · ✨수정됨' : '')) + '</p>' +
             '</div>' +
           '</div>' +
           (isEmpty ? '' : '<div class="chevron-icon ' + (state.routinePreviewExpanded ? 'expanded' : '') + '" style="color: var(--text-muted);">' + icon('chevron', 16) + '</div>') +
@@ -1072,7 +1080,7 @@ function renderWorkoutStep2() {
     return headerHtml +
       '<div class="card-warning text-center" style="padding: 40px 20px;">' +
         '<p class="font-bebas text-2xl mb-2" style="color: #fbbf24;">루틴 생성 실패</p>' +
-        '<p class="text-sm text-stone-400 mb-4">' + (routine ? routine.error : '알 수 없는 오류') + '</p>' +
+        '<p class="text-sm text-stone-400 mb-4">' + escapeHtml(routine ? routine.error : '알 수 없는 오류') + '</p>' +
         '<button class="routine-btn-modify" onclick="regenerateRoutine()">다시 시도</button>' +
       '</div>' +
       '</div>';
@@ -1107,19 +1115,19 @@ function renderWorkoutStep2() {
           (ex.weight !== null && ex.weight !== undefined ?
             '<div class="routine-ex-stat">' +
               '<p class="routine-ex-stat-label">' + (isReverseProgression(ex.name) ? '보조' : '무게') + '</p>' +
-              '<p class="routine-ex-stat-value">' + ex.weight + '<span class="text-[10px] text-stone-500">kg</span></p>' +
+              '<p class="routine-ex-stat-value">' + escapeHtml(ex.weight) + '<span class="text-[10px] text-stone-500">kg</span></p>' +
             '</div>' : '') +
           '<div class="routine-ex-stat">' +
             '<p class="routine-ex-stat-label">반복</p>' +
-            '<p class="routine-ex-stat-value regular">' + ex.reps + '</p>' +
+            '<p class="routine-ex-stat-value regular">' + escapeHtml(ex.reps) + '</p>' +
           '</div>' +
           '<div class="routine-ex-stat">' +
             '<p class="routine-ex-stat-label">세트</p>' +
-            '<p class="routine-ex-stat-value regular">' + ex.sets + '</p>' +
+            '<p class="routine-ex-stat-value regular">' + escapeHtml(ex.sets) + '</p>' +
           '</div>' +
           '<div class="routine-ex-stat">' +
             '<p class="routine-ex-stat-label">RIR</p>' +
-            '<p class="routine-ex-stat-value regular">' + ex.rir + '</p>' +
+            '<p class="routine-ex-stat-value regular">' + escapeHtml(ex.rir) + '</p>' +
           '</div>' +
           (ex.rest ? (
             '<div class="routine-ex-stat">' +
@@ -1152,11 +1160,11 @@ function renderWorkoutStep2() {
           '<p class="routine-meta-label">종목</p>' +
         '</div>' +
         '<div class="routine-meta-item">' +
-          '<p class="routine-meta-num">' + routine.totalSets + '</p>' +
+          '<p class="routine-meta-num">' + escapeHtml(routine.totalSets) + '</p>' +
           '<p class="routine-meta-label">세트</p>' +
         '</div>' +
         '<div class="routine-meta-item">' +
-          '<p class="routine-meta-num">' + routine.duration + '<span class="text-xs text-stone-500">분</span></p>' +
+          '<p class="routine-meta-num">' + escapeHtml(routine.duration) + '<span class="text-xs text-stone-500">분</span></p>' +
           '<p class="routine-meta-label">예상</p>' +
         '</div>' +
       '</div>' +
@@ -2712,9 +2720,10 @@ function renderWorkoutSession() {
   });
   
   // 이전 기록
+  // lastWeight·lastReps는 AI 루틴에서 그대로 넘어올 수 있다(대화 수정 경로는 무게 스냅을 거치지 않는다) → 이스케이프
   var prevText = exercise.lastWeight !== null
-    ? (isReverseProgression(exercise.name) ? '보조 ' : '') + exercise.lastWeight + 'kg × ' + (parseInt(String(exercise.targetReps || '8').split('-')[0]) || 8) + ' · ' + (exercise.sets.filter(function(s) { return !s.isWarmup; }).length) + '세트'
-    : (exercise.lastReps ? exercise.lastReps + '회 × ' + (exercise.sets.filter(function(s) { return !s.isWarmup; }).length) + '세트' : '첫 시도');
+    ? (isReverseProgression(exercise.name) ? '보조 ' : '') + escapeHtml(exercise.lastWeight) + 'kg × ' + (parseInt(String(exercise.targetReps || '8').split('-')[0]) || 8) + ' · ' + (exercise.sets.filter(function(s) { return !s.isWarmup; }).length) + '세트'
+    : (exercise.lastReps ? escapeHtml(exercise.lastReps) + '회 × ' + (exercise.sets.filter(function(s) { return !s.isWarmup; }).length) + '세트' : '첫 시도');
   
   // 휴식 타이머
   var restTimerHtml = '';
@@ -2953,7 +2962,7 @@ function renderWorkoutSession() {
       '<div class="flex items-center justify-between mb-4">' +
         '<button class="session-header-btn" onclick="endSession()">' + icon('close', 18) + '</button>' +
         '<div class="text-center">' +
-          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">' + session.sessionName + ' · 종목 ' + (session.currentExerciseIdx + 1) + '/' + totalExercises + '</p>' +
+          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest">' + escapeHtml(session.sessionName) + ' · 종목 ' + (session.currentExerciseIdx + 1) + '/' + totalExercises + '</p>' +
           '<p class="text-xs font-mono accent mt-0\\.5">⏱ ' + elapsedStr + '</p>' +
         '</div>' +
         '<div class="flex gap-2">' +
@@ -2977,7 +2986,7 @@ function renderWorkoutSession() {
         '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">현재 종목' +
           (exercise.addedInSession ? ' · 운동 중 추가' : '') + (exercise.skipped ? ' · 건너뜀' : '') + '</p>' +
         '<h2 class="font-bebas text-2xl mb-1">' + escapeHtml(exercise.name) + '</h2>' +
-        '<p class="text-xs font-mono text-stone-400">' + exercise.type +
+        '<p class="text-xs font-mono text-stone-400">' + escapeHtml(exercise.type) +
           ' · ' + (SET_SCHEMES[getSetScheme(exercise.name)] || SET_SCHEMES.straight).short +
           ' · 휴식 ' + getExerciseRestSec(exercise.name) + '초</p>' +
         (typeof exercise.supersetWith === 'number' && session.exercises[exercise.supersetWith]
@@ -3501,7 +3510,7 @@ function renderWorkoutComplete() {
       '<div class="' + completeIconClass + '">' + icon('check', 28) + '</div>' +
       '<p class="text-xs uppercase accent font-mono mb-2" style="letter-spacing: 0.3em;">WORKOUT COMPLETE</p>' +
       '<h1 class="font-bebas text-5xl">완료!</h1>' +
-      '<p class="text-sm text-stone-400 mt-2">' + cs.sessionName + ' · ' + dateStr + '</p>' +
+      '<p class="text-sm text-stone-400 mt-2">' + escapeHtml(cs.sessionName) + ' · ' + dateStr + '</p>' +
     '</div>' +
     
     '<div class="' + completeListClass + '">' +
@@ -4188,7 +4197,7 @@ function renderProfileEditModal() {
       '<div class="input-label"><p>' + label + '</p>' + (unit ? '<p>' + unit + '</p>' : '') + '</div>' +
       '<input type="number" inputmode="decimal" class="api-key-input"' +
         (step ? ' step="' + step + '"' : '') +
-        ' value="' + (e[key] != null ? e[key] : '') + '"' +
+        ' value="' + escapeHtml(e[key] != null ? e[key] : '') + '"' +
         ' oninput="updateProfileEditField(\'' + key + '\', this.value)" />' +
     '</div>';
   }
@@ -4532,7 +4541,7 @@ function renderMore() {
               '<p>API 키</p>' +
               '<p>console.anthropic.com</p>' +
             '</div>' +
-            '<input type="password" class="api-key-input" id="api-key-field" placeholder="sk-ant-..." value="' + (state.apiKeyInput || '') + '" oninput="updateApiKeyInput(this.value)" />' +
+            '<input type="password" class="api-key-input" id="api-key-field" placeholder="sk-ant-..." value="' + escapeHtml(state.apiKeyInput || '') + '" oninput="updateApiKeyInput(this.value)" />' +
             '<p class="text-[10px] font-mono text-stone-500 mt-2 px-1">키는 본인 기기에만 저장되며 외부로 전송되지 않습니다.</p>' +
           '</div>' +
           
@@ -4592,7 +4601,7 @@ function renderMore() {
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold">Anthropic API 키</p>' +
               '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + 
-                (apiKey ? maskApiKey(apiKey) : 'AI 코치·맞춤 루틴·주간 리뷰 켜기') +
+                (apiKey ? escapeHtml(maskApiKey(apiKey)) : 'AI 코치·맞춤 루틴·주간 리뷰 켜기') +
               '</p>' +
             '</div>' +
             '<span class="api-status-badge ' + (apiKey ? 'active' : 'inactive') + '">' +
@@ -4605,7 +4614,7 @@ function renderMore() {
               '<div class="menu-icon-sm accent-bg-soft">' + icon('chart', 18) + '</div>' +
               '<div class="menu-row-content">' +
                 '<p class="text-sm font-display font-bold">주간 리뷰</p>' +
-                '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + (state.weeklyReview ? '이번 주 ' + state.weeklyReview.grade + '등급 리뷰' : '이번 주 종합 분석') + '</p>' +
+                '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + (state.weeklyReview ? '이번 주 ' + escapeHtml(state.weeklyReview.grade) + '등급 리뷰' : '이번 주 종합 분석') + '</p>' +
               '</div>' +
               '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
             '</div>'
@@ -5012,7 +5021,7 @@ function renderCoachMemory() {
       return '<div class="menu-row">' +
         '<div class="flex-1" onclick="editMemoryNote(\'' + escapeHtml(m.id) + '\')" style="cursor:pointer;">' +
           '<p class="text-sm">' + escapeHtml(m.text) + '</p>' +
-          '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + srcBadge + ' · ' + (m.date || '') + ' · 탭하여 수정</p>' +
+          '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">' + srcBadge + ' · ' + escapeHtml(m.date || '') + ' · 탭하여 수정</p>' +
         '</div>' +
         '<button class="session-header-btn" onclick="deleteMemoryNote(\'' + escapeHtml(m.id) + '\')">' + icon('trash', 16) + '</button>' +
       '</div>';
@@ -5267,7 +5276,7 @@ function renderWeeklyReviewDetail() {
         
         // 등급 + 헤드라인
         '<div class="text-center mb-6">' +
-          '<div style="display: inline-block; font-family: var(--font); font-weight: 800; font-size: 80px; line-height: 1; color: ' + gradeColor + '; text-shadow: 0 0 30px ' + gradeColor + '40;">' + review.grade + '</div>' +
+          '<div style="display: inline-block; font-family: var(--font); font-weight: 800; font-size: 80px; line-height: 1; color: ' + gradeColor + '; text-shadow: 0 0 30px ' + gradeColor + '40;">' + escapeHtml(review.grade) + '</div>' +
           '<p class="text-xs font-mono text-stone-500 uppercase tracking-widest mt-1 mb-3">이번 주 평가</p>' +
           '<p class="text-base font-display font-bold leading-relaxed">' + escapeHtml(review.headline) + '</p>' +
         '</div>' +
@@ -5373,7 +5382,7 @@ function renderPlateauDetail() {
   var signalsHtml = p.signals.map(function(s) {
     return '<div class="review-bullet">' +
       '<div class="review-bullet-dot" style="background: #fbbf24;"></div>' +
-      '<p>' + (signalLabels[s] || s) + '</p>' +
+      '<p>' + escapeHtml(signalLabels[s] || s) + '</p>' +
     '</div>';
   }).join('');
   
@@ -6722,7 +6731,7 @@ function renderRunning() {
     '<div class="card mb-4">' +
       '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-2">운동 시간</p>' +
       '<div class="flex items-center gap-2">' +
-        '<input id="cardio-min-input" type="number" inputmode="numeric" min="5" max="120" step="1" value="' + (c.inputMin || '') + '" placeholder="예: 30"' + (c.loading ? ' disabled' : '') + ' style="flex:1;min-width:0;background:var(--bg-1);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px 14px;color:#fff;font-family:var(--font);font-weight:800;font-size:26px;" onkeydown="if(event.key===\'Enter\')buildCardioPlan()" />' +
+        '<input id="cardio-min-input" type="number" inputmode="numeric" min="5" max="120" step="1" value="' + escapeHtml(c.inputMin || '') + '" placeholder="예: 30"' + (c.loading ? ' disabled' : '') + ' style="flex:1;min-width:0;background:var(--bg-1);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px 14px;color:#fff;font-family:var(--font);font-weight:800;font-size:26px;" onkeydown="if(event.key===\'Enter\')buildCardioPlan()" />' +
         '<span class="text-sm font-mono text-stone-400">분</span>' +
         '<button class="sheet-submit" style="width:auto;padding:12px 20px;margin:0;flex-shrink:0;" onclick="buildCardioPlan()"' + (c.loading ? ' disabled' : '') + '>구성</button>' +
       '</div>' +
