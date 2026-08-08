@@ -151,6 +151,54 @@ test('가드레일: 대체 종목의 메타데이터 갱신 — 메인 자격 �
   });
 });
 
+test('가드레일: 대체 종목이 같은 부위에 주의면 그 수정 지침도 note에 붙는다 (Codex 리뷰 반영)', () => {
+  const orig = app.EXERCISE_SAFETY;
+  const origMem = app.state.coachMemory;
+  // 금기 → 대체인데, 그 대체 종목 자체가 같은 부위 caution인 실제 구성
+  // (바벨 스쿼트 → 핵 스쿼트가 정확히 이 모양이다)
+  app.EXERCISE_SAFETY = {
+    '바벨 스쿼트': { contra: ['lower_back'], sub: { lower_back: '핵 스쿼트' } },
+    '핵 스쿼트': { caution: ['lower_back'], mod: { lower_back: '골반이 말리지 않는 깊이까지만' } }
+  };
+  app.state.coachMemory = [injuryNote('허리 디스크')];
+  const r = app.applySafetyGuardrail([{ name: '바벨 스쿼트', sets: 4, weight: 80 }]);
+  assert.equal(r.exercises[0].name, '핵 스쿼트');
+  assert.ok(r.exercises[0].note.includes('골반이 말리지 않는 깊이까지만'),
+    `대체 종목의 주의 문구가 note에 없음: ${r.exercises[0].note}`);
+  app.EXERCISE_SAFETY = orig;
+  app.state.coachMemory = origMem;
+});
+
+test('가드레일: 부상이 여러 개면 교체 사유 부위 문구가 먼저, 나머지도 함께 (Codex 재리뷰 반영)', () => {
+  const orig = app.EXERCISE_SAFETY;
+  const origMem = app.state.coachMemory;
+  // 핵 스쿼트는 허리·무릎 둘 다 caution — 교체 사유는 허리인데 무릎 문구만 붙으면 안 된다
+  app.EXERCISE_SAFETY = {
+    '바벨 스쿼트': { contra: ['lower_back'], sub: { lower_back: '핵 스쿼트' } },
+    '핵 스쿼트': {
+      caution: ['lower_back', 'knee'],
+      mod: { lower_back: '골반이 말리지 않는 깊이까지만', knee: '발을 발판 위쪽에' }
+    }
+  };
+  app.state.coachMemory = [injuryNote('허리 디스크'), injuryNote('무릎 시큰거림')];
+  const note = app.applySafetyGuardrail([{ name: '바벨 스쿼트', sets: 4 }]).exercises[0].note;
+  const backAt = note.indexOf('골반이 말리지 않는 깊이까지만');
+  const kneeAt = note.indexOf('발을 발판 위쪽에');
+  assert.ok(backAt !== -1, `허리(교체 사유) 문구 누락: ${note}`);
+  assert.ok(kneeAt !== -1, `무릎 문구 누락: ${note}`);
+  assert.ok(backAt < kneeAt, `교체 사유인 허리 문구가 먼저 와야 함: ${note}`);
+  app.EXERCISE_SAFETY = orig;
+  app.state.coachMemory = origMem;
+});
+
+test('가드레일: 대체 종목이 무태그면 note는 교체 사유만 (문구 오염 없음)', () => {
+  withSynth(() => {
+    app.state.coachMemory = [injuryNote('허리 디스크')];
+    const r = app.applySafetyGuardrail([{ name: '바벨 로우', sets: 3 }]);
+    assert.equal(r.exercises[0].note, '허리 부상 보호 — 바벨 로우 대신 배치');
+  });
+});
+
 test('가드레일: 대체가 이미 루틴에 있거나 대체 없음 → 제거', () => {
   withSynth(() => {
     app.state.coachMemory = [injuryNote('허리 디스크')];
