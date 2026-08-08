@@ -120,7 +120,7 @@ var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v44';
+var APP_VERSION = 'v45';
 // 백업에 담지 않는 키. 두 부류:
 // (1) 로컬 전용·민감 → 복원해도 그대로 보존 (API 키·코치 대화)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
@@ -474,7 +474,7 @@ function generateDemoData() {
   var personalRecords = [
     { id: 'p1', exerciseName: '레그 프레스', weight: 120, reps: 10, previousWeight: 115, date: new Date(today.getTime() - 2 * 86400000).toISOString().split('T')[0] },
     { id: 'p2', exerciseName: '풀업', reps: 8, previousReps: 7, date: new Date(today.getTime() - 5 * 86400000).toISOString().split('T')[0] },
-    { id: 'p3', exerciseName: '체스트 프레스', weight: 65, reps: 8, previousWeight: 62.5, date: new Date(today.getTime() - 14 * 86400000).toISOString().split('T')[0] }
+    { id: 'p3', exerciseName: '머신 체스트 프레스', weight: 65, reps: 8, previousWeight: 62.5, date: new Date(today.getTime() - 14 * 86400000).toISOString().split('T')[0] }
   ];
   
   // 체중 기록 (최근 30일 추세: 78.0 → 77.2)
@@ -569,6 +569,7 @@ var state = {
   // AI 추천
   aiRecommendation: null,
   aiRecLoading: false,
+  aiRecFailedDate: null,   // 오늘 자동 로드가 실패한 날짜(YYYY-MM-DD). 렌더마다 재호출되는 무한 재시도 방지용 잠금.
   // 주간 리뷰
   weeklyReview: null,
   weeklyReviewLoading: false,

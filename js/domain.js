@@ -85,7 +85,9 @@ function _buildRecentSetsMap() {
       for (var j = 0; j < exList.length; j++) {
         var ex = exList[j];
         if (!ex.name) continue;
-        if (map[ex.name] && map[ex.name].length >= RECENT_PERFORMANCES_KEEP) continue;
+        // 별칭 표기('랫풀다운')와 표준명('랫 풀 다운')이 한 칸에 모이게 표준명으로 키를 잡는다
+        var exKey = canonicalExerciseName(ex.name);
+        if (map[exKey] && map[exKey].length >= RECENT_PERFORMANCES_KEEP) continue;
         var entry = null;
         if (ex.setsDetail && Array.isArray(ex.setsDetail)) {
           var working = ex.setsDetail.filter(function(s) { return !s.isWarmup; });
@@ -102,8 +104,8 @@ function _buildRecentSetsMap() {
           entry = { sets: [{ weight: wt, reps: rp }], date: w.date };
         }
         if (entry) {
-          if (!map[ex.name]) map[ex.name] = [];
-          map[ex.name].push(entry); // log[0]=최신이므로 [0]=가장 최근
+          if (!map[exKey]) map[exKey] = [];
+          map[exKey].push(entry); // log[0]=최신이므로 [0]=가장 최근
         }
       }
     }
@@ -113,13 +115,13 @@ function _buildRecentSetsMap() {
 }
 
 function getLastPerformedSets(exerciseName) {
-  var list = _buildRecentSetsMap()[exerciseName];
+  var list = _buildRecentSetsMap()[canonicalExerciseName(exerciseName)];
   return (list && list[0]) || null;
 }
 
 // 최근 n세션 수행 목록 ([0]=가장 최근). 고중량 복합/경량 고립의 "2세션 연속" 판정용.
 function getRecentPerformances(exerciseName, n) {
-  var list = _buildRecentSetsMap()[exerciseName] || [];
+  var list = _buildRecentSetsMap()[canonicalExerciseName(exerciseName)] || [];
   return list.slice(0, n || 2);
 }
 
@@ -174,6 +176,7 @@ function hasRecentPain(exerciseName, days) {
     if (chatSignals[c].pain) return true;
   }
   var cutoff = new Date(Date.now() - (days || 14) * 86400000).toISOString().slice(0, 10);
+  var canonical = canonicalExerciseName(exerciseName);
   var log = state.data.workoutLog || [];
   for (var i = 0; i < log.length; i++) {
     var w = log[i];
@@ -182,7 +185,7 @@ function hasRecentPain(exerciseName, days) {
     if (!Array.isArray(exList)) continue;
     for (var j = 0; j < exList.length; j++) {
       var ex = exList[j];
-      if (ex.name !== exerciseName) continue;
+      if (canonicalExerciseName(ex.name) !== canonical) continue;
       if (ex.painFlag) return true;
       var sets = ex.setsDetail;
       if (Array.isArray(sets)) {
@@ -296,10 +299,10 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
   };
 }
 
-// 1RM 갱신 (더 높으면). 고횟수(>12회)는 e1RM 신뢰도가 낮아 제외 — rolling max 경로와 동일 규칙.
+// 1RM 갱신 (더 높으면). 고횟수는 e1RM 신뢰도가 낮아 제외 — rolling max 경로와 동일 규칙(클래스별 상한).
 function update1RM(exerciseName, weight, reps) {
   if (!weight || !reps) return false;
-  if (reps > ROLLING_1RM_MAX_REPS) return false;
+  if (reps > rolling1RMMaxReps(exerciseName)) return false;
 
   var newRM = calculate1RM(weight, reps);
   var currentRM = get1RM(exerciseName);
@@ -318,15 +321,32 @@ function update1RM(exerciseName, weight, reps) {
 
 // ── 1RM 자동 증감 (rolling max) ──
 // tracked 1RM = "최근 N세션 중 최고 e1RM". 신기록이면 즉시↑, 옛 최고가 윈도우 밖으로
-// 빠지면 자연히↓ (한 번 못 든 날로 폭락하지 않음). 고횟수(>12회) 세트는 e1RM 신뢰도가
+// 빠지면 자연히↓ (한 번 못 든 날로 폭락하지 않음). 고횟수 세트는 e1RM 신뢰도가
 // 낮아 추세 신호에서 제외한다. 근거: REMAKE-PLAN.md 묶음2 ①.
 var ROLLING_1RM_WINDOW = 4; // 기본 추적 윈도우 (세션 수)
-var ROLLING_1RM_MAX_REPS = 12; // 이 이상 반복은 e1RM 추정 부정확 → 제외
+var ROLLING_1RM_MAX_REPS = 12; // 절대 상한(클래스별 상한의 천장) — 이 이상은 어떤 종목도 제외
+
+// e1RM 반복 상한 (종목 클래스별).
+// 근거상 10회 이하가 확실히 더 정확하다 (Reynolds 2006 — 5RM이 가장 정확 / Mayhew 2008 — 10회 미만에서 우수).
+// 다만 상한을 일괄 10으로 내리면 처방 반복이 12~15회인 '고립' 종목(펙 덱·푸시다운·컬·레그 익스텐션·
+// 레그 컬)은 본세트가 전부 잘려 calculateRollingMax1RM이 null → 추적 1RM이 INITIAL_1RM에 영원히 묶이고
+// PR 배지도 다시는 안 뜬다. 그래서 클래스 반복범위 하한 아래로는 자르지 않고, 기존 상한(12)보다
+// 느슨해지지도 않게 min/max로 묶는다.
+//   compound_heavy(5-8) · compound_moderate(8-12) → 10 (강화)
+//   isolation(12-15) · light_isolation(15-25) · rehab(15-20) → 12 (현행 유지)
+var ROLLING_1RM_BASE_MAX_REPS = 10;
+
+function rolling1RMMaxReps(exerciseName) {
+  var rules = EXERCISE_CLASS_RULES[getExerciseClass(exerciseName)];
+  if (!rules) return ROLLING_1RM_BASE_MAX_REPS;
+  return Math.min(ROLLING_1RM_MAX_REPS, Math.max(ROLLING_1RM_BASE_MAX_REPS, rules.repMin));
+}
 
 function calculateRollingMax1RM(exerciseName, windowSessions) {
   var n = windowSessions || ROLLING_1RM_WINDOW;
   var log = (state.data && state.data.workoutLog) || [];
   var canonical = EXERCISE_ALIASES_1RM[exerciseName] || exerciseName;
+  var maxReps = rolling1RMMaxReps(exerciseName); // 클래스별 e1RM 신뢰 반복 상한 (루프 밖에서 1회 계산)
 
   var byDate = []; // { date, e1rm } — 세션(날짜)별 최고 e1RM
   for (var i = 0; i < log.length; i++) {
@@ -344,7 +364,7 @@ function calculateRollingMax1RM(exerciseName, windowSessions) {
         var s = ex.setsDetail[k];
         if (s.isWarmup) continue;
         if (!s.weight || !s.reps) continue;
-        if (s.reps > ROLLING_1RM_MAX_REPS) continue; // 고횟수 제외
+        if (s.reps > maxReps) continue; // 고횟수 제외 (클래스별 상한)
         var e = calculate1RM(s.weight, s.reps);
         if (e > bestForDay) bestForDay = e;
       }
@@ -403,12 +423,13 @@ function recalc1RMAfterEdit(exerciseName, prevRM) {
   if (prevRM !== null && prevRM !== undefined) candidates.push(prevRM);
 
   // 진행 중 세션에 남아 있는 완료 본 세트들의 e1RM (다른 세트가 세운 기록은 유지)
+  var maxReps = rolling1RMMaxReps(exerciseName); // 위 두 경로와 동일한 클래스별 상한
   if (state.activeSession && Array.isArray(state.activeSession.exercises)) {
     state.activeSession.exercises.forEach(function(ex) {
       if (ex.name !== exerciseName) return;
       (ex.sets || []).forEach(function(s) {
         if (!s.completed || s.isWarmup || !s.weight || !s.reps) return;
-        if (s.reps > ROLLING_1RM_MAX_REPS) return;
+        if (s.reps > maxReps) return;
         candidates.push(calculate1RM(s.weight, s.reps));
       });
     });
@@ -652,21 +673,39 @@ function groupVolumeBy(volumeByPart) {
   return grouped;
 }
 
-// 종목명 → 부위 정보 찾기 (퍼지 매칭)
+// 종목명 → 부위 정보 찾기 (정확 → 별칭 → 부분 매칭 → 키워드 추측)
 function getExercisePart(exerciseName) {
   if (!exerciseName) return null;
-  // 정확한 매칭
+  // 공백·대소문자만 다른 표기를 같은 이름으로 본다 ('랫 풀다운' == '랫풀다운')
+  function squash(s) { return String(s).toLowerCase().replace(/\s+/g, ''); }
+
+  // 1. 정확한 매칭
   if (EXERCISE_BODY_PART_MAP[exerciseName]) return EXERCISE_BODY_PART_MAP[exerciseName];
-  
-  // 부분 매칭 (포함 관계)
-  var name = exerciseName.toLowerCase();
+
+  // 2. 별칭 테이블 → 표준명 (1RM 조회와 같은 표를 쓴다. 별칭이 늘어도 여기 한 곳만 거치면 된다)
+  var canonical = EXERCISE_ALIASES_1RM[exerciseName];
+  if (canonical && EXERCISE_BODY_PART_MAP[canonical]) return EXERCISE_BODY_PART_MAP[canonical];
+
+  // 3. 부분 매칭 — 맵 키가 질의 이름 **안에** 통째로 들어있을 때만, 그 중 가장 긴(=가장 구체적인) 키.
+  //    반대 방향(질의가 키의 일부)은 버렸다: '프레스' 한 단어가 아무 프레스 종목이나 잡고,
+  //    '덤벨 프레스'가 '인클라인 덤벨 프레스'(가슴 상부)로 잡히는 오탐이 실제로 났다.
+  //    가장 긴 키를 고르는 이유: '스탠딩 카프 레이즈 머신'이 '카프 레이즈'(맨몸)가 아니라
+  //    '스탠딩 카프 레이즈'(스미스)로 가야 장비 판정이 맞는다.
+  var q = squash(exerciseName);
+  var bestKey = null;
+  var bestLen = 0;
   for (var key in EXERCISE_BODY_PART_MAP) {
-    if (key.toLowerCase().includes(name) || name.includes(key.toLowerCase())) {
-      return EXERCISE_BODY_PART_MAP[key];
-    }
+    var k = squash(key);
+    if (q.indexOf(k) !== -1 && k.length > bestLen) { bestKey = key; bestLen = k.length; }
   }
-  
-  // 키워드 기반 추측
+  if (bestKey) return EXERCISE_BODY_PART_MAP[bestKey];
+
+  // 4. 키워드 기반 추측
+  var name = exerciseName.toLowerCase();
+  // 레그컬·햄스트링은 아래 '컬'(이두) 규칙보다 먼저 — '레그 컬 머신'이 이두로 잡히던 버그
+  if (name.indexOf('레그 컬') >= 0 || name.indexOf('레그컬') >= 0 || name.indexOf('햄스트링') >= 0 || name.indexOf('노르딕') >= 0) return { primary: 'hamstrings', secondary: [], compound: false };
+  // 리버스 플라이 계열은 후면 삼각근 — 아래 '플라이'(가슴) 규칙보다 먼저
+  if (name.indexOf('리버스') >= 0 && (name.indexOf('플라이') >= 0 || name.indexOf('펙') >= 0)) return { primary: 'shoulders_rear', secondary: ['upper_back'], compound: false };
   if (name.indexOf('체스트') >= 0 || name.indexOf('가슴') >= 0 || name.indexOf('벤치') >= 0 || name.indexOf('플라이') >= 0) {
     return { primary: 'chest', secondary: [], compound: name.indexOf('플라이') < 0, angle: name.indexOf('인클라인') >= 0 ? 'incline' : 'flat' };
   }
@@ -679,7 +718,7 @@ function getExercisePart(exerciseName) {
   if (name.indexOf('풀다운') >= 0 || name.indexOf('풀 다운') >= 0 || name.indexOf('풀업') >= 0) return { primary: 'lats', secondary: ['biceps'], compound: true };
   if (name.indexOf('스쿼트') >= 0 || name.indexOf('레그 프레스') >= 0) return { primary: 'quads', secondary: ['glutes'], compound: true };
   if (name.indexOf('레그 익스텐션') >= 0) return { primary: 'quads', secondary: [], compound: false };
-  if (name.indexOf('레그 컬') >= 0 || name.indexOf('햄스트링') >= 0 || name.indexOf('rdl') >= 0 || name.indexOf('데드리프트') >= 0) return { primary: 'hamstrings', secondary: ['glutes'], compound: true };
+  if (name.indexOf('rdl') >= 0 || name.indexOf('데드리프트') >= 0) return { primary: 'hamstrings', secondary: ['glutes'], compound: true };
   if (name.indexOf('힙') >= 0) return { primary: 'glutes', secondary: [], compound: false };
   if (name.indexOf('카프') >= 0 || name.indexOf('종아리') >= 0) return { primary: 'calves', secondary: [], compound: false };
   
@@ -807,8 +846,9 @@ function formatBalanceAnalysis(analysis) {
   return lines.join('\n');
 }
 
-// 최근 N주 부위별 누적 세트 수 (주간 볼륨 분석)
-function getRecentVolumeByPart(weeks) {
+// 최근 N주 부위별 누적 세트 수 — 직접(primary만) / 분할환산(간접 0.5 포함) 두 벌을 함께 반환.
+// STATS 화면이 '직접 몇 세트'를 따로 보여줘야 해서 분리. 계산 규칙은 기존과 동일.
+function getRecentVolumeSplitByPart(weeks) {
   var today = new Date();
   var since = new Date(today);
   since.setDate(today.getDate() - (weeks * 7));
@@ -818,7 +858,8 @@ function getRecentVolumeByPart(weeks) {
     return w.date >= sinceStr;
   });
   
-  var volumeByPart = {};
+  var direct = {};      // primary 부위만 (사용자가 그 부위를 직접 노린 세트)
+  var fractional = {};  // primary 1.0 + secondary 0.5 (분할환산)
   
   workouts.forEach(function(w) {
     if (!w.exercises || !Array.isArray(w.exercises)) return;
@@ -840,20 +881,43 @@ function getRecentVolumeByPart(weeks) {
       
       if (setCount === 0) return;
       
-      // primary 부위에 풀 세트
-      volumeByPart[info.primary] = (volumeByPart[info.primary] || 0) + setCount;
+      // primary 부위에 풀 세트 (직접·분할환산 둘 다)
+      direct[info.primary] = (direct[info.primary] || 0) + setCount;
+      fractional[info.primary] = (fractional[info.primary] || 0) + setCount;
       
       // secondary(보조근) 부위에 0.5 세트 (Pelland 2025 분할세트 예측력 최고; 0.3~0.7 휴리스틱 중 0.5)
       if (info.secondary && info.secondary.length > 0) {
         info.secondary.forEach(function(s) {
-          volumeByPart[s] = (volumeByPart[s] || 0) + setCount * 0.5;
+          fractional[s] = (fractional[s] || 0) + setCount * 0.5;
         });
       }
     });
   });
   
-  return volumeByPart;
+  return { direct: direct, fractional: fractional };
 }
+
+// 기존 호출부 호환 — 분할환산(간접 0.5 포함) 맵만 돌려준다. 동작 변경 없음.
+function getRecentVolumeByPart(weeks) {
+  return getRecentVolumeSplitByPart(weeks).fractional;
+}
+
+// 부위 그룹 → 주간 볼륨 임계(세트). getVolumeDiagnosis와 STATS 화면이 같은 숫자를 쓰도록 한 곳에만 둔다.
+//   large: 부족<4 / 하한미달 4~10 / 적정 10~20 / 이득 완만 20+, 목표 12
+//   small: 부족<3 / 하한미달 3~8 / 적정 8~16 / 이득 완만 16+, 목표 8
+//   size는 BODY_PART_GROUPS[group].size, 없거나 'small'이 아니면 'large'로 안전 처리
+function getVolumeThresholds(group) {
+  var g = BODY_PART_GROUPS[group];
+  var size = (g && g.size === 'small') ? 'small' : 'large';
+  return {
+    size: size,
+    lackBelow:  size === 'small' ? 3 : 4,
+    optimalLow: size === 'small' ? 8 : 10,
+    optimalTop: size === 'small' ? 16 : 20,
+    target:     size === 'small' ? 8 : 12
+  };
+}
+
 
 // 부족/과잉 부위 식별 (그룹 합산 기반)
 // volumeByPart는 세부 부위 단위 → 가슴(chest+chest_upper+chest_lower) 합산해서 진단
@@ -874,12 +938,11 @@ function getVolumeDiagnosis(volumeByPart, weeks) {
   Object.keys(BODY_PART_GROUPS).forEach(function(g) {
     var weeklyVol = (groupedVol[g] || 0) / weeks;
     var label = BODY_PART_GROUPS[g].kr;
-    var size = (BODY_PART_GROUPS[g] && BODY_PART_GROUPS[g].size === 'small') ? 'small' : 'large';
-    var lackBelow  = size === 'small' ? 3 : 4;   // 부족(🔴) 상한
-    var optimalLow = size === 'small' ? 8 : 10;  // 최적 하한(미달 시 🟡)
-    var optimalTop = size === 'small' ? 16 : 20; // 최적 상한(초과 시 수확 체감 🔥)
-    var target     = size === 'small' ? 8 : 12;  // 폐루프 목표 세트(ai.js volNeedNote가 참조)
-    var entry = { group: g, label: label, vol: weeklyVol, size: size, target: target };
+    var th = getVolumeThresholds(g);             // 임계는 getVolumeThresholds 한 곳에서만 정의
+    var lackBelow  = th.lackBelow;               // 부족(🔴) 상한
+    var optimalLow = th.optimalLow;              // 최적 하한(미달 시 🟡)
+    var optimalTop = th.optimalTop;              // 최적 상한(초과 시 수확 체감 🔥)
+    var entry = { group: g, label: label, vol: weeklyVol, size: th.size, target: th.target };
 
     if (weeklyVol === 0) {
       // 미접촉: 저우선 참고 버킷(전완·복근 등이 매번 '최우선'으로 도배되는 노이즈 방지)
@@ -1187,6 +1250,7 @@ function getRecentFeel(exerciseName, days) {
     if (chatSignals[c].feel === 'bad' || chatSignals[c].feel === 'good') return chatSignals[c].feel;
   }
   var cutoff = new Date(Date.now() - (days || 14) * 86400000).toISOString().slice(0, 10);
+  var canonical = canonicalExerciseName(exerciseName);
   var log = state.data.workoutLog || [];
   for (var i = 0; i < log.length; i++) {
     var w = log[i];
@@ -1195,7 +1259,7 @@ function getRecentFeel(exerciseName, days) {
     if (!Array.isArray(exList)) continue;
     for (var j = 0; j < exList.length; j++) {
       var ex = exList[j];
-      if (ex.name === exerciseName && (ex.feel === 'bad' || ex.feel === 'good')) return ex.feel;
+      if (canonicalExerciseName(ex.name) === canonical && (ex.feel === 'bad' || ex.feel === 'good')) return ex.feel;
     }
   }
   return null;
@@ -1222,10 +1286,11 @@ function recordChatSignal(exerciseName, signal) {
 // 저장된 date가 KST(getTodayStr) 기준이므로 cutoff도 KST로 계산 (UTC면 오전 9시 전 하루 오차)
 function _recentChatSignals(exerciseName, days) {
   var cutoff = getDateStr(new Date(Date.now() - (days || 14) * 86400000));
+  var canonical = canonicalExerciseName(exerciseName);
   var log = storage.get(KEYS.CHAT_SIGNALS, []);
   if (!Array.isArray(log)) return [];
   return log.filter(function(s) {
-    return s && s.name === exerciseName && s.date && s.date >= cutoff;
+    return s && canonicalExerciseName(s.name) === canonical && s.date && s.date >= cutoff;
   });
 }
 

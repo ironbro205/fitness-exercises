@@ -20,7 +20,14 @@ function renderHome() {
   if (state.apiKey && !state.plateauCheck && !state.plateauCheckLoading) {
     loadPlateauCheckIfNeeded();
   }
-  
+
+  // 오늘의 추천 자동 로드 (백그라운드) — 캐시가 KST 날짜 기준이라 하루 1회만 API를 쓴다.
+  // await 하지 않으므로 첫 페인트를 막지 않는다 (주간 리뷰·정체기와 같은 패턴).
+  if (state.apiKey && !state.aiRecLoading && state.aiRecFailedDate !== tdStr &&
+      (!state.aiRecommendation || state.aiRecommendation.date !== tdStr)) {
+    loadAIRecommendationIfNeeded();
+  }
+
   var monday = new Date(today);
   monday.setDate(today.getDate() - (dayOfWeek - 1));
   monday.setHours(0,0,0,0);
@@ -159,6 +166,9 @@ function renderHome() {
           '</div>' : '') +
       '</div>' +
       
+      // 오늘의 추천 카드 (AI 일일 추천 — 하루 1회)
+      renderAIRecommendationCard() +
+
       // 주간 리뷰 카드 (일요일 또는 새 주차)
       (state.weeklyReview ? 
         '<div class="weekly-review-card mb-4" onclick="openWeeklyReview()">' +
@@ -208,6 +218,77 @@ function renderHome() {
     '</div>';
 }
 
+// ═══════════════════════════════════════════════
+// 오늘의 추천 카드 (홈) — AI 일일 추천
+// 상태 4가지: API 키 없음 / 로딩 / 오늘 실패 / 결과
+// CSS는 이미 있는 .ai-rec-card 계열을 그대로 쓴다 (css/styles.css:1978~2029)
+// ═══════════════════════════════════════════════
+function renderAIRecommendationCard() {
+  // API 키 없음 — 키 모달은 더보기 화면에서만 렌더되므로 탭 이동으로 유도
+  if (!state.apiKey) {
+    return '<div class="coach-api-required" onclick="setTab(\'more\')">' +
+      '<div style="color: #fbbf24; flex-shrink: 0;">' + icon('info', 18) + '</div>' +
+      '<div class="flex-1">' +
+        '<p class="text-xs font-display font-bold" style="color: #fbbf24;">오늘의 추천 — API 키 필요</p>' +
+        '<p class="text-[10px] font-mono text-stone-400 mt-0\\.5">더보기 → Anthropic API 키 설정</p>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // 로딩 (백그라운드 로드 중 — 첫 페인트는 이미 끝난 상태)
+  if (state.aiRecLoading) {
+    return '<div class="ai-rec-card mb-4">' +
+      '<div class="flex items-center gap-3">' +
+        '<div class="loading-spinner"></div>' +
+        '<div>' +
+          '<p class="text-sm font-display font-bold">오늘의 추천 분석 중</p>' +
+          '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">컨디션 · 부족 부위 · 사이클 확인 중...</p>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  var rec = state.aiRecommendation;
+
+  // 오늘 실패 — 자동 재시도는 막고(무한 호출 방지) 수동 재시도 버튼만 준다
+  if (!rec) {
+    if (state.aiRecFailedDate !== getTodayStr()) return '';
+    return '<div class="ai-rec-card mb-4">' +
+      '<div class="flex items-center justify-between gap-3">' +
+        '<div>' +
+          '<p class="text-sm font-display font-bold">오늘의 추천을 못 받았어요</p>' +
+          '<p class="text-[10px] font-mono text-stone-500 mt-0\\.5">네트워크·API 키를 확인한 뒤 다시 시도</p>' +
+        '</div>' +
+        '<button class="session-header-btn" onclick="refreshAIRecommendation()" title="다시 추천">' + icon('refresh', 16) + '</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // 결과 — session은 fetchAIRecommendation이 5종(push/pull/legs/upper/free)으로 검증한 값.
+  // 옛 캐시가 이상한 값을 갖고 있어도 free로 폴백해 렌더가 깨지지 않게 한다.
+  var session = SESSIONS[rec.session] || SESSIONS.free;
+  var intensityKr = { light: '가볍게', moderate: '보통', challenging: '도전적' }[rec.intensity] || '보통';
+
+  return '<div class="ai-rec-card mb-4">' +
+    '<div class="relative">' +
+      '<div class="flex items-center justify-between mb-3">' +
+        '<span class="ai-badge">✨ 오늘의 추천</span>' +
+        '<button class="session-header-btn" onclick="refreshAIRecommendation()" title="다시 추천">' + icon('refresh', 16) + '</button>' +
+      '</div>' +
+      '<div class="flex items-baseline gap-3 mb-1">' +
+        '<p class="font-bebas text-4xl accent">' + session.name + '</p>' +
+        '<p class="text-[11px] font-mono text-stone-500">' + session.description + ' · 강도 ' + intensityKr + '</p>' +
+      '</div>' +
+      (rec.title ? '<p class="text-sm font-display font-bold">' + escapeHtml(rec.title) + '</p>' : '') +
+      (rec.reason ? '<div class="ai-rec-reason"><p class="text-xs text-stone-200 leading-relaxed">' + escapeHtml(rec.reason) + '</p></div>' : '') +
+      (rec.suggestion ? '<div class="ai-rec-suggestion"><p class="text-xs text-stone-200 leading-relaxed">💪 ' + escapeHtml(rec.suggestion) + '</p></div>' : '') +
+      (rec.caution ? '<div class="ai-rec-caution"><p class="text-xs leading-relaxed" style="color: #fbbf24;">⚠️ ' + escapeHtml(rec.caution) + '</p></div>' : '') +
+      '<p class="text-[11px] font-mono text-stone-500 mt-3">운동 탭에 ✨추천으로 표시돼 있어요</p>' +
+    '</div>' +
+  '</div>';
+}
+
+
 function renderWorkout() {
   // STEP 2/3는 다른 함수에서 처리, 여기는 STEP 1 (부위 선택)
   if (state.workoutWizardStep === 2) {
@@ -249,6 +330,14 @@ function renderWorkout() {
   if (legsCount === minCount) recommended = 'legs';
   else if (pullCount === minCount) recommended = 'pull';
   else recommended = 'push';
+
+  // 오늘의 AI 추천이 있으면 그 부위를 우선 (홈 카드와 ✨추천 배지가 어긋나지 않도록).
+  // AI는 컨디션(RPE)·디로드 단계·부족 부위·최근 추천 다양성까지 보고 고르므로
+  // 룰(이번 주 최소 횟수)보다 근거가 많다.
+  var aiRec = state.aiRecommendation;
+  if (aiRec && aiRec.date === getTodayStr() && SESSIONS[aiRec.session]) {
+    recommended = aiRec.session;
+  }
   
   // 7일 막대 그래프 데이터
   var dayBarsHtml = '';
@@ -1865,9 +1954,10 @@ window.completeSet = function() {
   }
 
   // 휴식 시간 결정: AI가 지정한 rest(초) 우선, 없으면 복합/고립 기본값 (B안)
-  var isCompound = ['프레스', '풀업', '랫풀다운', '로우', '스쿼트', '데드리프트', '레그 프레스', '핵 스쿼트'].some(function(k) {
-    return exercise.name.indexOf(k) !== -1;
-  });
+  // 복합 판정은 종목표(compound 플래그)로 — 이름 키워드 목록은 표준명 '랫 풀 다운'처럼
+  // 띄어쓰기가 다른 이름을 놓쳐 복합 종목에 고립 휴식(90초)을 준다.
+  var restInfo = EXERCISE_BODY_PART_MAP[exercise.name] || getExercisePart(exercise.name);
+  var isCompound = restInfo ? !!restInfo.compound : (exercise.type === '복합');
   var aiRest = exercise.rest ? parseInt(String(exercise.rest), 10) : NaN; // 범위 "120-180"이면 하단 120초
   var restDuration = set.isWarmup ? 60 : ((!isNaN(aiRest) && aiRest > 0) ? aiRest : (isCompound ? 150 : 90));
 
@@ -2002,7 +2092,7 @@ function buildSwapListHtml(query) {
   if (!nq) {
     // 같은 primary 부위의 다른 종목 — compound 일치 우선 정렬 (기존 동작)
     candidates = (primary ? (EXERCISES_BY_PRIMARY[primary] || []) : [])
-      .filter(function(name) { return name !== exercise.name && isExerciseAvailable(name); })
+      .filter(function(name) { return canonicalExerciseName(name) !== canonicalExerciseName(exercise.name) && isExerciseAvailable(name); })
       .sort(function(a, b) {
         var ai = EXERCISE_BODY_PART_MAP[a].compound === compound ? 0 : 1;
         var bi = EXERCISE_BODY_PART_MAP[b].compound === compound ? 0 : 1;
@@ -2011,7 +2101,7 @@ function buildSwapListHtml(query) {
   } else {
     // 전체 종목에서 검색 (공백 무시 부분일치), 같은 부위 우선
     candidates = Object.keys(EXERCISE_BODY_PART_MAP)
-      .filter(function(name) { return name !== exercise.name && norm(name).indexOf(nq) !== -1 && isExerciseAvailable(name); })
+      .filter(function(name) { return canonicalExerciseName(name) !== canonicalExerciseName(exercise.name) && !isAliasExerciseName(name) && norm(name).indexOf(nq) !== -1 && isExerciseAvailable(name); })
       .sort(function(a, b) {
         var ap = EXERCISE_BODY_PART_MAP[a].primary === primary ? 0 : 1;
         var bp = EXERCISE_BODY_PART_MAP[b].primary === primary ? 0 : 1;
@@ -2951,7 +3041,7 @@ window.deleteApiKey = function() {
 };
 
 // ═══════════════════════════════════════════════
-// 프로필 수정 모달 (묶음1): 기본(나이·키·체중) + 목표(단백질·칼로리·운동빈도)
+// 프로필 수정 모달 (묶음1): 기본(나이·키·체중) + 주간 운동 횟수
 // ═══════════════════════════════════════════════
 window.openProfileEditModal = function() {
   var p = state.profile || {};
@@ -3121,6 +3211,9 @@ function renderOneRMList() {
             '<div>' +
               '<p class="text-xs font-display font-bold" style="color: #fbbf24;">자동 갱신됨</p>' +
               '<p class="text-[10px] font-mono text-stone-400 leading-relaxed mt-1">최근 몇 번의 운동 중 최고 기록으로 추적해요. 신기록은 바로 반영, 한동안 못 들면 천천히 내려갑니다. 한 번의 컨디션 난조로 폭락하지 않아요. (Epley 공식)</p>' +
+              // 면책 한 줄. Epley는 종목별로 체계 편향이 있어(Nuzzo 2024: 같은 %1RM에서 가능한 반복이
+              // 벤치 8.8회 vs 레그프레스 13.1회) 절대값·종목 간 비교로 쓰면 안 된다. 같은 종목의 시간 추세로만 안전.
+              '<p class="text-[10px] font-mono text-stone-500 leading-relaxed mt-1">※ 실제로 1회 들어본 값이 아니라 계산으로 뽑은 추정치예요. 종목에 따라 10~15% 차이날 수 있어요. 종목끼리 비교하지 말고, 같은 종목이 시간이 지나며 오르는지만 보세요.</p>' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -3538,8 +3631,15 @@ function renderMore() {
 
 // AI 추천 새로고침
 window.refreshAIRecommendation = async function() {
-  // 캐시 무효화
+  if (!state.apiKey) {
+    showToast('API 키가 필요해요. 더보기에서 설정해주세요.', true);
+    return;
+  }
+  if (state.aiRecLoading) return;  // 연타 방지 (호출 2번 = 요금 2번)
+
+  // 캐시 무효화 + 실패 잠금 해제 (수동 새로고침은 항상 새로 부른다)
   storage.set(KEYS.AI_RECOMMENDATION, null);
+  state.aiRecFailedDate = null;
   
   state.aiRecLoading = true;
   state.aiRecommendation = null;
@@ -3548,6 +3648,11 @@ window.refreshAIRecommendation = async function() {
   var rec = await fetchAIRecommendation();
   state.aiRecommendation = rec;
   state.aiRecLoading = false;
+  if (!rec) {
+    // 실패하면 오늘은 자동 재시도 잠금 (홈 렌더가 다시 부르지 않도록)
+    state.aiRecFailedDate = getTodayStr();
+    showToast('추천을 못 받았어요. 잠시 후 다시 시도해주세요.', true);
+  }
   render();
 };
 
@@ -4557,10 +4662,13 @@ function renderStats() {
         '<div class="bar-chart" style="height: 140px;">' + weekBarsHtml + '</div>' +
         
         '<div class="border-t pt-4 mt-5">' +
-          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest mb-3">부위별 분배</p>' +
+          '<p class="text-[10px] font-mono text-stone-500 uppercase tracking-widest mb-3">세션 타입 분배</p>' +
           partsHtml +
         '</div>' +
       '</div>' +
+
+      // 부위별 주간 볼륨 (최근 2주 — AI 프롬프트와 같은 수치)
+      volumeByPartCardHtml() +
 
       // 유산소 요약(기록 있을 때만)
       cardioSummaryCardHtml(period) +
@@ -4637,6 +4745,135 @@ function renderStats() {
       
     '</div>';
 }
+
+// ═══════════════════════════════════════════════
+// 부위별 주간 볼륨 카드 (STATS)
+//  - AI 프롬프트(buildUserContext)가 보는 것과 "같은 함수·같은 인자(2주)"를 써서 숫자가 어긋나지 않게 한다.
+//  - 기간 탭(state.statsPeriod)과 무관하게 항상 최근 2주 평균이다.
+//  - 상한 초과는 '과잉'이 아니라 '이득 완만' — 볼륨-근비대 곡선이 꺾이는 지점은 아직 확인된 적이 없다
+//    (Pelland 2025/2026, 67개 연구·2,058명: 기울기>0 사후확률 100%).
+// ═══════════════════════════════════════════════
+function volumeByPartCardHtml() {
+  var WEEKS = 2; // js/ai.js buildUserContext 의 getRecentVolumeByPart(2) 와 반드시 동일
+  var log = (state.data && state.data.workoutLog) ? state.data.workoutLog : [];
+  if (!log.length) return '';
+
+  // 최소 표본 가드 — 첫 기록부터 오늘까지 14일 미만이면 판정하지 않는다.
+  // (볼륨은 항상 2로 나눈 주간 평균이라, 3일 쓴 사용자는 전 부위가 '부족'으로 보인다)
+  var dates = log.map(function(w) { return String(w.date || ''); }).filter(function(s) { return s; }).sort();
+  var spanDays = 0;
+  if (dates.length > 0) {
+    var firstD = new Date(dates[0] + 'T00:00:00');
+    var todayD = new Date(getTodayStr() + 'T00:00:00');
+    spanDays = Math.floor((todayD.getTime() - firstD.getTime()) / 86400000) + 1;
+  }
+  var enoughData = spanDays >= WEEKS * 7;
+
+  var split = getRecentVolumeSplitByPart(WEEKS);
+  var groupedFrac = groupVolumeBy(split.fractional);
+  var groupedDirect = groupVolumeBy(split.direct);
+
+  // 판정은 도메인의 getVolumeDiagnosis 한 곳에서만 — 프롬프트와 같은 버킷을 쓴다
+  var diag = getVolumeDiagnosis(split.fractional, WEEKS);
+  var verdictOf = {};
+  var buckets = [
+    ['lacking',      '부족',      'var(--danger)',  'var(--danger-rgb)'],
+    ['belowOptimal', '하한 미달', 'var(--warn)',    'var(--warn-rgb)'],
+    ['optimal',      '적정',      'var(--success)', 'var(--success-rgb)'],
+    ['excessive',    '이득 완만', 'var(--purple)',  'var(--purple-rgb)']
+  ];
+  buckets.forEach(function(b) {
+    (diag[b[0]] || []).forEach(function(e) {
+      verdictOf[e.group] = { text: b[1], color: b[2], rgb: b[3] };
+    });
+  });
+
+  // 그룹별 행 (주간 평균 = 최근 2주 누적 / 2)
+  var rows = [];
+  var untouched = [];
+  Object.keys(BODY_PART_GROUPS).forEach(function(g) {
+    var frac = (groupedFrac[g] || 0) / WEEKS;
+    if (frac <= 0) { untouched.push(BODY_PART_GROUPS[g].kr); return; }
+    var th = getVolumeThresholds(g);
+    rows.push({
+      kr: BODY_PART_GROUPS[g].kr,
+      frac: frac,
+      direct: (groupedDirect[g] || 0) / WEEKS,
+      th: th,
+      verdict: verdictOf[g] || null
+    });
+  });
+
+  var head =
+    '<div class="flex items-center justify-between mb-1">' +
+      '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono">부위별 주간 볼륨</p>' +
+      '<p class="text-[10px] font-mono text-stone-500">최근 2주 평균</p>' +
+    '</div>';
+
+  if (rows.length === 0) {
+    return '<div class="card mb-4">' + head +
+        '<p class="text-xs text-stone-500 font-mono text-center" style="padding: 16px 0;">최근 2주 세트 기록이 없어요</p>' +
+      '</div>';
+  }
+
+  // 모자란 부위가 위로 (숫자는 그대로, 보는 순서만 바꾼다)
+  rows.sort(function(a, b) { return (a.frac / a.th.optimalLow) - (b.frac / b.th.optimalLow); });
+
+  // 한 행 = 부위명 + 상태 배지 + 가로 막대(적정 범위 밴드) + 직접/간접 세트 수
+  function volRow(r) {
+    var color = 'var(--text-muted)';
+    var rgb = 'var(--muted-rgb)';
+    var pill = '';
+    if (enoughData && r.verdict) {
+      color = r.verdict.color;
+      rgb = r.verdict.rgb;
+      pill = '<span class="meal-status-pill" style="color: ' + color + '; background: rgba(' + rgb + ', 0.15);">' + r.verdict.text + '</span>';
+    }
+    // 눈금 상한 = 적정 상한 × 1.4 → 큰/작은 근육 모두 밴드가 같은 위치(36%~71%)에 와서 한눈에 비교된다
+    var scaleMax = r.th.optimalTop * 1.4;
+    var pctFrac = Math.min(100, (r.frac / scaleMax) * 100);
+    var pctDirect = Math.min(100, (r.direct / scaleMax) * 100);
+    var bandL = (r.th.optimalLow / scaleMax) * 100;
+    var bandR = (r.th.optimalTop / scaleMax) * 100;
+
+    return '<div style="margin-bottom: 12px;">' +
+      '<div class="flex items-center justify-between mb-1">' +
+        '<p class="text-xs font-display font-bold">' + r.kr + '</p>' +
+        pill +
+      '</div>' +
+      '<div class="progress-bg" style="position: relative; height: 9px;">' +
+        // 적정 범위 밴드
+        '<div style="position: absolute; top: 0; bottom: 0; left: ' + bandL.toFixed(1) + '%; width: ' + (bandR - bandL).toFixed(1) + '%; background: rgba(var(--success-rgb), 0.16);"></div>' +
+        // 간접 포함(분할환산) — 연한 막대
+        '<div style="position: absolute; top: 0; bottom: 0; left: 0; width: ' + pctFrac.toFixed(1) + '%; border-radius: 9999px; background: rgba(' + rgb + ', 0.38);"></div>' +
+        // 직접 세트(primary) — 진한 막대
+        '<div style="position: absolute; top: 0; bottom: 0; left: 0; width: ' + pctDirect.toFixed(1) + '%; border-radius: 9999px; background: ' + color + ';"></div>' +
+        // 적정 하한/상한 눈금
+        '<div style="position: absolute; top: 0; bottom: 0; left: ' + bandL.toFixed(1) + '%; width: 1px; background: rgba(var(--white-rgb), 0.45);"></div>' +
+        '<div style="position: absolute; top: 0; bottom: 0; left: ' + bandR.toFixed(1) + '%; width: 1px; background: rgba(var(--white-rgb), 0.45);"></div>' +
+      '</div>' +
+      '<div class="flex items-center justify-between mt-1">' +
+        '<p class="text-[10px] font-mono text-stone-500">직접 ' + r.direct.toFixed(1) + ' · 간접 포함 ' + r.frac.toFixed(1) + '세트/주</p>' +
+        '<p class="text-[10px] font-mono text-stone-600 flex-shrink-0">적정 ' + r.th.optimalLow + '~' + r.th.optimalTop + '</p>' +
+      '</div>' +
+    '</div>';
+  }
+
+  var guardHtml = enoughData ? '' :
+    '<div class="mb-3" style="padding: 10px 12px; border-radius: 12px; background: rgba(var(--warn-rgb), 0.10); border: 1px solid rgba(var(--warn-rgb), 0.25);">' +
+      '<p class="text-xs font-display font-bold" style="color: var(--warn);">아직 판단하기 이릅니다</p>' +
+      '<p class="text-[10px] font-mono text-stone-500 mt-1">기록이 2주 이상 쌓이면 부족·적정을 표시해요. 지금은 세트 수만 보여줍니다.</p>' +
+    '</div>';
+
+  return '<div class="card mb-4">' + head +
+      '<p class="text-[10px] font-mono text-stone-600 mb-3">진한 막대 = 직접 세트 · 연한 막대 = 간접(보조근 0.5) 포함</p>' +
+      guardHtml +
+      rows.map(volRow).join('') +
+      (untouched.length > 0 ? '<p class="text-[10px] font-mono text-stone-600 mt-2">주 0세트: ' + untouched.join(' · ') + '</p>' : '') +
+      '<p class="text-[10px] font-mono text-stone-600 mt-3">이 범위는 연구 평균이고 본인 반응은 다를 수 있어요.</p>' +
+    '</div>';
+}
+
 
 // ═══════════════════════════════════════════════
 // 자리표시 화면

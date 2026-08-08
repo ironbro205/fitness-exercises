@@ -157,12 +157,14 @@ var SESSIONS = {
     exerciseCount: 6,
     setCount: 18,
     exercises: [
-      { name: '체스트 프레스 머신', type: '머신', sets: 3, reps: '8-10', lastWeight: 60 },
-      { name: '인클라인 덤벨 프레스', type: '덤벨', sets: 3, reps: '10-12', lastWeight: 20 },
-      { name: '숄더 프레스 머신', type: '머신', sets: 3, reps: '8-10', lastWeight: 40 },
-      { name: '사이드 레터럴 레이즈', type: '덤벨', sets: 3, reps: '12-15', lastWeight: 8 },
-      { name: '펙덱 플라이', type: '머신', sets: 3, reps: '12-15', lastWeight: 35 },
-      { name: '트라이셉스 푸시다운', type: '케이블', sets: 3, reps: '10-15', lastWeight: 25 }
+      // 종목명은 EXERCISE_ALIASES_1RM 기준 **표준명**으로 쓴다 — 별칭 표기로 저장되면
+      // 진행도·통증·자극 조회가 표준명 기록과 갈린다(정규화 이후에도 표기 통일이 원칙).
+      { name: '머신 체스트 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 60 },
+      { name: '덤벨 인클라인 벤치 프레스', type: '덤벨', sets: 3, reps: '10-12', lastWeight: 20 },
+      { name: '머신 시티드 숄더 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 40 },
+      { name: '덤벨 사이드 레터럴 레이즈', type: '덤벨', sets: 3, reps: '12-15', lastWeight: 8 },
+      { name: '머신 펙 덱 플라이', type: '머신', sets: 3, reps: '12-15', lastWeight: 35 },
+      { name: '케이블 푸시 다운', type: '케이블', sets: 3, reps: '10-15', lastWeight: 25 }
     ]
   },
   pull: {
@@ -173,11 +175,11 @@ var SESSIONS = {
     setCount: 18,
     exercises: [
       { name: '풀업', type: '체중', sets: 3, reps: '본인 최대', lastWeight: null, reps_done: 7 },
-      { name: '랫풀다운', type: '머신', sets: 3, reps: '8-12', lastWeight: 50 },
-      { name: '시티드 로우 머신', type: '머신', sets: 3, reps: '8-12', lastWeight: 55 },
+      { name: '랫 풀 다운', type: '머신', sets: 3, reps: '8-12', lastWeight: 50 },
+      { name: '머신 시티드 로우', type: '머신', sets: 3, reps: '8-12', lastWeight: 55 },
       { name: '페이스 풀', type: '케이블', sets: 3, reps: '12-15', lastWeight: 20 },
       { name: '인클라인 덤벨 컬', type: '덤벨', sets: 3, reps: '10-12', lastWeight: 10 },
-      { name: '해머 컬', type: '덤벨', sets: 3, reps: '10-15', lastWeight: 12 }
+      { name: '덤벨 해머 컬', type: '덤벨', sets: 3, reps: '10-15', lastWeight: 12 }
     ]
   },
   legs: {
@@ -188,7 +190,7 @@ var SESSIONS = {
     setCount: 18,
     exercises: [
       { name: '레그 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 120 },
-      { name: '레그 익스텐션', type: '머신', sets: 3, reps: '12-15', lastWeight: 45 },
+      { name: '머신 레그 익스텐션', type: '머신', sets: 3, reps: '12-15', lastWeight: 45 },
       // 종목명은 EXERCISE_BODY_PART_MAP의 정확 키를 쓴다 — 퍼지 매칭에 의존하면 부위·장비 판정이 어긋난다.
       // ('시티드 햄스트링 컬'·'카프 레이즈 머신'은 맵에 없는 이름이었고, 후자는 이 헬스장에 없는 전용 카프 머신을 가리켰다)
       { name: '시티드 레그 컬', type: '머신', sets: 3, reps: '10-12', lastWeight: 35 },
@@ -204,13 +206,13 @@ var SESSIONS = {
     exerciseCount: 7,
     setCount: 21,
     exercises: [
-      { name: '체스트 프레스 머신', type: '머신', sets: 3, reps: '8-10', lastWeight: 60 },
-      { name: '랫풀다운', type: '머신', sets: 3, reps: '8-12', lastWeight: 50 },
-      { name: '숄더 프레스 머신', type: '머신', sets: 3, reps: '8-10', lastWeight: 40 },
-      { name: '시티드 로우 머신', type: '머신', sets: 3, reps: '8-12', lastWeight: 55 },
-      { name: '사이드 레터럴 레이즈', type: '덤벨', sets: 3, reps: '12-15', lastWeight: 8 },
+      { name: '머신 체스트 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 60 },
+      { name: '랫 풀 다운', type: '머신', sets: 3, reps: '8-12', lastWeight: 50 },
+      { name: '머신 시티드 숄더 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 40 },
+      { name: '머신 시티드 로우', type: '머신', sets: 3, reps: '8-12', lastWeight: 55 },
+      { name: '덤벨 사이드 레터럴 레이즈', type: '덤벨', sets: 3, reps: '12-15', lastWeight: 8 },
       { name: '인클라인 덤벨 컬', type: '덤벨', sets: 3, reps: '10-12', lastWeight: 10 },
-      { name: '트라이셉스 푸시다운', type: '케이블', sets: 3, reps: '10-15', lastWeight: 25 }
+      { name: '케이블 푸시 다운', type: '케이블', sets: 3, reps: '10-15', lastWeight: 25 }
     ]
   },
   free: {
@@ -429,12 +431,30 @@ var EXERCISE_BODY_PART_MAP = {
   '터미널 니 익스텐션': { primary: 'quads', secondary: [], compound: false, mainEligible: false, equipment: 'bodyweight' }
 };
 
+// 종목명 → 표준명 (별칭 표기 흡수). 기록 조회(진행도·통증·자극·채팅 신호)는 전부 이걸 거쳐야
+// '랫풀다운'과 '랫 풀 다운'의 히스토리가 갈리지 않는다. 1RM 계열(get1RM·update1RM·
+// calculateRollingMax1RM)은 예전부터 같은 규칙을 쓰고 있었고, 나머지가 누락돼 있었다.
+// data.js에 두는 이유: 바로 아래 EXERCISES_BY_PRIMARY IIFE가 로드 시점에 이미 이걸 쓴다.
+function canonicalExerciseName(name) {
+  return EXERCISE_ALIASES_1RM[name] || name;
+}
+
+// '표준명이 따로 있고 그 표준명도 종목표에 등록된' 별칭 표기인가.
+// 종목 풀·교체 후보에서 중복 노출을 막는 데만 쓴다 — 표 항목 자체는 옛 기록의
+// 부위·장비 판정용으로 그대로 남겨야 한다(지우면 과거 로그가 볼륨에서 사라진다).
+function isAliasExerciseName(name) {
+  var canon = EXERCISE_ALIASES_1RM[name];
+  return !!(canon && canon !== name && EXERCISE_BODY_PART_MAP[canon]);
+}
+
 // primary 부위별 종목 이름 인덱스 (종목 변경 시트 등에서 O(1) 조회)
+// 별칭 표기는 제외 — 같은 운동이 두 이름으로 교체 후보·대체 종목에 뜨는 것을 막는다.
 var EXERCISES_BY_PRIMARY = (function() {
   var idx = {};
   Object.keys(EXERCISE_BODY_PART_MAP).forEach(function(name) {
     var info = EXERCISE_BODY_PART_MAP[name];
     if (!info || !info.primary) return;
+    if (isAliasExerciseName(name)) return;
     if (!idx[info.primary]) idx[info.primary] = [];
     idx[info.primary].push(name);
   });
@@ -1085,7 +1105,7 @@ var BODY_PART_KR = {
 var COACH_KNOWLEDGE =
   '### 1. 트레이닝 핵심 원리\n' +
   '- 볼륨: 부위당 주 10~20 직접세트가 핵심 구간. 세트 1개당 약 +0.24% 근비대, 이후 수확 체감(금지선 아님 — 회복 여력 되면 더 가능) (Pelland 2024). 4세트 미만=부족. 간접(보조근) 세트는 0.5로 합산해 판단.\n' +
-  '- 빈도: 같은 부위 주 2회 자극이 1회보다 우월. 주간 볼륨이 같다면 2회 분할이 유리 (Schoenfeld 2016 메타).\n' +
+  '- 빈도: 주간 총 세트가 같으면 주 1회든 2회든 근비대 차이가 없다 (Schoenfeld·Grgic·Krieger 2019, J Sports Sci 37(11):1286, 25개 연구 — 2016년 메타의 같은 저자들이 뒤집음). 그럼에도 주 2회를 권하는 이유는 두 가지다: ① 근력에는 빈도가 유의미하고(Pelland 2025), ② 주간 세트를 한 세션에 몰면 세션 내 수확 체감 구간에 들어가므로 나눠 담는 그릇이 필요하다. 사용자가 주 1회 분할을 선호하면 막지 말고 세션당 부위 세트 수만 점검한다.\n' +
   '- 강도(노력): 본세트는 실패 1~3회 전(RIR 1~3)에서 멈추는 것이 효율적. 매 세트 완전 실패는 피로만 누적 (Refalo 2023).\n' +
   '- 반복 범위: 약 5~30회 모두 실패에 근접하면 근비대 효과는 동등 (IUSCA 2021). 저반복=근력에 유리, 고반복=관절 부담↓·펌프.\n' +
   '- 신장 강조(스트레치): 근육이 늘어난 위치에서 부하가 큰 종목/가동범위가 근비대에 유리. 긴 근육 길이가 핵심이며 신장 부분반복은 전가동과 같거나 우월 (Maeo 2023, 2024~25 메타 재확인).\n' +
@@ -1112,10 +1132,25 @@ var COACH_KNOWLEDGE =
   '- 손목/팔꿈치: 그립·각도(EZ바/뉴트럴) 변경으로 완화되는 경우 많음.\n' +
   '- 2주 이상 지속·악화되거나 일상에 지장을 주면 의료/물리치료 전문가 상담 권유. 코치는 진단을 대신하지 않음.\n\n' +
 
+  '### 4. 영양 — 단백질\n' +
+  '- 총량이 거의 전부다: 하루 1.6 g/kg 체중 부근에서 수확 체감이 시작된다 (Morton 2018 BJSM, 49개 RCT·1,863명 — 1.62 g/kg을 넘겨도 제지방 증가분이 더 늘지 않음). Tagawa 2021(105편·5,402명)도 1.3 g/kg 아래에서 기울기가 급하고 그 위에서 완만해진다고 보고.\n' +
+  '- 감량(적자) 중에는 더 높인다: 1.6~2.4 g/kg 체중 (Hector & Phillips 2018). Longland 2016(AJCN): 40% 적자 + 고강도 훈련 4주에서 2.4 g/kg 군은 제지방 +1.2kg / 지방 -4.8kg, 1.2 g/kg 군은 +0.1kg / -3.5kg. 적자 중에도 근육이 늘 수 있다.\n' +
+  '- 흔한 통념 반박: "한 끼 20~30g 넘으면 낭비"는 틀렸다. Trommelen 2023(Cell Rep Med)에서 100g을 한 번에 먹어도 25g보다 근단백질 합성이 더 크고 더 오래 지속됐다. 옛 상한설은 관찰 시간을 3~5시간으로 짧게 잡아 생긴 착시다.\n' +
+  '- 분배(끼니당 0.4 g/kg)는 총량이 부족할 때만 의미가 있다. 원 출처(Schoenfeld & Aragon 2018) 저자들도 추정치임을 밝혔고 이후 연구는 엇갈린다(Hudson 2017: 균등 vs 편중 분배 체성분 차이 없음). → 총량을 채웠으면 분배는 부차적이라고 답할 것.\n\n' +
+
+  '### 5. 영양 — 에너지 균형과 리컴포지션\n' +
+  '- 리컴포지션(체지방↓ + 근육↑ 동시)은 실제로 가능하다. 초보·복귀자·체지방이 여유 있는 사람에게서 특히 잘 일어난다 (Barakat 2020 Strength Cond J). 필수 조건은 (1) 점진적 과부하 (2) 충분한 단백질.\n' +
+  '- 적자 상한: 하루 500 kcal를 넘기면 제지방 증가가 사라진다 (Murphy & Koehler 2022 메타회귀).\n' +
+  '- 감량 속도: 주 0.5~1.0% 체중. Garthe 2011(IJSNEM): 주 0.7% 감량군은 제지방 +2.1%, 주 1.4% 감량군은 -0.2%로 정체 — 두 군 다 주 4회 웨이트를 했는데도 차이가 났다.\n' +
+  '- 증량 속도: 주 +0.25~0.5% 체중, 유지 칼로리 대비 +10~20% (Iraki 2019).\n' +
+  '- 단기 체중 변동은 지방이 아니다: 2주간 체중 변화의 84%가 제지방(주로 수분) (Bhutani 2017). 하루 체중 하나로 판단하지 말고 7일 이동평균 추세로 볼 것.\n' +
+  '- 보충제는 6번 항목 기준으로 답한다 — 근육량과 직접 연관되는 건 크레아틴뿐이다.\n\n' +
+
   '### 6. 보충제 (근거 등급순)\n' +
-  '- 크레아틴 모노하이드레이트: 가장 입증된 근력·근비대 보조. 매일 3~5g, 로딩 불필요(꾸준함이 핵심). 안전 (ISSN).\n' +
+  '- 크레아틴 모노하이드레이트: 근육량과 직접 연관되는 사실상 유일한 보충제. 매일 3~5g, 로딩 불필요(꾸준함이 핵심). 안전 (Kreider 2017, ISSN 포지션스탠드).\n' +
   '- 카페인: 운동 약 60분 전 3~6 mg/kg으로 근력·파워·근지구력 소폭 향상. 약 2mg/kg부터 효과 가능, 9mg/kg 이상은 부작용↑·추가 이득 없음 (ISSN 2021, Guest).\n' +
-  '- 그 외(시트룰린·베타알라닌 등)는 효과가 작거나 상황 한정. 크레아틴·카페인이 우선.\n\n' +
+  '- 퍼포먼스 근거가 충분하다고 본 건 IOC 합의(Maughan 2018) 기준 카페인·크레아틴·질산염(비트루트)·중탄산나트륨·(아마도) 베타알라닌 다섯뿐이며, 이 중 근비대 목적에 실익이 있는 건 크레아틴·카페인이다.\n' +
+  '- 그 외(시트룰린·BCAA·테스토 부스터 등)는 효과가 작거나 근거가 약하다. 확실하지 않으면 근거가 약하다고 정직하게 답할 것.\n\n' +
 
   '### 7. 회복 — 수면·디로드·부위 회복\n' +
   '- 수면 7~9시간. 4~6시간으로 줄면 MPS·테스토스테론↓, 회복·수행 저하.\n' +
