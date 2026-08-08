@@ -2136,10 +2136,19 @@ test('XSS 회귀 — AI 응답·사용자 입력을 심어도 어떤 화면에�
   assert.deepEqual(leakedTag, [], '태그가 살아있는 화면: ' + leakedTag.join(', '));
   assert.deepEqual(leakedAttr, [], '속성 탈출이 가능한 화면: ' + leakedAttr.join(', '));
 
-  // '지난 기록' 줄은 현재 종목 하나만 그린다 → 무게 있는 종목/맨몸 종목 두 갈래를 각각 태운다
+  // '지난 기록' 줄은 현재 종목 하나만 그린다 → 무게 있는 종목/맨몸 종목 두 갈래를 각각 태운다.
+  // ⚠ 이 줄은 추천이 'rm_estimate'(=수행 기록 없음 + 1RM 있음)일 때만 그려진다. 그 조건이 나중에
+  //   바뀌면 줄 자체가 사라져 "태그 없음" 어서션이 **아무것도 검사하지 않은 채 통과**한다.
+  //   그래서 통과 조건을 뒤집어, 페이로드가 **이스케이프된 모습으로 실제로 찍혔는지**를 확인한다.
+  //   (이 어서션이 깨지면 '이스케이프가 뚫렸다'가 아니라 '이 테스트가 헛돌기 시작했다'는 신호다)
+  const prevTextMarks = ['&lt;img src=x onerror=eeek()&gt;kg ×', '&lt;img src=x onerror=eeek()&gt;회 ×'];
   for (const idx of [0, 1]) {
     fresh.state.activeSession.currentExerciseIdx = idx;
-    assert.ok(!fresh.renderWorkoutSession().includes('<img'), '세션 화면 종목 ' + idx + ' 에서 태그가 살아있다');
+    const h = fresh.renderWorkoutSession();
+    assert.ok(!h.includes('<img'), '세션 화면 종목 ' + idx + ' 에서 태그가 살아있다');
+    assert.ok(h.includes('지난 기록'), "'지난 기록' 줄이 안 그려졌다 — 이 검사가 헛돌고 있다 (종목 " + idx + ')');
+    assert.ok(h.includes(prevTextMarks[idx]),
+      '지난 기록 줄에 이스케이프된 값이 안 보인다 — 이 검사가 헛돌고 있다 (종목 ' + idx + ')');
   }
   fresh.state.activeSession.currentExerciseIdx = 0;
 
