@@ -243,3 +243,67 @@ test('세트 구성: 증량 모드면 새 무게 + 범위 하단부터 (더블 �
   assert.equal(plan.weight, 105);
   assert.equal(plan.reps, 8, '증량 후엔 하단부터 다시 채움');
 });
+
+// ═══ 8. 종목 이름 별칭 정합성 (표준명/별칭 표기가 같은 히스토리를 본다) ═══
+test('별칭: 랫풀다운/랫 풀 다운이 같은 추천 무게를 낸다 (65kg vs 45kg 발산 금지)', () => {
+  seedLog([
+    workout(daysAgo(3), '랫풀다운', [set(60, 12), set(60, 12), set(60, 12)]),
+    workout(daysAgo(7), '랫풀다운', [set(60, 12), set(60, 12), set(60, 12)]),
+  ]);
+  const alias = app.getProgressiveRecommendation('랫풀다운', '8-12');
+  const canon = app.getProgressiveRecommendation('랫 풀 다운', '8-12');
+  assert.equal(alias.source, 'progress');
+  assert.equal(canon.source, 'progress', '표준명이 별칭 기록을 못 보면 rm_estimate로 떨어진다');
+  assert.equal(canon.weight, alias.weight);
+  assert.equal(canon.previousWeight, alias.previousWeight, '지난 무게도 같은 기록으로 인식');
+});
+
+test('별칭: 통증 게이트가 표기와 무관하게 걸린다', () => {
+  seedLog([workout(daysAgo(2), '랫풀다운', [set(60, 12, { painFlag: true })])]);
+  assert.equal(app.hasRecentPain('랫풀다운', 14), true);
+  assert.equal(app.hasRecentPain('랫 풀 다운', 14), true);
+});
+
+test('별칭: 통증 게이트가 추천까지 이어진다 (별칭으로 보고 → 표준명 조회에서도 증량 차단)', () => {
+  // 별칭 표기('체스트 프레스 머신')로만 기록 — 상단(10회) 달성이라 통증이 없으면 증량이 나온다.
+  seedLog([
+    workout(daysAgo(2), '체스트 프레스 머신', [set(60, 10), set(60, 10, { painFlag: true, painSite: '어깨' })]),
+  ]);
+  const canon = app.getProgressiveRecommendation('머신 체스트 프레스', '8-10');
+  assert.ok(canon, '표준명 조회에도 추천 카드가 나와야 함');
+  assert.ok(canon.painGated, '별칭으로 보고한 통증이 표준명 추천에서도 게이트를 걸어야 함');
+  assert.notEqual(canon.source, 'progress', '통증 있는데 증량 제안 금지');
+  assert.equal(canon.weight, 60, '증량 없이 지난 무게 유지');
+  // 별칭 표기로 물어봐도 같은 판정 (표기에 따라 안전 게이트가 갈리면 안 된다)
+  const alias = app.getProgressiveRecommendation('체스트 프레스 머신', '8-10');
+  assert.equal(alias.painGated, canon.painGated);
+  assert.equal(alias.source, canon.source);
+  assert.equal(alias.weight, canon.weight);
+});
+
+test('별칭: 종목 인덱스·SESSIONS 템플릿에 별칭 표기가 남아 있지 않다', () => {
+  const parts = Object.keys(app.EXERCISES_BY_PRIMARY);
+  assert.ok(parts.length > 0, '부위 인덱스가 비어 있으면 이 테스트가 헛돈다');
+  let indexed = 0;
+  parts.forEach((part) => {
+    app.EXERCISES_BY_PRIMARY[part].forEach((name) => {
+      indexed++;
+      assert.ok(!app.isAliasExerciseName(name), `${part} 인덱스에 별칭 표기 "${name}"이 남아 있다`);
+    });
+  });
+  assert.ok(indexed > 0, '인덱스에 종목이 하나도 없으면 이 테스트가 헛돈다');
+
+  let templated = 0;
+  Object.keys(app.SESSIONS).forEach((key) => {
+    (app.SESSIONS[key].exercises || []).forEach((ex) => {
+      templated++;
+      assert.ok(!app.isAliasExerciseName(ex.name), `SESSIONS.${key}에 별칭 표기 "${ex.name}"이 남아 있다`);
+    });
+  });
+  assert.ok(templated > 0, 'SESSIONS 템플릿에 종목이 하나도 없으면 이 테스트가 헛돈다');
+});
+
+test('별칭: 표준명이 종목표에 없는 별칭도 부위가 잡힌다 (볼륨 누락 방지)', () => {
+  assert.equal(app.getExercisePart('레그프레스').primary, 'quads');
+  assert.equal(app.getExercisePart('인클라인 덤벨 벤치 프레스').primary, 'chest_upper');
+});

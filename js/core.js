@@ -28,6 +28,7 @@ var KEYS = {
   CYCLE_HISTORY: 'fitness_cycle_history',
   COACH_MEMORY: 'fitness_coach_memory',
   AI_RECOMMENDATION_HISTORY: 'fitness_ai_recommendation_history',
+  AI_REC_FAILED_DATE: 'fitness_ai_rec_failed_date',
   CHAT_SIGNALS: 'fitness_chat_signals',
   LAST_BACKUP: 'fitness_last_backup'
 };
@@ -120,7 +121,7 @@ var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v44';
+var APP_VERSION = 'v45';
 // 백업에 담지 않는 키. 두 부류:
 // (1) 로컬 전용·민감 → 복원해도 그대로 보존 (API 키·코치 대화)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
@@ -137,6 +138,7 @@ var BACKUP_TRANSIENT_KEYS = [
   KEYS.EXERCISES_VERSION,
   KEYS.AI_RECOMMENDATION,  // AI 캐시 (새 데이터 기준으로 재생성)
   KEYS.AI_RECOMMENDATION_HISTORY, // 추천 다양성용 이력 (재생성 가능)
+  KEYS.AI_REC_FAILED_DATE, // 오늘 추천 실패 잠금 (하루짜리 임시값)
   KEYS.WEEKLY_REVIEW,
   KEYS.PLATEAU_CHECK
 ];
@@ -474,7 +476,7 @@ function generateDemoData() {
   var personalRecords = [
     { id: 'p1', exerciseName: '레그 프레스', weight: 120, reps: 10, previousWeight: 115, date: new Date(today.getTime() - 2 * 86400000).toISOString().split('T')[0] },
     { id: 'p2', exerciseName: '풀업', reps: 8, previousReps: 7, date: new Date(today.getTime() - 5 * 86400000).toISOString().split('T')[0] },
-    { id: 'p3', exerciseName: '체스트 프레스', weight: 65, reps: 8, previousWeight: 62.5, date: new Date(today.getTime() - 14 * 86400000).toISOString().split('T')[0] }
+    { id: 'p3', exerciseName: '머신 체스트 프레스', weight: 65, reps: 8, previousWeight: 62.5, date: new Date(today.getTime() - 14 * 86400000).toISOString().split('T')[0] }
   ];
   
   // 체중 기록 (최근 30일 추세: 78.0 → 77.2)
@@ -569,6 +571,7 @@ var state = {
   // AI 추천
   aiRecommendation: null,
   aiRecLoading: false,
+  aiRecFailedDate: null,   // 오늘 자동 로드가 실패한 날짜(YYYY-MM-DD). 렌더마다 재호출되는 무한 재시도 방지용 잠금.
   // 주간 리뷰
   weeklyReview: null,
   weeklyReviewLoading: false,
@@ -842,6 +845,10 @@ function init() {
   if (cachedRec && cachedRec.date === getTodayStr()) {
     state.aiRecommendation = cachedRec;
   }
+  // 오늘 추천 실패 잠금 복원 — 메모리에만 두면 새로고침마다 잠금이 풀려
+  // 실패할 때마다 유료 API가 다시 나간다(앱을 열 때마다 1회). 어제 것은 버린다.
+  var failedDate = storage.get(KEYS.AI_REC_FAILED_DATE);
+  state.aiRecFailedDate = (failedDate === getTodayStr()) ? failedDate : null;
   
   // 캐시된 주간 리뷰 로드 (이번 주 것만)
   var cachedReview = storage.get(KEYS.WEEKLY_REVIEW);

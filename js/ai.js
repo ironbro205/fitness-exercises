@@ -116,7 +116,7 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
     
     '## 🧬 과학 근거 (인용 시 활용)\n' +
     '- 부위당 주 10~20세트 (Pelland 2024) / RIR 1~3 (Refalo 2023)\n' +
-    '- 부위당 주 2회 자극 우월 (Schoenfeld 2016)\n' +
+    '- 빈도: 볼륨 같으면 주 1회=2회 (Schoenfeld 2019) — 주 2회는 세트를 나눠 담는 수단이지 그 자체가 우월한 건 아님\n' +
     '- 신장 위치 강조 우월 (Maeo 2023) / 머신=프리웨이트 (Schwanbeck)\n' +
     '- 5~30회 반복 모두 유효 (IUSCA 2021)\n\n' +
     
@@ -330,10 +330,12 @@ function buildUserContext(options) {
         repsList.push(ex.reps);
       }
 
-      if (!recentLifts[ex.name]) {
-        recentLifts[ex.name] = { weight: weight, date: w.date, history: [], lastReps: repsList };
+      // 별칭 표기는 표준명으로 합친다 — 같은 운동이 두 줄로 보이면 정체기(plateau) 판정도 갈린다
+      var liftKey = canonicalExerciseName(ex.name);
+      if (!recentLifts[liftKey]) {
+        recentLifts[liftKey] = { weight: weight, date: w.date, history: [], lastReps: repsList };
       }
-      recentLifts[ex.name].history.push({ weight: weight, date: w.date, reps: repsList });
+      recentLifts[liftKey].history.push({ weight: weight, date: w.date, reps: repsList });
     });
   });
   
@@ -380,7 +382,8 @@ function buildUserContext(options) {
       var exList = w.exercises || w.exercisesData;
       if (!Array.isArray(exList)) return;
       exList.forEach(function(ex) {
-        if (ex && ex.name && thisWeekExNames.indexOf(ex.name) === -1) thisWeekExNames.push(ex.name);
+        var exCanon = ex && ex.name ? canonicalExerciseName(ex.name) : null;
+        if (exCanon && thisWeekExNames.indexOf(exCanon) === -1) thisWeekExNames.push(exCanon);
       });
     });
     if (thisWeekExNames.length > 0) {
@@ -437,8 +440,12 @@ function buildUserContext(options) {
       ctx += '⚠️ **부족 부위 (최우선 보충)**:\n';
       diagnosis.lacking.forEach(function(item) {
         // 보유 장비로 못 하는 종목은 권장에서 뺀다 (장비 표만 고쳐도 추천이 따라오도록 런타임 필터)
-        var recs = (WEAK_PART_EXERCISE_MAP[item.group] || []).filter(function(n) {
-          return isExerciseAvailable(n.replace(/\(.*\)$/, ''));
+        // 이름 뒤 괄호 주석('(이두 보조 자극)')은 떼고 넘긴다 — AI가 그대로 베껴 쓰면
+        // 1RM·진행도·통증 조회가 전부 '이름 완전 일치'라 기록이 통째로 빗나간다.
+        var recs = (WEAK_PART_EXERCISE_MAP[item.group] || []).map(function(n) {
+          return n.replace(/\(.*\)$/, '');
+        }).filter(function(n) {
+          return isExerciseAvailable(n);
         });
         ctx += '- ' + item.label + volNeedNote(item.vol, item.target);
         if (recs.length > 0) {
@@ -632,7 +639,7 @@ function buildCoachSystemParts() {
     '2. **데이터 기반 개인화** — 내 데이터(부족/과잉 부위, 1RM 등)에 관한 질문은 그 데이터를 직접 인용한다.\n' +
     '3. **사용자 환경 존중** — 머신/덤벨 중심. 프리웨이트 강요 금지.\n' +
     '4. **점진적 과부하** — 구체적 수치 (예: 62.5 → 65kg).\n' +
-    '5. **근손실 방지 넛지** — 체지방을 빼는 시기에도 근육을 지키려면 웨이트(근력운동)를 병행하고 단백질을 충분히 확보하라고 조언할 수 있다(앱에 영양 추적 기능은 없으니 일반 텍스트 조언으로만).\n\n' +
+    '5. **영양·근손실 방지** — 감량기에도 웨이트(근력운동)를 병행하고 단백질을 충분히 확보하라고 조언한다. 영양 질문은 아래 지식 베이스 4·5번의 수치와 출처를 그대로 인용해 구체적으로 답한다. 다만 이 앱에는 식단·칼로리 기록 기능이 없다(기록되는 건 체중뿐) — 사용자의 실제 섭취량을 아는 척하지 말고, 체중 추세와 일반 기준으로만 조언한다.\n\n' +
 
     '## 🧬 지식 베이스 (이 내용을 활용해 충실히 답한다)\n' +
     COACH_KNOWLEDGE + '\n' +
@@ -759,7 +766,7 @@ async function fetchAIRecommendation() {
     '반드시 JSON 형식으로만 응답하세요. 추가 설명 없이 JSON만.\n\n' +
     
     '## 🧬 과학적 근거\n' +
-    '- 부위당 주 2회 자극이 1회보다 우월 (Schoenfeld 2016)\n' +
+    '- 주간 총 세트가 같으면 빈도(주 1회 vs 2회)는 근비대에 무관 (Schoenfeld 2019). 주 2회는 세트를 나눠 담는 수단\n' +
     '- 부위당 주 10~20세트 최적 (Pelland 2024)\n' +
     '- 48~72시간 회복 보장 (큰 근육)\n\n' +
     
@@ -907,6 +914,7 @@ async function generateFullRoutine(bodyPart) {
     Object.keys(EXERCISE_BODY_PART_MAP).forEach(function(name) {
       var info = EXERCISE_BODY_PART_MAP[name];
       if (targetParts.indexOf(info.primary) === -1) return;
+      if (isAliasExerciseName(name)) return;   // 같은 운동의 별칭 표기 — AI에겐 표준명만 보여준다
       if (!isExerciseAvailable(name)) return;  // 헬스장에 없는 기구 종목은 풀에서 제외
 
       var partKr = BODY_PART_KR[info.primary] || info.primary;
@@ -1201,7 +1209,7 @@ async function generateFullRoutine(bodyPart) {
   }
 }
 
-// 운동 화면 진입 시 AI 추천 로드
+// 홈 화면 진입 시 오늘의 추천 로드 (백그라운드) — 캐시가 KST 날짜 기준이라 자동 호출은 하루 1회
 async function loadAIRecommendationIfNeeded() {
   if (!state.apiKey) {
     state.aiRecommendation = null;
@@ -1217,12 +1225,27 @@ async function loadAIRecommendationIfNeeded() {
     state.aiRecommendation = cached;
     return;
   }
+
+  // 오늘 이미 실패했으면 자동 재시도하지 않는다.
+  // fetchAIRecommendation은 실패 시 null만 돌려주고 아무것도 캐시하지 않으므로,
+  // 이 잠금이 없으면 render()마다 API를 다시 부른다. 재시도는 새로고침 버튼으로만.
+  if (state.aiRecFailedDate === todayStr) return;
+
+  // 앱을 켜둔 채 KST 자정을 넘겼으면 어제 추천은 버린다
+  if (state.aiRecommendation && state.aiRecommendation.date !== todayStr) {
+    state.aiRecommendation = null;
+  }
   
   state.aiRecLoading = true;
   render();
   
   var rec = await fetchAIRecommendation();
   state.aiRecommendation = rec;
+  // 실패(null)면 오늘은 자동 재시도 금지 — 성공하면 잠금 해제.
+  // localStorage에도 남긴다: 메모리에만 두면 새로고침·서비스워커 갱신 때마다 잠금이 풀려
+  // 실패가 반복될 때 앱을 열 때마다 유료 호출이 한 번씩 더 나간다.
+  state.aiRecFailedDate = rec ? null : todayStr;
+  storage.set(KEYS.AI_REC_FAILED_DATE, state.aiRecFailedDate);
   state.aiRecLoading = false;
   render();
 }
@@ -1351,7 +1374,10 @@ async function generateWeeklyReview(forceRefresh) {
       var loV = isSmallG ? 3 : 4;
       var mevV = isSmallG ? 8 : 10;
       var optV = isSmallG ? 16 : 20;
-      var status = vol < loV ? '🔴 부족' : (vol < mevV ? '🟡 MEV' : (vol <= optV ? '🟢 적정' : '🔥 과잉'));
+      // 라벨은 buildUserContext(:451, :460)와 같은 말을 쓴다 — 같은 앱의 두 프롬프트가 다른 말을 하면 안 된다.
+      // 'MEV'는 검증된 용어가 아니고(Israetel 외 자비출판 휴리스틱, 경계값을 검증한 동료심사 연구 없음),
+      // 상한 초과도 "손해"가 아니라 이득 증가폭이 완만해지는 구간이다(Pelland 2025 — 꺾이는 지점 미확인).
+      var status = vol < loV ? '🔴 부족' : (vol < mevV ? '🟡 하한 미달' : (vol <= optV ? '🟢 적정' : '🔥 이득 완만'));
       weekSummary += '- ' + BODY_PART_GROUPS[g].kr + ': ' + vol.toFixed(1) + '세트 (' + status + ')\n';
     });
   }
@@ -1376,9 +1402,9 @@ async function generateWeeklyReview(forceRefresh) {
     '반드시 JSON으로만 응답하세요.\n\n' +
     
     '## 🧬 평가 기준 (과학 근거)\n' +
-    '- **운동 빈도**: 부위당 주 2회 자극 우월 (Schoenfeld 2016)\n' +
+    '- **운동 빈도**: 주간 총 세트가 같으면 빈도는 근비대에 무관 (Schoenfeld 2019, 25개 연구). 주 2회 분할은 세트를 나눠 담는 수단이므로, 주 1회로 몰렸을 때만 세션당 부위 세트 수를 지적한다\n' +
     '- **부위 볼륨**: 큰 근육(가슴·등·다리·둔근) 주 10~20세트 / 작은 근육(팔·어깨) 주 8~16세트 적정 (Pelland 2024, 간접세트 0.5 합산). 작은 근육은 복합운동 간접자극으로 목표가 낮다(종아리는 간접자극이 거의 없어 예외 — 직접 볼륨 필요). 하한 미만 = 부족, 상한 초과 = 수확 체감\n' +
-    '- **부위 균형**: PUSH/PULL/LEGS 골고루. 한 부위만 과잉 X.\n' +
+    '- **부위 균형**: PUSH/PULL/LEGS 골고루. 한 부위에만 몰리지 않게.\n' +
     '- **체중 변화**: 리컴포지션 목표 시 ±0.3kg/주 적정\n' +
     '- **PR 갱신**: 점진적 과부하 성과 지표\n\n' +
     
@@ -1525,35 +1551,118 @@ async function loadWeeklyReviewIfNeeded() {
 // 정체기 감지 (Sonnet 4.6)
 // ═══════════════════════════════════════════════
 
-// 정체기 신호 감지 (규칙 기반 pre-check)
-function detectPlateauSignals() {
-  var today = new Date();
-  var twoWeeksAgo = new Date(today);
-  twoWeeksAgo.setDate(today.getDate() - 14);
-  
-  var signals = [];
-  
-  // 1. PR 갱신 없음 (2주)
-  var recentPRs = state.data.personalRecords.filter(function(p) {
-    return new Date(p.date) >= twoWeeksAgo;
-  });
-  if (recentPRs.length === 0 && state.data.workoutLog.length > 5) {
-    signals.push('pr_stalled');
+// ── 정체 판정 기준 ─────────────────────────────────────────
+// 1RM 검사–재검사 변동계수(CV) 중앙값이 4.2%인데(Grgic 2020, Sports Med Open 6:31),
+// 비선수 중급자의 현실적 e1RM 증가폭은 주당 0.25~1%다. 즉 2주치(0.5~2%)는 측정 잡음보다 작아
+// "정체"와 "정상 진행"을 원리상 구분할 수 없다 → 최소 세션 수·최소 기간 가드를 둔다.
+// ※ "몇 세션 정체하면 진짜 정체"에 대한 직접적인 RCT 기준은 존재하지 않는다.
+//    아래 값은 측정학 원칙에서 도출한 보수적 기준이지 연구 결과가 아니다.
+var PLATEAU_MIN_SESSIONS = 4; // 종목당 최소 세션 수 (이 미만이면 판정 자체를 금지)
+var PLATEAU_MIN_DAYS = 28;    // 종목당 최소 관찰 기간(일)
+var PLATEAU_WINDOW_DAYS = 42; // 관찰 창(일) — 이 안의 기록만 본다 (6주)
+
+// "무게도 반복도 안 오르는" 종목 목록.
+// 더블 프로그레션(무게 고정 + 반복 상승)은 정상 진행이므로 정체로 세지 않는다 —
+// buildUserContext의 recentLifts[].plateau와 같은 발상이되, 여기엔 표본·기간 가드를 추가로 건다.
+function getStalledLifts() {
+  var log = (state.data && state.data.workoutLog) || [];
+  var windowStart = getDateStr(new Date(Date.now() - PLATEAU_WINDOW_DAYS * 86400000));
+  var byName = {};
+
+  // 한 묶음(앞/뒤 절반) 안의 최고치 — 한 세션 컨디션 난조로 판정이 뒤집히지 않게 한다
+  function bestOf(list, field) {
+    var b = 0;
+    for (var n = 0; n < list.length; n++) {
+      if (list[n][field] > b) b = list[n][field];
+    }
+    return b;
   }
-  
-  // 2. 체중 변화 없음 (2주, 0.3kg 미만)
-  var bodyLog = state.data.bodyLog || [];
-  if (bodyLog.length >= 5) {
-    var recent = bodyLog.slice(-1)[0];
-    var twoWeeksAgoLog = bodyLog.find(function(b) {
-      return new Date(b.date) >= twoWeeksAgo;
-    });
-    if (twoWeeksAgoLog && Math.abs(recent.weight - twoWeeksAgoLog.weight) < 0.3) {
-      signals.push('weight_stalled');
+
+  for (var i = 0; i < log.length; i++) {
+    var w = log[i];
+    if (!w.date || w.date < windowStart) continue; // 관찰 창 밖
+    var exList = w.exercises || w.exercisesData;
+    if (!exList || !Array.isArray(exList)) continue;
+    for (var j = 0; j < exList.length; j++) {
+      var ex = exList[j];
+      if (!ex.name) continue;
+      var weight = ex.maxWeight !== undefined ? ex.maxWeight : (ex.weight !== undefined ? ex.weight : null);
+      if (weight === null || weight === undefined) continue;
+
+      // 본 세트(워밍업 제외) 최고 반복
+      var topReps = 0;
+      if (ex.setsDetail && Array.isArray(ex.setsDetail)) {
+        for (var k = 0; k < ex.setsDetail.length; k++) {
+          var s = ex.setsDetail[k];
+          if (s && !s.isWarmup && s.reps && s.reps > topReps) topReps = s.reps;
+        }
+      } else if (ex.reps) {
+        // 옛 기록은 reps가 배열([8,10,12])이거나 문자열일 수 있다.
+        // 위 setsDetail 분기와 같은 의미가 되려면 **최댓값**을 써야 한다 —
+        // 첫 세트만 보면 세션 안에서 반복을 올린 사용자([8,8,8] → [8,10,12])가
+        // 둘 다 8로 읽혀 "반복도 안 오름" = 정체로 오판된다(더블 프로그레션 정상 진행인데).
+        var repsArr = Array.isArray(ex.reps) ? ex.reps : [ex.reps];
+        for (var r = 0; r < repsArr.length; r++) {
+          var rv = parseInt(repsArr[r], 10) || 0;
+          if (rv > topReps) topReps = rv;
+        }
+      }
+
+      // 별칭 표기('랫풀다운')와 표준명('랫 풀 다운')이 한 종목으로 모이게 표준명을 키로 쓴다 —
+      // 갈리면 세션 수·관찰 기간 가드에 걸려 진짜 정체를 영영 못 잡는다.
+      var stallKey = canonicalExerciseName(ex.name);
+      if (!byName[stallKey]) byName[stallKey] = [];
+      byName[stallKey].push({ date: w.date, weight: weight, reps: topReps });
     }
   }
-  
-  // 3. 운동 빈도 감소
+
+  var stalled = [];
+  Object.keys(byName).forEach(function(name) {
+    var hist = byName[name].sort(function(a, b) {
+      return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0);
+    });
+    if (hist.length < PLATEAU_MIN_SESSIONS) return; // 표본 부족 → 판정 금지
+    var spanDays = (new Date(hist[hist.length - 1].date) - new Date(hist[0].date)) / 86400000;
+    if (spanDays < PLATEAU_MIN_DAYS) return;        // 기간 부족 → 판정 금지
+    var half = Math.floor(hist.length / 2);
+    var oldHalf = hist.slice(0, half);
+    var newHalf = hist.slice(hist.length - half);
+    var weightRising = bestOf(newHalf, 'weight') > bestOf(oldHalf, 'weight');
+    var repsRising = bestOf(newHalf, 'reps') > bestOf(oldHalf, 'reps');
+    if (!weightRising && !repsRising) stalled.push(name); // 무게도 반복도 안 오름 = 진짜 정체
+  });
+  return stalled;
+}
+
+// 정체기 신호 감지 (규칙 기반 pre-check)
+// 변경 근거:
+//  (1) 2주·3세션 문턱은 측정 잡음보다 작아 거짓양성이 난다(위 주석) → 종목당 4세션·4주 가드.
+//  (2) weight_stalled(2주 체중 변화 <0.3kg) 삭제 — 린매스 목표에서 "체중 유지 + 수행 상승"은
+//      리컴포지션 정상 진행이지 정체가 아니다. 오히려 바람직한 상태를 경고로 띄우면 안 된다.
+//  (3) pr_stalled 재정의 — PR은 maxWeight 갱신 시에만 찍히는데 더블 프로그레션은 무게를 고정하고
+//      반복을 올리는 기간이 정상이라 그동안 PR이 0이다. 그래서 2주→4주로 올리고,
+//      실제 수행 정체(getStalledLifts)가 함께 잡힐 때만 신호로 센다.
+function detectPlateauSignals() {
+  var today = new Date();
+  var signals = [];
+
+  // 1. 수행 정체 — 무게도 반복도 안 오르는 종목이 2개 이상 (가장 직접적인 신호)
+  var stalled = getStalledLifts();
+  if (stalled.length >= 2) {
+    signals.push('lift_stalled');
+  }
+
+  // 2. PR 갱신 없음 (4주) — 단, 수행 정체 종목이 최소 1개 있을 때만
+  var fourWeeksAgo = new Date(today);
+  fourWeeksAgo.setDate(today.getDate() - 28);
+  var recentPRs = state.data.personalRecords.filter(function(p) {
+    return new Date(p.date) >= fourWeeksAgo;
+  });
+  if (recentPRs.length === 0 && stalled.length >= 1 && state.data.workoutLog.length > 10) {
+    signals.push('pr_stalled');
+  }
+
+  // 3. 운동 빈도 감소 (보조 신호 — 회복·실행 문제를 잡는다)
   var oneWeekAgo = new Date(today);
   oneWeekAgo.setDate(today.getDate() - 7);
   var oneWeekAgoStr = getDateStr(oneWeekAgo);
@@ -1574,12 +1683,13 @@ async function analyzePlateauWithAI(signals) {
   var context = buildUserContext();
   
   var signalDescriptions = {
-    'pr_stalled': '최근 2주간 PR 갱신 없음',
-    'weight_stalled': '최근 2주간 체중 변화 0.3kg 미만',
+    'lift_stalled': '4주 이상·4세션 이상 관찰했는데 무게도 반복도 안 오르는 종목이 2개 이상',
+    'pr_stalled': '최근 4주간 PR 갱신 없음 (수행 정체 종목과 동반 확인됨)',
     'frequency_drop': '이번 주 운동 빈도가 목표보다 적음'
   };
   
-  var signalText = signals.map(function(s) { return '- ' + signalDescriptions[s]; }).join('\n');
+  // 옛 캐시(weight_stalled 등)로 호출돼도 프롬프트에 'undefined'가 찍히지 않게 폴백
+  var signalText = signals.map(function(s) { return '- ' + (signalDescriptions[s] || s); }).join('\n');
   
   var systemPrompt = '당신은 사용자의 피트니스 코치입니다. 사용자 데이터에서 정체기 신호가 감지됐습니다. ' +
     '원인을 분석하고 구체적인 변형/조정 방안을 제안하세요. JSON으로만 응답.\n\n' +
@@ -1593,9 +1703,20 @@ async function analyzePlateauWithAI(signals) {
     '  "encouragement": "정체는 흔한 신호라는 사실 + 먼저 시도할 조정 1개를 담담하게 1문장 (응원조 금지)"\n' +
     '}\n\n' +
     '## 정체기 분석 원칙\n' +
-    '- 점진 과부하 실패: 중량/횟수 정체 → 디로드 또는 변형 자극\n' +
+    '- 점진 과부하 실패: 중량도 반복도 정체 → 회복 점검 → 디로드 1주(볼륨 -40~50%, 무게 유지) 순으로 먼저\n' +
     '- 회복 부족: 빈도/수면 → 휴식일 늘리기\n' +
-    '- 자극 적응: 같은 종목 6주 이상 → 종목 교체\n\n' +
+    // "같은 종목 N주 이상이면 교체"는 근거 없는 통념이라 삭제했다.
+    //   Fonseca 2014(JSCR 28(11):3085) — 12주 종목 고정군도 대퇴사두 CSA 11.6~12.0% 증가, 변화군과 차이 없음
+    //   Baz-Valle 2019(PLoS One 14(12):e0226989) — 매 세션 무작위 변경 vs 고정, 1RM·근두께 군간 차이 없음
+    //   Kassiano 2022(JSCR 36(6):1753) — 과도·무작위 변화는 오히려 근육 발달을 저해할 수 있음
+    // 게다가 종목을 바꾸면 getRecentPerformances 히스토리가 끊겨 더블 프로그레션 추적선이 사라진다.
+    '- 종목 교체는 "몇 주 했는가"가 아니라 사유로 판단한다:\n' +
+    '  (a) 해부학적 공백 — 루틴이 특정 근육·각도를 못 덮을 때\n' +
+    '  (b) 통증·장비 제약\n' +
+    '  (c) 회복 점검·디로드를 이미 해봤는데도 정체가 계속될 때\n' +
+    '  (d) 최근 4주 완수율 하락(동기 저하) — 이때만 새 종목을 권하되 이유를 "근성장"이 아니라 "재미·지속"으로 정직하게 설명 (Baz-Valle 2019)\n' +
+    '- 진행 중인 종목은 최소 8~12주 유지가 기본. 무게나 반복이 오르는 중이면 바꿀 이유가 없다.\n' +
+    '- 개입 순서(종목 교체는 마지막): ① 회복 점검(수면·섭취·완수율) → ② 디로드 1주 → ③ 해당 부위 주간 세트 수 조정 → ④ 종목 변경\n\n' +
     (function() { var sb = buildSafetyPromptBlock(); return sb ? sb + '(조정안에 금기 종목을 제안하지 말 것)\n\n' : ''; })() +
     '## 사용자 데이터\n' + context;
   
@@ -1673,7 +1794,9 @@ async function loadPlateauCheckIfNeeded() {
   
   // 신호 감지
   var signals = detectPlateauSignals();
-  if (signals.length < 2) {
+  // 빈도만 떨어진 건 "정체"가 아니라 실행 문제다 → 수행 근거(lift_stalled·pr_stalled)가 있을 때만 AI를 부른다.
+  var hasPerfEvidence = signals.indexOf('lift_stalled') !== -1 || signals.indexOf('pr_stalled') !== -1;
+  if (signals.length < 2 || !hasPerfEvidence) {
     state.plateauCheck = null;
     storage.set(KEYS.PLATEAU_CHECK, null);
     return;
