@@ -805,6 +805,101 @@ function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
   }
 }
 
+// 루틴 미리보기(2단계 처방 표 · 대화 미리보기)가 쓰는 세트 계획.
+// **시작 버튼(startGeneratedRoutine)과 같은 인자**로 계획해야 미리보기와 실제 세션이 어긋나지 않는다.
+// 워밍업만 뺀다 — 미리보기는 워킹세트 구성만 말하고, 워킹세트는 워밍업 유무와 무관하다.
+function getRoutinePreviewPlan(ex) {
+  if (!ex || !ex.name) return null;
+  return getSessionSetPlan(ex.name, ex.weight, ex.reps || '8-12', { sets: ex.sets || 3, warmup: false });
+}
+
+// 미리보기 처방 표 한 줄의 값 — 무게·반복·세트·RIR·휴식.
+// **전부 계획(getRoutinePreviewPlan)에서 뽑는다.** AI가 준 원본을 적으면 화면이 거짓말을 한다:
+//  · 무게: 수행 기록이 있으면 세션은 점진적 과부하 추천값으로 시작한다(AI 무게가 아니라)
+//  · 반복: 종목 클래스 범위로 교정된다(clampRepsToClass 가드레일)
+//  · RIR : 세트 역할이 정한다(탑 1-2 / 백오프·복합 2-3 / 그 외 0-2). AI의 rir 은 세션이 안 쓴다
+//  · 휴식: resolveRestSec 이 세트가 들고 있는 값을 먼저 쓰므로 결국 클래스 기본값이다
+// 표기는 첫 워킹세트 기준 — 탑세트+백오프처럼 세트마다 다른 경우는 아래 세트 구성 줄이 풀어 준다.
+function buildPrescriptionValues(ex, plan) {
+  var first = plan ? plan.sets.filter(function(s) { return s && !s.isWarmup; })[0] : null;
+  if (!plan || !first) {
+    // 계획을 못 세우는 종목(이름 없음·워킹세트 0개)은 AI가 준 값이라도 보여준다.
+    // 다만 숫자 자리에 숫자가 아닌 게 오면 적지 않는다 — 'abc세트' 같은 줄이 나가면 안 된다.
+    // parseInt 는 '3abc'를 3으로 읽어 주므로 문자열 전체를 먼저 본다(restSecToMin 과 같은 규칙).
+    var rawSets = /^\d+$/.test(String(ex ? ex.sets : '').trim()) ? parseInt(ex.sets, 10) : NaN;
+    return {
+      weight: (ex && ex.weight !== undefined && ex.weight !== null) ? ex.weight : null,
+      reps: ex ? ex.reps : null,
+      sets: (rawSets > 0) ? rawSets : null,
+      rir: ex ? ex.rir : null,
+      rest: (ex && ex.rest) ? restSecToMin(ex.rest) : null
+    };
+  }
+  return {
+    weight: (plan.weight === null || plan.weight === undefined) ? null : plan.weight,
+    reps: repRangeToStr(plan.repRange),
+    // 드롭·마이오렙 세트는 마지막 워킹세트의 연장이지 독립 세트가 아니다(countWorkingSets 와 같은 규칙).
+    sets: plan.sets.filter(function(s) {
+      return s && !s.isWarmup && s.role !== 'drop' && s.role !== 'myo';
+    }).length,
+    rir: first.rir,
+    rest: restSecToMin(first.rest)
+  };
+}
+
+// 휴식 초 → "3분" / "1.5-2분" (AI가 준 "90-120" 같은 범위 문자열도 받는다).
+// 숫자로 못 읽히는 값은 통째로 버린다 — 'NaN분'을 화면에 내보내느니 아무것도 안 적는 게 낫다.
+function restSecToMin(v) {
+  var raw = String(v === null || v === undefined ? '' : v).trim();
+  // "180" 또는 "90-120" 만 받는다. 음수·문자는 통째로 버린다 ('-90'을 '-'로 쪼개면 90초가 돼 버린다).
+  if (!/^\d+(-\d+)?$/.test(raw)) return null;
+  var mins = raw.split('-').map(function(x) {
+    var sec = parseInt(x, 10);
+    if (!(sec > 0)) return null;
+    var m = sec / 60;
+    return (m % 1 === 0) ? m : Math.round(m * 10) / 10;
+  }).filter(function(m) { return m !== null; });
+  return mins.length ? mins.join('-') + '분' : null;
+}
+
+// 세트 구성 한 줄 — "탑세트 1 + 백오프 2 (90%)".
+// 숫자·비율을 화면에서 따로 적지 않고 **실제로 만들어진 세트 배열에서 센다**. 그래야 사용자가
+// 세트법을 바꾸거나(종목별 override), 무게를 몰라 스트레이트로 접힐 때(effectiveSetScheme)
+// 미리보기가 저절로 따라온다 — 화면과 세션이 서로 다른 말을 할 수 없다.
+// 스트레이트(전부 work)는 '세트' 열이 이미 같은 사실을 말하므로 빈 문자열을 돌려준다.
+// 세트마다 RIR이 다르면(탑 1-2 / 백오프 2-3) 역할별로 같이 적는다 — 'RIR' 열은 한 값만 담아서
+// 첫 세트 기준이 되는데, 그 줄만 보면 뒤 세트도 같은 강도인 줄 읽힌다.
+function describeSetStructure(sets, exerciseName) {
+  if (!Array.isArray(sets)) return '';
+  var order = [], count = {}, rirOf = {}, rirSeen = {}, rirKinds = 0;
+  sets.forEach(function(s) {
+    if (!s || s.isWarmup) return;
+    var role = s.role || 'work';
+    if (count[role] === undefined) { count[role] = 0; order.push(role); rirOf[role] = s.rir; }
+    count[role]++;
+    if (s.rir !== undefined && s.rir !== null && !rirSeen[s.rir]) { rirSeen[s.rir] = true; rirKinds++; }
+  });
+  if (!order.length) return '';
+  if (order.length === 1 && order[0] === 'work') return '';
+
+  // 역방향(어시스트)은 "가볍게 = 보조를 더" 라서 90%·−25% 가 정반대로 읽힌다.
+  var reverse = isReverseProgression(exerciseName);
+  var weightNote = {};
+  if (count.backoff) weightNote.backoff = reverse ? '보조 한 칸' : Math.round(BACKOFF_PCT * 100) + '%';
+  if (count.drop) weightNote.drop = reverse ? '보조 두 칸' : '−' + Math.round((1 - DROP_PCT) * 100) + '%';
+
+  var parts = order.map(function(role, i) {
+    var kr = SET_ROLE_KR[role];                      // work 는 빈 문자열 = 역할 이름이 없는 보통 세트
+    var label = kr ? kr + ' ' + count[role] : count[role] + '세트';
+    var notes = [];
+    if (weightNote[role]) notes.push(weightNote[role]);
+    // RIR은 **첫 역할 다음부터**만 적는다 — 첫 역할의 값은 이미 'RIR' 열에 있다.
+    if (i > 0 && rirKinds > 1 && rirOf[role] !== undefined && rirOf[role] !== null) notes.push('RIR ' + rirOf[role]);
+    return label + (notes.length ? ' (' + notes.join(' · ') + ')' : '');
+  });
+  return parts.join(' + ');
+}
+
 // 실제 휴식 시간 결정 (세트 완료 시 호출).
 // 우선순위: 세트가 지정한 rest > AI가 지정한 exercise.rest > 클래스 기본값
 // 그 위에 §3-C 자가조절: **직전 세트가 목표 반복 하단을 못 채웠으면 +30초(상한 240초)**.

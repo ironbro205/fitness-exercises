@@ -1,5 +1,5 @@
 // 헬스앱 Service Worker - 오프라인 캐싱
-const CACHE_VERSION = 'health-app-v53';
+const CACHE_VERSION = 'health-app-v54';
 const CACHE_NAME = `health-app-${CACHE_VERSION}`;
 
 // 캐싱할 핵심 자원

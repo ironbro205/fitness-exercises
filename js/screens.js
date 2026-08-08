@@ -753,15 +753,23 @@ function renderWorkoutStep3() {
   var previewExHtml = '';
   if (state.routinePreviewExpanded) {
     routine.exercises.forEach(function(ex, idx) {
-      var weight = ex.weight ? (isReverseProgression(ex.name) ? '보조 ' : '') + escapeHtml(ex.weight) + 'kg × ' : '';
+      // 2단계 처방 표와 **같은 계획**에서 값을 뽑는다 — 두 미리보기가 다른 숫자를 말하면 안 된다.
+      var previewPlan = getRoutinePreviewPlan(ex);
+      var p = buildPrescriptionValues(ex, previewPlan);
+      var weight = (p.weight !== null && p.weight !== '')
+        ? (isReverseProgression(ex.name) ? '보조 ' : '') + escapeHtml(p.weight) + 'kg × ' : '';
       // 종목 줄을 누르면 그 종목의 자극 근육 인체도를 펼친다 (한 번에 한 종목만).
       // index + 종목명이 둘 다 맞아야 펼친다 — 루틴이 바뀌면 저절로 닫힌다.
       var mapOpen = isRoutineExerciseMapOpen(idx, ex.name);
       var mapHtml = mapOpen ? buildMuscleMapBlock(ex.name, { compact: true }) : '';
+      // 자유 구성은 2단계(처방 표)를 건너뛰므로 세트법을 알 자리가 여기뿐이다.
+      // 한 줄에 들어가야 해서 짧은 이름(탑+백오프)만 붙이고, 스트레이트면 아무것도 안 붙인다.
+      var schemeShort = (previewPlan && previewPlan.scheme !== 'straight' && SET_SCHEMES[previewPlan.scheme])
+        ? ' · ' + SET_SCHEMES[previewPlan.scheme].short : '';
       previewExHtml +=
         '<div class="routine-preview-ex" onclick="toggleRoutineExerciseMap(' + idx + ')">' +
           '<span class="flex-1"><strong>' + (idx + 1) + '. ' + escapeHtml(ex.name) + '</strong></span>' +
-          '<span class="text-stone-400 font-mono text-[11px]">' + weight + escapeHtml(ex.reps) + ' · ' + escapeHtml(ex.sets) + '세트</span>' +
+          '<span class="routine-preview-ex-stat text-stone-400 font-mono text-[11px]">' + weight + escapeHtml(p.reps) + ' · ' + escapeHtml(p.sets) + '세트' + escapeHtml(schemeShort) + '</span>' +
         '</div>' +
         (mapHtml ? '<div style="margin: -2px 0 6px;">' + mapHtml + '</div>' : '');
     });
@@ -1074,38 +1082,36 @@ function renderWorkoutStep2() {
     challenging: '도전'
   }[routine.intensity] || '적당히';
 
-  // ── 처방 표: 머리글(무게/반복/세트/RIR/휴식)은 목록 맨 위에 한 번만 둔다.
-  //    카드마다 붙이면 6종목 × 4라벨 = 24개가 되어 값보다 라벨이 더 많이 보인다.
-  //    그리고 전 종목이 같은 값이면(세트 3 · RIR 2 처럼) 열을 아예 빼고 머리글 옆에 한 번만 적는다.
+  // ── 처방 표: 머리글(무게/반복/세트/RIR/휴식)은 목록 맨 위에 한 번만 두고,
+  //    값은 **종목마다 전부** 적는다. 카드마다 라벨을 붙이면 6종목 × 4라벨 = 24개라 값보다
+  //    라벨이 많아지지만, 값까지 접어(공통값을 머리글로 올려) 버리면 "이 종목이 몇 세트인지"를
+  //    종목 줄에서 못 읽는다 — 그건 표가 아니라 요약이다. 라벨만 접고 값은 접지 않는다.
   var exList = routine.exercises || [];
-  var uniq = function(get) {
-    var seen = {}, n = 0, v = null;
-    exList.forEach(function(ex) {
-      var k = String(get(ex));
-      if (!seen[k]) { seen[k] = true; n++; v = get(ex); }
-    });
-    return n === 1 ? v : null;
+  // 표에 적는 값은 전부 **[시작]을 누르면 실제로 만들어질 세트**에서 온다(getRoutinePreviewPlan).
+  // AI가 준 원본(ex.weight/ex.rir/ex.rest)을 그대로 적으면 화면이 거짓말을 한다 — 세션은
+  // 기록 기반 추천 무게로 시작하고, RIR·휴식은 종목 클래스와 세트 역할이 정한다.
+  var plans = exList.map(function(ex) { return getRoutinePreviewPlan(ex); });
+  var pres = exList.map(function(ex, i) { return buildPrescriptionValues(ex, plans[i]); });
+  // 열 자체는 값이 하나라도 있을 때만 만든다(전 종목 맨몸이면 '무게' 열은 —만 6줄이 된다).
+  var showWeight = pres.some(function(p) { return p.weight !== null; });
+  var statCell = function(v) {
+    return '<p class="routine-ex-stat-value regular">' +
+      ((v === null || v === undefined || v === '') ? '<span class="text-stone-500">—</span>' : escapeHtml(v)) +
+    '</p>';
   };
-  var sameSets = exList.length > 1 ? uniq(function(ex) { return ex.sets; }) : null;
-  var sameRir  = exList.length > 1 ? uniq(function(ex) { return ex.rir; }) : null;
-  var showWeight = exList.some(function(ex) { return ex.weight !== null && ex.weight !== undefined; });
-  var showRest   = exList.some(function(ex) { return !!ex.rest; });
-  var restMin = function(v) {
-    return String(v).split('-').map(function(x) {
-      var m = parseInt(x, 10) / 60;
-      return (m % 1 === 0) ? m : Math.round(m * 10) / 10;
-    }).join('-') + '분';
-  };
+  // 열 폭은 그 열이 담는 값에 맞춘다 — 세트·RIR은 한 자리, 휴식은 '1.5-2분'까지 온다.
+  // 다섯 열을 똑같이 나누면 좁은 폰(360px)에서 휴식·반복이 두 줄로 접힌다.
   var cols = [];
-  if (showWeight) cols.push('무게');
-  cols.push('반복');
-  if (sameSets === null) cols.push('세트');
-  if (sameRir === null) cols.push('RIR');
-  if (showRest) cols.push('휴식');
-  var colStyle = ' style="grid-template-columns: repeat(' + cols.length + ', minmax(0, 1fr));"';
+  if (showWeight) cols.push({ label: '무게', w: 1.2 });
+  cols.push({ label: '반복', w: 1.2 });
+  cols.push({ label: '세트', w: 0.6 });
+  cols.push({ label: 'RIR', w: 0.7 });
+  cols.push({ label: '휴식', w: 1.4 });
+  var colStyle = ' style="grid-template-columns: ' +
+    cols.map(function(c) { return 'minmax(0, ' + c.w + 'fr)'; }).join(' ') + ';"';
   var prescriptionHead =
     '<div class="routine-ex-prescription-head"' + colStyle + '>' +
-      cols.map(function(c) { return '<p>' + c + '</p>'; }).join('') +
+      cols.map(function(c) { return '<p>' + c.label + '</p>'; }).join('') +
     '</div>';
 
   // 종목 카드 렌더
@@ -1114,7 +1120,10 @@ function renderWorkoutStep2() {
     var cardCls = ex.isMain ? 'routine-exercise main' : 'routine-exercise';
     var numCls = ex.isMain ? 'routine-ex-num main' : 'routine-ex-num';
     var typeTag = ex.isMain ? '<span class="routine-ex-tag">메인</span>' : '';
-    
+    // 세트 구성(탑세트+백오프 등)도 같은 세트 배열에서 센다 — 여기서 다시 정하지 않는다.
+    var p = pres[idx];
+    var structure = plans[idx] ? describeSetStructure(plans[idx].sets, ex.name) : '';
+
     exercisesHtml += 
       '<div class="' + cardCls + '">' +
         '<div class="routine-ex-header">' +
@@ -1129,17 +1138,19 @@ function renderWorkoutStep2() {
         '<div class="routine-ex-prescription"' + colStyle + '>' +
           (showWeight
             ? '<p class="routine-ex-stat-value">' +
-                ((ex.weight !== null && ex.weight !== undefined)
+                (p.weight !== null
                   ? (isReverseProgression(ex.name) ? '<span class="text-[11px] text-stone-500">보조 </span>' : '') +
-                    escapeHtml(ex.weight) + '<span class="text-[11px] text-stone-500">kg</span>'
+                    escapeHtml(p.weight) + '<span class="text-[11px] text-stone-500">kg</span>'
                   : '<span class="text-stone-500">—</span>') +
               '</p>'
             : '') +
-          '<p class="routine-ex-stat-value regular">' + escapeHtml(ex.reps) + '</p>' +
-          (sameSets === null ? '<p class="routine-ex-stat-value regular">' + escapeHtml(ex.sets) + '</p>' : '') +
-          (sameRir === null ? '<p class="routine-ex-stat-value regular">' + escapeHtml(ex.rir) + '</p>' : '') +
-          (showRest ? '<p class="routine-ex-stat-value regular">' + (ex.rest ? restMin(ex.rest) : '<span class="text-stone-500">—</span>') + '</p>' : '') +
+          statCell(p.reps) +
+          statCell(p.sets) +
+          statCell(p.rir) +
+          statCell(p.rest) +
         '</div>' +
+        // 세트 열의 숫자가 어떻게 나뉘는지 (스트레이트면 적지 않는다 — 세트 열이 이미 말한 사실)
+        (structure ? '<p class="routine-ex-scheme">' + escapeHtml(structure) + '</p>' : '') +
       '</div>';
   });
   
@@ -1188,16 +1199,11 @@ function renderWorkoutStep2() {
         '<p class="text-sm text-stone-200 leading-relaxed">' + escapeHtml(routine.caution) + '</p>' +
       '</div>' : '') +
     
-    // 강도 + 종목 헤더 (전 종목이 같은 세트·RIR이면 여기 한 번만 적는다)
+    // 강도 + 종목 헤더
     '<div class="flex items-center justify-between mt-5 mb-1 px-1">' +
       '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">추천 루틴</p>' +
       '<p class="text-[11px] font-mono text-stone-400">강도 ' + intensityLabel + '</p>' +
     '</div>' +
-    ((sameSets !== null || sameRir !== null)
-      ? '<p class="text-[11px] font-mono text-stone-500 px-1 mb-2">전 종목 ' +
-          [sameSets !== null ? escapeHtml(sameSets) + '세트' : '', sameRir !== null ? 'RIR ' + escapeHtml(sameRir) : '']
-            .filter(Boolean).join(' · ') + '</p>'
-      : '') +
     prescriptionHead +
 
     // 종목 리스트
