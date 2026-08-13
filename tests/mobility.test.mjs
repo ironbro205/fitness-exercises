@@ -85,8 +85,10 @@ test('디자인 규칙 — 드릴 이름 18자 이내, 설명은 해요체·한 
   for (const [key, d] of Object.entries(DRILLS)) {
     assert.ok([...d.kr].length <= 18, `${key}.kr 이 18자를 넘는다: ${d.kr}`);
     if (d.discSafe === false) continue;
-    for (const field of ['prep', 'cue', 'std']) {
+    // warn(주의 문구)도 화면에 그대로 뜬다 — 여기 빠져 있어서 하다체가 오래 살아남았다.
+    for (const field of ['prep', 'cue', 'std', 'warn']) {
       const text = d[field];
+      if (!text) continue;                    // warn 은 있는 드릴에만 있다
       assert.ok([...text].length <= 75, `${key}.${field} 가 75자를 넘는다`);
       assert.ok(!/[!]/.test(text), `${key}.${field} 에 느낌표가 있다`);
       assert.ok(!/(다\.|니다\.|한다$|합니다|됩니다)/.test(text),
@@ -296,11 +298,23 @@ test('드릴 설명(cue/why)이 근비대·근육통·부상예방 효과를 약
   }
 });
 
-test('화면 문구에 근거 한계가 명시돼 있다', () => {
+// 화면에 붙어 있던 정직성 안내 문단(ⓘ)은 **사양 변경으로 삭제됐다** — 앱이 자기 행동을
+// 설명하지 않는다는 디자인 규칙에 따른 것이다. 그래서 "한계를 적었는가"가 아니라
+// **"근거 이상을 약속하지 않는가"** 를 화면 문구에서 직접 본다. 이쪽이 문구 형식과 무관하게 산다.
+test('스트레칭 화면이 근거 이상(근비대·부상 예방·근육통 감소)을 약속하지 않는다', () => {
   const src = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
-  assert.ok(src.includes('유연성 유지'), '스트레칭 화면이 "유연성 유지"로 한정해 말해야 함');
-  assert.ok(src.includes('근육통·부상 예방·근성장 효과는 기대하지 마세요'), '기대치를 낮추는 문구 필요');
-  assert.ok(src.includes('60초 넘게'), '본세트 전 장시간 정적 스트레칭 경고 문구 필요');
+  assert.ok(src.includes('유연성 유지'), '스트레칭을 "유연성 유지"로 한정해 말해야 함 (§2 델파이 합의)');
+
+  const fresh = loadApp();
+  fresh.state.completedSession = null;
+  fresh.state.activeSession = null;
+  fresh.openStretchGuide();
+  const html = fresh.renderStretchGuide();
+  assert.ok(html.length > 0, '스트레칭 가이드가 그려지지 않았다 — 이 검사가 헛돌고 있다');
+
+  ['근비대', '근성장', '근육이 커', '근육통이 줄', '부상을 예방', '부상 예방'].forEach((phrase) => {
+    assert.ok(!html.includes(phrase), `스트레칭 화면이 "${phrase}"를 약속한다 — 근거가 없는 주장이다`);
+  });
 });
 
 // ── 진행 상태머신 · 복원 · 라우팅 ──────────────────────────────

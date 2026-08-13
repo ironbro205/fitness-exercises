@@ -135,7 +135,7 @@ test('삽입 지점 뒤를 가리키던 index가 모두 한 칸씩 밀린다 (�
   // 슈퍼세트 짝: 1 ↔ 2
   s.exercises[1].supersetWith = 2;
   s.exercises[2].supersetWith = 1;
-  s.techDismissed = { 0: true, 2: true };
+  // techDismissed(강도 기법 제안 거절 표시)는 기능 삭제로 사라진 데이터라 더는 밀 것이 없다.
   app.state.restTimer = { startTime: Date.now(), duration: 90, exerciseIdx: 2, setIdx: 0, nextExerciseIdx: 3 };
   app.state.editingSet = { exerciseIdx: 3, setIdx: 1 };
   app.state.sessionChatPending = { exIdx: 1, pain: true };
@@ -146,7 +146,6 @@ test('삽입 지점 뒤를 가리키던 index가 모두 한 칸씩 밀린다 (�
     ['랫 풀 다운', '덤벨 사이드 레터럴 레이즈', '바벨 컬', '페이스 풀', '레그 프레스']);
   assert.equal(s.exercises[2].supersetWith, 3, '바벨 컬의 짝이 페이스 풀(3)로 밀린다');
   assert.equal(s.exercises[3].supersetWith, 2);
-  assert.deepEqual(plain(s.techDismissed), { 0: true, 3: true });
   assert.equal(app.state.restTimer.exerciseIdx, 3);
   assert.equal(app.state.restTimer.nextExerciseIdx, 4);
   assert.equal(app.state.editingSet.exerciseIdx, 4);

@@ -59,6 +59,46 @@ var storage = {
 function saveActiveSession() {
   storage.set(KEYS.ACTIVE_SESSION, state.activeSession);
 }
+
+// 사라진 세트법을 살아 있는 세트법으로 갈아 끼운다 (data.js SET_SCHEME_MIGRATIONS).
+// 이관하지 않으면 ① 종목별 사용자 선택이 조용히 클래스 기본값으로 되돌아가고
+// ② 진행 중 세션의 exercise.scheme 이 표에 없는 id라 화면이 세트법을 못 읽는다.
+// 이미 만들어진 세트 배열(역할·무게·반복)은 건드리지 않는다 — 사용자가 하는 중인 운동이라
+// 도중에 바꾸면 남은 세트 처방이 통째로 달라진다. 역할 뱃지는 SET_ROLE_KR 에 남겨 뒀다.
+// 반환: 실제로 바꾼 값의 개수 (0이면 저장도 하지 않는다 — 매 실행 쓰기를 막는다)
+function migrateSetSchemeData() {
+  var changed = 0;
+
+  var overrides = storage.get(KEYS.SET_SCHEMES, {}) || {};
+  var overrideHits = 0;
+  Object.keys(overrides).forEach(function(name) {
+    var next = SET_SCHEME_MIGRATIONS[overrides[name]];
+    if (!next) return;
+    overrides[name] = next;
+    overrideHits++;
+  });
+  if (overrideHits) {
+    storage.set(KEYS.SET_SCHEMES, overrides);
+    changed += overrideHits;
+  }
+
+  var session = storage.get(KEYS.ACTIVE_SESSION);
+  if (session && Array.isArray(session.exercises)) {
+    var sessionHits = 0;
+    session.exercises.forEach(function(ex) {
+      var next = ex && SET_SCHEME_MIGRATIONS[ex.scheme];
+      if (!next) return;
+      ex.scheme = next;
+      sessionHits++;
+    });
+    if (sessionHits) {
+      storage.set(KEYS.ACTIVE_SESSION, session);
+      changed += sessionHits;
+    }
+  }
+
+  return changed;
+}
 // 진행 중인 유산소(러닝) 세션을 localStorage에 저장 — 백그라운드 메모리 회수·새로고침에도 진행이 남도록.
 // 정밀 타이머는 performance.now(startPerf) 기준이라 세션 간 이어지지 않으므로, 복원 기준이 되는
 // 벽시계 시작시각(startedAtWall)과 거리·적분위치·구간·소리 상태를 함께 스냅샷한다.
@@ -903,6 +943,9 @@ function init() {
       state.plateauCheck = cachedPlateau;
     }
   }
+
+  // 사라진 세트법 이관 — **세션을 복원하기 전에** 해야 복원된 세션이 이관된 값을 들고 온다.
+  migrateSetSchemeData();
 
   // 진행 중이던 운동 세션 복원 (백그라운드/새로고침에서 돌아왔을 때)
   var savedSession = storage.get(KEYS.ACTIVE_SESSION);

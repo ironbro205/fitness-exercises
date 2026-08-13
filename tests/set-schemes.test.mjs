@@ -1,10 +1,11 @@
 // 세트 스킴(세트법) · 휴식시간 · 슈퍼세트 엔진 테스트
 // 근거 문서: docs/research/set-schemes.md · docs/research/set-schemes-v2.md · docs/research/training-splits.md
 // 핵심 계약:
-//  · 고중량 복합만 탑세트+백오프, 나머지는 스트레이트 (**기본 배정은 v2에서도 안 바뀐다**)
+//  · 고중량 복합만 탑세트(가장 무거운 1세트 + 90% 백오프), 나머지는 스트레이트
 //  · 무게는 가까운 배수(덤벨 2kg / 그 외 5kg)로 맞추되, 감량은 기준보다 최소 한 단위 낮다 (§2-B 함정)
 //  · 휴식 기본값이 클래스별 새 권장치이고, 반복이 하단 미달이면 +30초
 //  · 드롭·마이오렙·백다운 세트가 증량 판정·1RM을 오염시키지 않는다 (백다운은 볼륨엔 포함)
+//    — 마이오렙·백다운 세트법은 삭제됐지만 **옛 기록에 남은 세트**는 계속 이 규칙으로 읽힌다
 //  · 세트 생성 규칙은 코드가 아니라 SET_SCHEMES[].build 데이터에 있다 (v2 §4-A)
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -121,12 +122,12 @@ test('반올림: 덤벨은 2kg 격자 — 이름에 "덤벨"이 없는 덤벨 �
   ['해머 컬', '사이드 레터럴 레이즈', '컨센트레이션 컬', '풀오버', '켈소 슈러그'].forEach((n) => {
     assert.equal(app.getWeightIncrement(n), 2, `${n}은 덤벨 종목 — 2kg 격자여야 함`);
   });
-  assert.equal(app.reduceWeight(30, app.BACKDOWN_PCT, '덤벨 벤치 프레스'), 24, '30kg의 82.5% = 24.75 → 24');
+  assert.equal(app.reduceWeight(30, 0.825, '덤벨 벤치 프레스'), 24, '30kg의 82.5% = 24.75 → 24');
   assert.equal(app.reduceWeight(20, 0.9, '해머 컬'), 18, '2kg 격자라 18kg이 나와야 한다 (5kg 격자면 15)');
 });
 
 test('반올림: 감량은 언제나 기준보다 낮고, 소수점이 없다 (전 스킴 배율 × 넓은 무게대)', () => {
-  const pcts = [app.BACKOFF_PCT, app.BACKOFF_DELOAD_PCT, app.BACKDOWN_PCT, app.DROP_PCT, 0.925, 0.85, 0.80];
+  const pcts = [app.BACKOFF_PCT, app.BACKOFF_DELOAD_PCT, app.DROP_PCT, 0.925, 0.85, 0.825, 0.80];
   ['핵 스쿼트', '덤벨 벤치 프레스'].forEach((name) => {
     const step = app.getWeightIncrement(name);
     for (let top = step * 2; top <= 200; top += step) {
@@ -248,17 +249,13 @@ test('드롭세트: 마지막 워킹세트 뒤에 −25%씩 2개가 붙고 그 �
   resetOverrides();
 });
 
-test('마이오렙: 같은 무게 미니세트 3개 + 사이 휴식 20초 (프리웨이트 안전 대안)', () => {
+test('삭제된 세트법은 고를 수 없다 — override 로도 안 들어간다 (표에 없는 id)', () => {
   resetOverrides();
-  seedLog([{ date: daysAgo(3), exercises: [{ name: '인클라인 덤벨 컬', setsDetail: [set(10, 13), set(10, 13)] }] }]);
-  app.setSetSchemeOverride('인클라인 덤벨 컬', 'myo_reps');
-  const sets = app.getSessionSetPlan('인클라인 덤벨 컬', null, '12-15', { sets: 3 }).sets;
-
-  const myo = sets.filter((s) => s.role === 'myo');
-  assert.equal(myo.length, 3);
-  assert.ok(myo.every((s) => s.weight === 10), '무게를 바꾸지 않는 게 마이오렙의 핵심(프리웨이트 안전)');
-  assert.equal(myo[0].rest, 20);
-  assert.equal(myo[2].rest, 120);
+  ['myo_reps', 'top_backdown'].forEach((id) => {
+    assert.equal(app.SET_SCHEMES[id], undefined, `${id}: 스킴 표에서 지워져야 한다`);
+    assert.equal(app.setSetSchemeOverride('인클라인 덤벨 컬', id), false, `${id}: 저장을 거부해야 한다`);
+    assert.equal(app.getSetScheme('인클라인 덤벨 컬'), 'straight');
+  });
   resetOverrides();
 });
 
@@ -290,7 +287,7 @@ test('sets:0 은 "남은 워킹세트 없음" — 새 워킹세트를 만들지 
   assert.equal(app.getSessionSetPlan('머신 레그 익스텐션', null, '12-15').sets.length, 3);
 });
 
-test('countWorkingSets: setsCount 없는 옛 로그도 드롭·마이오렙을 볼륨에서 뺀다 (코드리뷰 회귀)', () => {
+test('countWorkingSets: 옛 로그의 드롭·마이오렙 세트도 볼륨에서 뺀다 (코드리뷰 회귀)', () => {
   const rows = [
     { completed: true, isWarmup: false, role: 'work' },
     { completed: true, isWarmup: false, role: 'work' },
@@ -397,28 +394,9 @@ test('[보정③] 탑세트가 목표 미달이면 남은 백오프를 한 칸 �
   resetOverrides();
 });
 
-test('[신규] top_backdown: 탑 1 + 백다운 2 (82.5% · 12~15회 · RIR 0-1 · 휴식 120초)', () => {
+test('[신규] 피라미드의 반복 목표는 클래스 범위로 잘리지 않는다 (v2 §4-E 최대 함정)', () => {
   heavySeed();
-  const rows = working('top_backdown');
-  assert.equal(rows.map((s) => s.role).join(','), 'top,backdown,backdown');
-  assert.equal(rows[0].weight, 60);
-  assert.equal(rows[1].weight, 50, '60kg의 82.5% = 49.5 → 50');
-  assert.equal(rows[1].reps, 12);
-  assert.equal(rows[1].repsMax, 15);
-  assert.equal(rows[1].amrap, true);
-  assert.equal(rows[1].rir, '0-1');
-  assert.equal(rows[1].rest, 120, '고반복은 회복이 상대적으로 빠르다');
-  resetOverrides();
-});
-
-test('[신규] 백다운·피라미드의 반복 목표는 클래스 범위로 잘리지 않는다 (v2 §4-E 최대 함정)', () => {
-  heavySeed();
-  // compound_heavy 는 5~8회 클래스인데, 백다운은 12~15회여야 한다
-  const bd = working('top_backdown');
-  assert.ok(bd[1].reps > app.EXERCISE_CLASS_RULES.compound_heavy.repMax,
-    `백다운 ${bd[1].reps}회가 클래스 상한(8)으로 잘렸다 — 스킴이 무효가 된다`);
-
-  // 피라미드의 repsDelta +4 도 마찬가지
+  // compound_heavy 는 5~8회 클래스인데, 피라미드 첫 세트는 +4회(12회)여야 한다
   const py = working('pyramid');
   assert.equal(py.map((s) => s.reps).join(','), '12,10,8', 'R.high+4 → +2 → R.high');
   assert.ok(py[0].reps > app.EXERCISE_CLASS_RULES.compound_heavy.repMax);
@@ -455,26 +433,24 @@ test('[신규] 세트 수가 3이 아니어도 핵심 세트(증량 판정 기�
   assert.equal(working('pyramid', { sets: 4, warmup: false }).map((s) => s.weight).join(','), '50,50,55,60');
   // 탑세트 계열은 첫 세트가 핵심
   assert.equal(working('rpt', { sets: 1, warmup: false }).map((s) => s.role).join(','), 'top');
-  assert.equal(working('top_backdown', { sets: 1, warmup: false }).map((s) => s.role).join(','), 'top');
+  assert.equal(working('top_backoff', { sets: 1, warmup: false }).map((s) => s.role).join(','), 'top');
   assert.equal(working('top_backoff', { sets: 4, warmup: false }).map((s) => s.rir).join(','), '1-2,2-3,2-3,0-1');
   resetOverrides();
 });
 
-test('[신규] 무게를 모르는 종목은 새 스킴 3종도 스트레이트로 접힌다 (표기 = 실제)', () => {
+test('[신규] 무게를 모르는 종목은 감량 기반 스킴을 전부 스트레이트로 접는다 (표기 = 실제)', () => {
   resetOverrides();
   seedLog([]);
   app.storage.set(app.KEYS.ONE_RM_DATA, {});
-  ['top_backdown', 'pyramid', 'rpt', 'top_backoff', 'drop'].forEach((id) => {
+  ['pyramid', 'rpt', 'top_backoff', 'drop'].forEach((id) => {
     assert.equal(app.schemeNeedsWeight(id), true, `${id}은 감량 기반 스킴`);
     app.setSetSchemeOverride('풀업', id);
     const plan = app.getSessionSetPlan('풀업', null, '본인 최대', { sets: 3 });
     assert.equal(plan.scheme, 'straight', `${id}: 감량 불가 종목에서 스트레이트로 접혀야 한다`);
     assert.ok(plan.sets.filter((s) => !s.isWarmup).every((s) => s.role === 'work'), `${id}: 세트도 스트레이트여야 한다`);
   });
-  // 마이오렙은 무게를 바꾸지 않으므로 맨몸에서도 성립한다
-  assert.equal(app.schemeNeedsWeight('myo_reps'), false);
-  app.setSetSchemeOverride('풀업', 'myo_reps');
-  assert.equal(app.getSessionSetPlan('풀업', null, '본인 최대', { sets: 3 }).sets.filter((s) => s.role === 'myo').length, 3);
+  // 스트레이트는 감량 자체가 없으니 접을 것도 없다
+  assert.equal(app.schemeNeedsWeight('straight'), false);
   resetOverrides();
 });
 
@@ -493,7 +469,7 @@ test('[불변식] 세션 화면은 저장된 선택이 아니라 **실제 적용
   resetOverrides();
 });
 
-test('[신규] 백다운은 볼륨에는 들어가고, 증량 판정·지난기록·1RM은 오염시키지 않는다', () => {
+test('[옛 기록] 백다운은 볼륨에는 들어가고, 증량 판정·지난기록·1RM은 오염시키지 않는다', () => {
   resetOverrides();
   // 탑 60×8 2세션 연속 + 백다운 50×15 → 탑세트 기준으로 증량돼야 하고, 백다운 15회가 섞이면 안 된다
   seedLog([
@@ -531,19 +507,24 @@ test('[신규] 백다운은 볼륨에는 들어가고, 증량 판정·지난기�
   seedLog([]);
 });
 
-test('[신규] 세트법 시트에 7종이 뜨고, 근거상 주의는 warn으로 알려준다', () => {
+test('[신규] 세트법 시트에 5종이 뜨고, 근거상 주의는 warn으로 알려준다', () => {
   resetOverrides();
   // vm 컨텍스트의 배열은 프로토타입 출신이 달라 deepEqual 이 실패한다 → 문자열로 비교 (하네스 주석 참조)
   const ids = app.getSetSchemeOptions('핵 스쿼트').map((o) => o.id).join(',');
-  assert.equal(ids, 'straight,top_backoff,top_backdown,pyramid,rpt,drop,myo_reps');
+  assert.equal(ids, 'straight,top_backoff,pyramid,rpt,drop');
 
   const byId = {};
   app.getSetSchemeOptions('핵 스쿼트').forEach((o) => { byId[o.id] = o; });
-  assert.equal(byId.top_backoff.suggested, true, '고중량 복합 기본값은 그대로 탑+백오프');
-  assert.equal(byId.top_backdown.suggested, false, '신규 스킴은 기본 배정하지 않는다 (근비대 차이 0)');
-  assert.ok(byId.top_backdown.warn);
+  assert.equal(byId.top_backoff.suggested, true, '고중량 복합 기본값은 그대로 탑세트');
+  assert.equal(byId.top_backoff.kr, '탑세트', '표시명은 탑세트 하나로 줄인다');
+  assert.equal(byId.pyramid.suggested, false, '나머지는 기본 배정하지 않는다 (근비대 차이 0)');
   assert.ok(byId.pyramid.warn);
   assert.ok(byId.drop.warn);
+  // warn 문구가 사라진 세트법을 대안으로 권하면 안 된다
+  Object.keys(byId).forEach((id) => {
+    assert.equal(byId[id].warn.indexOf('마이오렙'), -1, `${id}: 없는 세트법을 권하고 있다`);
+    assert.equal(byId[id].warn.indexOf('백다운'), -1, `${id}: 없는 세트법을 권하고 있다`);
+  });
 
   // 재활은 여전히 스트레이트 하나뿐
   assert.equal(app.getSetSchemeOptions('페이스 풀').length, 1);
@@ -557,7 +538,7 @@ test('[신규] 세트법 시트에 7종이 뜨고, 근거상 주의는 warn으�
 test('[신규] 어시스트 종목: 새 스킴도 보조가 늘어나는 방향으로 만들어지고, 설명이 "칸"으로 뒤집힌다', () => {
   resetOverrides();
   seedLog([{ date: daysAgo(3), exercises: [{ name: '어시스트 풀업', setsDetail: [set(30, 8), set(30, 8)] }] }]);
-  ['top_backdown', 'pyramid', 'rpt'].forEach((id) => {
+  ['top_backoff', 'pyramid', 'rpt'].forEach((id) => {
     app.setSetSchemeOverride('어시스트 풀업', id);
     const plan = app.getSessionSetPlan('어시스트 풀업', null, '5-8', { sets: 3 });
     const work = plan.sets.filter((s) => !s.isWarmup);
@@ -594,11 +575,10 @@ test('[신규] SET_SCHEMES 표 자체의 무결성 (pct 범위·rir 형식·role
   assert.equal(app.SET_SCHEME_ORDER.slice().sort().join(','), Object.keys(app.SET_SCHEMES).sort().join(','));
 });
 
-test('[신규] "세트 추가"가 스킴이 정한 다음 단을 이어 붙인다 (탑 → 백오프 / 탑 → 백다운)', () => {
+test('[신규] "세트 추가"가 스킴이 정한 다음 단을 이어 붙인다 (탑 → 백오프)', () => {
   heavySeed();
   const expected = {
-    top_backoff:  'top:60x8/180 backoff:55x8/180 backoff:55x8/180',
-    top_backdown: 'top:60x8~15/180 backdown:50x12~15/120 backdown:50x12~15/120'
+    top_backoff:  'top:60x8/180 backoff:55x8/180 backoff:55x8/180'
   };
   Object.keys(expected).forEach((sc) => {
     app.setSetSchemeOverride('핵 스쿼트', sc);
@@ -698,7 +678,8 @@ test('[불변식] 전 스킴 × 전 클래스 × 무게 3~200kg × 세트 1~6 �
     });
   });
 
-  assert.ok(checked > 15000, `전수 검사 조합이 너무 적다: ${checked}`);
+  // 스킴 5종 × 종목 7 × 무게대 × 세트 수 = 약 11,150 조합. 스킴을 지워도 이 검사가 헛돌면 안 된다.
+  assert.ok(checked > 10000, `전수 검사 조합이 너무 적다: ${checked}`);
   assert.equal(bad.slice(0, 5).join(' | '), '', `${bad.length}건 위반 (앞 5건만 표시)`);
 });
 
@@ -746,13 +727,12 @@ test('[리뷰] 처방 표 반복 열이 클래스 범위 밖 목표를 감추지
   // 클래스 범위(5-8) 안에서 끝나는 스킴은 기존 표기 그대로
   assert.equal(repsCol('straight').shown, '5-8');
   assert.equal(repsCol('top_backoff').shown, '5-8');
-  // 피라미드(+4)·백다운(12~15)은 5-8 이라 써 놓으면 실제 세트를 하나도 안 담는다
+  // 피라미드(+4)는 5-8 이라 써 놓으면 실제 세트를 하나도 안 담는다
   assert.equal(repsCol('pyramid').shown, '8-12');
   assert.equal(repsCol('rpt').shown, '8-12');
-  assert.equal(repsCol('top_backdown').shown, '8-15');
 
   // 적힌 폭이 실제 워킹세트를 전부 담는지 (표 = 세션)
-  ['pyramid', 'rpt', 'top_backdown'].forEach((sc) => {
+  ['pyramid', 'rpt'].forEach((sc) => {
     const r = repsCol(sc);
     const bounds = r.shown.split('-').map(Number);
     r.plan.sets.filter((s) => !s.isWarmup && !app.isSetExtension(s)).forEach((s) => {
@@ -763,7 +743,7 @@ test('[리뷰] 처방 표 반복 열이 클래스 범위 밖 목표를 감추지
   resetOverrides();
 });
 
-test('[리뷰] 휴식 자가조절이 백다운의 자기 목표(12회)를 기준으로 본다', () => {
+test('[리뷰·옛 기록] 휴식 자가조절이 백다운의 자기 목표(12회)를 기준으로 본다', () => {
   const ex = { name: '핵 스쿼트', targetReps: '5-8' };
   // 클래스 하한(5회)으로 보면 백다운 4회도 "달성"으로 잡혀 +30초가 안 붙는다
   assert.equal(app.resolveRestSec(ex, { reps: 4, rest: 120, role: 'backdown', repsMin: 12 }), 150);
@@ -845,7 +825,7 @@ test('[리뷰] 고중량 복합은 어떤 세트법이든 워밍업 램프를 �
   resetOverrides();
   const range = { low: 5, high: 8 };
   [20, 30, 40, 60, 100].forEach((w) => {
-    ['top_backoff', 'top_backdown', 'pyramid', 'rpt'].forEach((sc) => {
+    ['top_backoff', 'pyramid', 'rpt'].forEach((sc) => {
       const rows = app.buildSchemeSets('핵 스쿼트', w, 8, range, sc, { sets: 3, warmup: true });
       const warm = rows.filter((s) => s.isWarmup);
       const work = rows.filter((s) => !s.isWarmup);
@@ -872,7 +852,7 @@ test('[리뷰] 사다리 단이 격자에 다 안 들어가면 그 스킴을 접
 test('[리뷰] "세트 추가"가 연장 세트의 짧은 휴식을 물려받지 않는다', () => {
   resetOverrides();
   seedLog([{ date: daysAgo(3), exercises: [{ name: '머신 레그 익스텐션', setsDetail: [set(40, 13), set(40, 13)] }] }]);
-  ['drop', 'myo_reps'].forEach((sc) => {
+  ['drop'].forEach((sc) => {
     app.setSetSchemeOverride('머신 레그 익스텐션', sc);
     const plan = app.getSessionSetPlan('머신 레그 익스텐션', null, '12-15', { sets: 3, warmup: false });
     app.state.activeSession = {
@@ -965,7 +945,7 @@ test('드롭·마이오렙 사이의 짧은 휴식은 자가조절 대상이 아
 
 // ═══ 5. 증량 판정·볼륨 오염 방지 (§5-D 리스크) ═══
 
-test('마이오렙 미니세트가 증량 판정을 막지 않는다 (같은 무게 5회가 상단 미달로 잡히면 안 됨)', () => {
+test('[옛 기록] 마이오렙 미니세트가 증량 판정을 막지 않는다 (같은 무게 5회가 상단 미달로 잡히면 안 됨)', () => {
   resetOverrides();
   seedLog([
     { date: daysAgo(3), exercises: [{ name: '머신 레그 익스텐션', setsDetail: [
@@ -1034,8 +1014,8 @@ test('드롭·마이오렙 세트는 rolling 1RM 근거에서도 빠진다 (세 
 test('슈퍼세트: 길항 관계 + 머신·케이블 조합만 페어로 묶는다', () => {
   seedLog([]);
   const pairs = app.buildSupersetSuggestions([
-    { name: '머신 체스트 프레스' },   // chest
-    { name: '머신 시티드 로우' },     // upper_back — 길항 ✅
+    { name: '머신 펙 덱 플라이' },     // chest (고립)
+    { name: '케이블 암 풀 다운' },     // lats (고립) — 길항 ✅
     { name: '덤벨 사이드 레터럴 레이즈' } // 덤벨 = 프리웨이트 → 제외
   ]);
   assert.equal(pairs.length, 1);
@@ -1045,17 +1025,22 @@ test('슈퍼세트: 길항 관계 + 머신·케이블 조합만 페어로 묶는
 test('슈퍼세트: 같은 근육끼리(가슴 → 삼두)는 묶지 않는다 — 볼륨 로드가 떨어진다', () => {
   seedLog([]);
   const pairs = app.buildSupersetSuggestions([
-    { name: '머신 체스트 프레스' },
+    { name: '머신 펙 덱 플라이' },
     { name: '케이블 푸시 다운' }
   ]);
   assert.equal(pairs.length, 0);
 });
 
-test('슈퍼세트: 고중량 복합·요추 축성 부하 종목은 페어에서 제외한다 (허리 보호)', () => {
+test('슈퍼세트: 고립·경량 고립만 묶는다 (복합은 전부 제외 — 뒤 종목 반복이 무너진다)', () => {
   seedLog([]);
   assert.equal(app.canSupersetExercise('핵 스쿼트'), false, '고중량 복합 + 축성 부하 high');
+  assert.equal(app.canSupersetExercise('머신 체스트 프레스'), false, '중강도 복합도 제외');
+  assert.equal(app.canSupersetExercise('레그 프레스'), false, '중강도 복합도 제외');
+  assert.equal(app.canSupersetExercise('랫 풀 다운'), false, '중강도 복합도 제외');
   assert.equal(app.canSupersetExercise('페이스 풀'), false, '재활 종목');
-  assert.equal(app.canSupersetExercise('머신 레그 익스텐션'), true);
+  assert.equal(app.canSupersetExercise('머신 레그 익스텐션'), true, '고립');
+  assert.equal(app.canSupersetExercise('힙 어덕션'), true, '경량 고립');
+  assert.equal(app.canSupersetExercise('인클라인 덤벨 컬'), false, '고립이어도 프리웨이트는 제외');
   assert.equal(app.getExerciseAxialLoad('핵 스쿼트'), 'high');
   assert.equal(app.getExerciseAxialLoad('머신 레그 익스텐션'), 'low');
 });
@@ -1063,9 +1048,9 @@ test('슈퍼세트: 고중량 복합·요추 축성 부하 종목은 페어에�
 test('슈퍼세트: 세션당 2페어까지만 제안한다 (RPE·대사 스트레스가 높다)', () => {
   seedLog([]);
   const pairs = app.buildSupersetSuggestions([
-    { name: '머신 체스트 프레스' }, { name: '머신 시티드 로우' },
+    { name: '머신 펙 덱 플라이' }, { name: '케이블 암 풀 다운' },
     { name: '머신 레그 익스텐션' }, { name: '시티드 레그 컬' },
-    { name: '머신 펙 덱 플라이' }, { name: '랫 풀 다운' }
+    { name: '케이블 컬' }, { name: '케이블 푸시 다운' }
   ]);
   assert.equal(pairs.length, 2);
 });
@@ -1083,9 +1068,9 @@ test('슈퍼세트 휴식: 앞 종목은 45초(이동), 뒤 종목은 클래스 
 
 test('슈퍼세트: 붙어 있는 종목을 먼저 묶는다 (이동이 짧아야 시간 이득이 남는다)', () => {
   seedLog([]);
-  // 0번(레그프레스·사두)도 2번(레그컬·햄)과 길항이지만, 인접한 1↔2가 우선이어야 한다
+  // 0번(레그 익스텐션·사두)도 2번(레그컬·햄)과 길항이지만, 인접한 1↔2가 우선이어야 한다
   const pairs = app.buildSupersetSuggestions([
-    { name: '레그 프레스' }, { name: '머신 레그 익스텐션' }, { name: '시티드 레그 컬' }
+    { name: '레그 익스텐션' }, { name: '머신 레그 익스텐션' }, { name: '시티드 레그 컬' }
   ]);
   assert.equal(pairs.length, 1);
   assert.equal(pairs[0].a + ',' + pairs[0].b, '1,2');
@@ -1093,65 +1078,23 @@ test('슈퍼세트: 붙어 있는 종목을 먼저 묶는다 (이동이 짧아�
 
 test('applySupersetSuggestions: 양쪽 종목에 페어 정보를 얹는다', () => {
   seedLog([]);
-  const exercises = [{ name: '머신 체스트 프레스' }, { name: '머신 시티드 로우' }];
+  const exercises = [{ name: '머신 펙 덱 플라이' }, { name: '케이블 암 풀 다운' }];
   app.applySupersetSuggestions(exercises);
   assert.equal(exercises[0].supersetWith, 1);
   assert.equal(exercises[1].supersetWith, 0);
   assert.ok(exercises[0].supersetKr.includes('↔'));
 });
 
-// ═══ 7. 드롭·마이오렙 제안 조건 (§4) ═══
+// ═══ 7. 강도 기법 자동 제안은 삭제됐다 ═══
+// 드롭세트 제안 카드(제안 → 수락/거절)와 판정 함수 3종을 통째로 뺐다. 근거상 이득이 시간뿐이라
+// 앱이 먼저 권할 이유가 없었고, 세트법은 사용자가 세트법 시트에서 직접 고른다.
 
-test('제안 조건: 시간 압박이 없으면 제안하지 않는다 (이득은 오직 시간)', () => {
-  resetOverrides();
-  seedLog([]);
-  const session = {
-    sessionType: 'legs',
-    startTime: Date.now(),
-    exercises: [{ name: '머신 레그 익스텐션', targetReps: '12-15',
-      sets: [{ reps: 15, completed: false }] }]
-  };
-  assert.equal(app.isSessionTimePressured(session), false);
-  assert.equal(app.suggestIntensityTechnique('머신 레그 익스텐션', session), null);
-});
-
-test('제안 조건: 시간이 빠듯하면 머신·케이블엔 드롭세트, 프리웨이트엔 마이오렙', () => {
-  resetOverrides();
-  seedLog([]);
-  const many = (name) => ({
-    name, targetReps: '12-15',
-    sets: Array.from({ length: 3 }, () => ({ reps: 15, completed: false }))
-  });
-  // 종목을 많이 남겨 예상 소요가 예산을 넘게 만든다
-  const session = {
-    sessionType: 'legs', startTime: Date.now(),
-    exercises: [many('머신 레그 익스텐션'), many('시티드 레그 컬'), many('머신 펙 덱 플라이'),
-                many('인클라인 덤벨 컬'), many('힙 어덕션'), many('레그 프레스')]
-  };
-  assert.equal(app.isSessionTimePressured(session), true);
-  assert.equal(app.suggestIntensityTechnique('머신 레그 익스텐션', session), 'drop');
-  assert.equal(app.suggestIntensityTechnique('인클라인 덤벨 컬', session), 'myo_reps');
-  // 복합·재활은 대상이 아니다
-  assert.equal(app.suggestIntensityTechnique('레그 프레스', session), null);
-  assert.equal(app.suggestIntensityTechnique('페이스 풀', session), null);
-});
-
-test('제안 조건: 최근 통증 기록이 있으면 제안하지 않는다', () => {
-  resetOverrides();
-  seedLog([{ date: daysAgo(2), exercises: [
-    { name: '머신 레그 익스텐션', painFlag: true, setsDetail: [set(40, 15)] }
-  ] }]);
-  const many = (name) => ({
-    name, targetReps: '12-15',
-    sets: Array.from({ length: 3 }, () => ({ reps: 15, completed: false }))
-  });
-  const session = {
-    sessionType: 'legs', startTime: Date.now(),
-    exercises: [many('머신 레그 익스텐션'), many('시티드 레그 컬'), many('머신 펙 덱 플라이'),
-                many('힙 어덕션'), many('레그 프레스'), many('머신 시티드 로우')]
-  };
-  assert.equal(app.suggestIntensityTechnique('머신 레그 익스텐션', session), null);
-  seedLog([]);
+test('강도 기법 자동 제안 함수가 남아 있지 않다 (기능 삭제 — 되살아나면 UI 없는 죽은 코드)', () => {
+  ['suggestIntensityTechnique', 'isSessionTimePressured', 'intensityTechniqueCountThisWeek']
+    .forEach((fn) => assert.equal(typeof app[fn], 'undefined', `${fn}: 삭제된 함수가 되살아났다`));
+  // 드롭세트 자체는 세트법으로 남아 있다 — 사라진 건 "앱이 먼저 권하는" 흐름뿐이다
+  assert.ok(app.SET_SCHEMES.drop, '드롭세트 세트법까지 지우면 안 된다');
+  assert.ok(app.SET_SCHEME_ORDER.indexOf('drop') >= 0, '세트법 시트에는 계속 뜬다');
 });
 
 // ═══ 8. 60분 시간 예산 — 템플릿이 예산 안에 들어오는가 (training-splits.md §2-C) ═══
@@ -1208,4 +1151,83 @@ test('EXERCISE_SAFETY의 대체 종목이 모두 종목표에 등록된 이름�
     });
   });
   assert.equal(unknown.join(' | '), '');
+});
+
+// ═══ 10. 삭제된 세트법 이관 (core.js migrateSetSchemeData) ═══
+// 이관하지 않으면 ① 종목별 사용자 선택이 조용히 클래스 기본값으로 되돌아가고
+// ② 진행 중 세션의 scheme 이 표에 없는 id라 화면이 세트법을 못 읽는다.
+
+test('[이관] 이관표가 가리키는 곳은 살아 있는 세트법이다', () => {
+  Object.keys(app.SET_SCHEME_MIGRATIONS).forEach((from) => {
+    assert.equal(app.SET_SCHEMES[from], undefined, `${from}: 아직 스킴 표에 남아 있다`);
+    assert.ok(app.SET_SCHEMES[app.SET_SCHEME_MIGRATIONS[from]], `${from}: 이관 대상이 표에 없다`);
+  });
+  assert.equal(app.SET_SCHEME_MIGRATIONS.top_backdown, 'top_backoff');
+  assert.equal(app.SET_SCHEME_MIGRATIONS.myo_reps, 'straight');
+});
+
+test('[이관] 저장된 종목별 선택을 갈아 끼운다 · 살아 있는 값은 그대로 · 멱등', () => {
+  resetOverrides();
+  app.storage.set(app.KEYS.SET_SCHEMES, {
+    '핵 스쿼트': 'top_backdown',
+    '머신 레그 익스텐션': 'myo_reps',
+    '레그 프레스': 'drop'
+  });
+  assert.equal(app.migrateSetSchemeData(), 2, '바꾼 값의 개수를 돌려준다');
+
+  const saved = app.storage.get(app.KEYS.SET_SCHEMES, {});
+  assert.equal(saved['핵 스쿼트'], 'top_backoff');
+  assert.equal(saved['머신 레그 익스텐션'], 'straight');
+  assert.equal(saved['레그 프레스'], 'drop', '살아 있는 선택은 건드리지 않는다');
+  assert.equal(app.getSetScheme('핵 스쿼트'), 'top_backoff', '이관 전이면 클래스 기본값으로 되돌아갔을 값');
+
+  assert.equal(app.migrateSetSchemeData(), 0, '두 번째 실행은 바꿀 게 없다');
+  resetOverrides();
+});
+
+test('[이관] 진행 중 세션의 세트법도 갈아 끼우되, 이미 기록된 세트는 건드리지 않는다', () => {
+  resetOverrides();
+  app.storage.set(app.KEYS.ACTIVE_SESSION, {
+    startTime: Date.now(),
+    exercises: [
+      { name: '핵 스쿼트', scheme: 'top_backdown',
+        sets: [{ role: 'top', weight: 60, reps: 8, completed: true, isWarmup: false },
+               { role: 'backdown', weight: 50, reps: 12, completed: false, isWarmup: false }] },
+      { name: '머신 레그 익스텐션', scheme: 'myo_reps', sets: [] },
+      { name: '레그 프레스', scheme: 'straight', sets: [] }
+    ]
+  });
+  assert.equal(app.migrateSetSchemeData(), 2);
+
+  const s = app.storage.get(app.KEYS.ACTIVE_SESSION);
+  assert.equal(s.exercises.map((e) => e.scheme).join(','), 'top_backoff,straight,straight');
+  assert.equal(app.sessionSchemeOf(s.exercises[0]), 'top_backoff', '화면이 세트법 이름을 읽을 수 있어야 한다');
+  // 하는 중인 운동의 남은 처방을 도중에 바꾸지 않는다 — 역할 뱃지도 그대로 뜬다
+  assert.equal(s.exercises[0].sets.map((x) => x.role).join(','), 'top,backdown');
+  assert.equal(app.SET_ROLE_KR.backdown, '백다운');
+  assert.equal(app.SET_ROLE_KR.myo, '미니');
+
+  app.storage.set(app.KEYS.ACTIVE_SESSION, null);
+  resetOverrides();
+});
+
+test('[이관] init() 이 세션을 복원하기 전에 이관을 끝낸다 (앱을 열면 저절로 갈린다)', () => {
+  resetOverrides();
+  app.storage.set(app.KEYS.SET_SCHEMES, { '핵 스쿼트': 'top_backdown' });
+  app.storage.set(app.KEYS.ACTIVE_SESSION, {
+    startTime: Date.now(), currentExerciseIdx: 0,
+    exercises: [{ name: '머신 레그 익스텐션', targetReps: '12-15', scheme: 'myo_reps',
+                  sets: [{ role: 'work', weight: 40, reps: 13, completed: false, isWarmup: false }] }]
+  });
+
+  app.init();
+
+  assert.equal(app.storage.get(app.KEYS.SET_SCHEMES, {})['핵 스쿼트'], 'top_backoff');
+  assert.equal(app.state.activeSession.exercises[0].scheme, 'straight',
+    '복원된 세션이 표에 없는 id를 들고 있으면 안 된다');
+
+  app.state.activeSession = null;
+  app.storage.set(app.KEYS.ACTIVE_SESSION, null);
+  resetOverrides();
+  seedLog([]);
 });

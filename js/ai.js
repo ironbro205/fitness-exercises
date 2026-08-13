@@ -1184,9 +1184,9 @@ async function generateFullRoutine(bodyPart) {
 
 **4-1. 세트법·휴식·세트별 무게는 앱이 계산한다 (AI는 정하지 않는다)**
 - 너는 **종목·세트 수·반복 범위**만 정하면 된다. 세트법·세트별 무게·휴식 초는 앱이 종목 클래스로 결정론적으로 배정한다.
-- 참고로 앱의 기본 배정은 이렇다(설명용 — JSON에 넣지 말 것): 고중량 복합 = 탑세트 1 + 백오프 2세트(탑의 90%), 나머지 = 스트레이트 3세트.
+- 참고로 앱의 기본 배정은 이렇다(설명용 — JSON에 넣지 말 것): 고중량 복합 = 탑세트(가장 무거운 1세트 + 백오프 2세트, 탑의 90%), 나머지 = 스트레이트 3세트.
   즉 고중량 복합에 sets:3을 주면 화면에는 탑 1 + 백오프 2로 펼쳐진다. **sets는 워킹세트 총 개수**를 뜻한다.
-  사용자가 종목별로 다른 세트법(탑+백다운·피라미드·역피라미드·드롭·마이오렙)을 골라 뒀을 수도 있지만,
+  사용자가 종목별로 다른 세트법(피라미드·역피라미드·드롭)을 골라 뒀을 수도 있지만,
   그때도 sets 의 뜻은 같다 — 앱이 그 수만큼 펼친다.
 - 응답에 scheme·세트별 무게 배열 같은 필드를 만들지 말 것. 세트법은 코드가 일관되게 정하는 편이 낫다.
 
@@ -1260,7 +1260,7 @@ async function generateFullRoutine(bodyPart) {
 - 실패 근접도(RIR)가 근비대에 유의미하나 완전 실패까진 불필요, 6~12회가 효율 스윗스팟이며 5~30회 모두 유효(Refalo 2023; Schoenfeld·Grgic 2021).
 - 머신 = 프리웨이트 동등(Schwanbeck). 신장 강조 소폭 우위(Maeo 2021·2023, 효과는 작고 논쟁적). 종목 순서는 총 근비대에 사실상 무관하나 앞 종목의 수행·근력 이득은 있다(Nunes 2021) — 배치는 규칙 11을 따른다.
 - 휴식(앱 기본값): 고중량복합 180초 · 중강도복합 150초 · 고립 120초 · 경량고립 90초 · 재활 60초. 훈련 경험자에서 3분 > 1분(Schoenfeld 2016 JSCR). 다만 90초 초과의 추가 이득은 불확실하다(Frontiers 2024 베이지안 메타) — 긴 휴식이 작동하는 메커니즘은 "다음 세트 반복 수를 지켜주는 것"이라, 앱은 직전 세트가 목표 하단을 못 채웠을 때만 +30초를 더한다.
-- 세트법: 볼륨을 맞추면 스트레이트·피라미드·드롭세트의 근비대는 동등하다(Angleri 2017 CSA +7.6/+7.5/+7.8%, Sødal 2023 메타 SMD 0.155 p=0.392). 드롭세트·마이오렙의 이득은 **오직 시간**(1/2~1/3)이므로 시간 압박이 있을 때만 값어치가 있다.
+- 세트법: 볼륨을 맞추면 스트레이트·피라미드·드롭세트의 근비대는 동등하다(Angleri 2017 CSA +7.6/+7.5/+7.8%, Sødal 2023 메타 SMD 0.155 p=0.392). 드롭세트의 이득은 **오직 시간**(1/2~1/3)이므로 시간 압박이 있을 때만 값어치가 있다.
 
 ## ❌ 절대 금지
 - 풀에 없는 종목 사용 금지(반드시 위 "사용 가능 종목 풀"에서만 고른다).
@@ -1536,7 +1536,7 @@ async function generateWeeklyReview(forceRefresh) {
         var setCount = 0;
         if (typeof ex.setsCount === 'number') setCount = ex.setsCount;
         else if (typeof ex.sets === 'number') setCount = ex.sets;
-        else if (Array.isArray(ex.setsDetail)) setCount = countWorkingSets(ex.setsDetail); // 드롭·마이오렙 제외
+        else if (Array.isArray(ex.setsDetail)) setCount = countWorkingSets(ex.setsDetail); // 연장 세트(드롭 등) 제외
         else if (Array.isArray(ex.sets)) setCount = countWorkingSets(ex.sets);
         if (setCount === 0) return;
         weeklyVolByPart[info.primary] = (weeklyVolByPart[info.primary] || 0) + setCount;
