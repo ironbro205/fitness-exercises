@@ -263,11 +263,17 @@ function buildMuscleMapBlock(exerciseName, opts) {
 
   // opts.fold: 세로 200px 그림 대신 한 줄로 접어 둔다 — 담긴 정보(근육 이름)는 접힌 줄에 그대로 있고,
   // 그림이 필요할 때만 편다. 네이티브 <details> 라 재렌더가 없어 스크롤이 튀지 않는다.
+  //
+  // opts.foldOpen / opts.foldToggle: 펼침 상태를 **호출부가** 들고 있게 하는 통로.
+  // <details> 의 펼침은 DOM 에만 남으므로, 운동 세션처럼 휴식 타이머가 매초 전체 재렌더를
+  // 돌리는 화면에서는 1초 만에 도로 접혔다. 호출부가 foldOpen 으로 상태를 복원하고
+  // foldToggle(ontoggle) 로 상태를 받아 적는다 — 이 경로는 재렌더가 필요 없다.
   if (opts.fold) {
     var names = [muscleLabel(muscles.primary)]
       .concat(muscles.secondary.length ? [muscles.secondary.map(muscleLabel).join(', ')] : [])
       .join(' · ');
-    return '<details class="note mm-fold">'
+    return '<details class="note mm-fold"' + (opts.foldOpen ? ' open' : '')
+      + (opts.foldToggle ? ' ontoggle="' + opts.foldToggle + '"' : '') + '>'
       + '<summary>' + (typeof icon === 'function' ? icon('info', 13) : '')
         + '<span class="note-summary-text">자극 근육 — ' + escapeHtml(names) + '</span>'
         + '<span class="note-caret">' + (typeof icon === 'function' ? icon('chevron', 12) : '') + '</span>'

@@ -2364,25 +2364,24 @@ test('문서 — CLAUDE.md·QA 체크리스트가 실제 탭 구성과 맞는다
 });
 
 // ═══════════════════════════════════════════════
-// 루틴 미리보기 처방 표 — 종목별 표시 + 세트 구조
-// 표의 존재 이유는 "이 종목을 어떻게 하는가"를 종목 줄에서 읽는 것이다.
-// 공통값을 머리글로 올려 열을 접으면 그 줄이 사라진다 → 아래 테스트가 그 회귀를 막는다.
+// 루틴 미리보기 처방 — 종목 카드마다 **한 줄** ("30kg × 5~8회 × 3세트 · 휴식 3분")
+// 머리글 + 5열 격자 표는 폐기했다(종목 6개면 라벨 24개가 되어 정작 읽어야 할 값이 묻혔다).
+// 형식이 바뀌어도 이 줄이 지켜야 하는 계약은 둘이다:
+//  ① 종목마다 **자기 줄**을 갖는다 — 공통값을 위로 접으면 그 종목의 세트를 못 읽는다
+//  ② 적힌 값은 전부 [시작]이 실제로 만들 세트(getRoutinePreviewPlan)에서 온다 — AI 원본이 아니라
 // ═══════════════════════════════════════════════
 
-// 2단계 화면을 그리고, 처방 표의 각 종목 줄(격자)만 잘라낸다.
-function step2Rows(routine, part) {
+// 2단계 화면을 그리고, 종목별 처방 한 줄만 잘라낸다.
+function step2Lines(routine, part) {
   const fresh = loadApp();
   fresh.state.workoutWizardStep = 2;
   fresh.state.selectedBodyPart = part || 'push';
   fresh.state.routineLoading = false;
   fresh.state.generatedRoutine = routine;
   const html = fresh.renderWorkoutStep2();
-  const rows = html.split('<div class="routine-ex-prescription"').slice(1)
-    .map((s) => s.slice(0, s.indexOf('</div>')));
-  const head = html.includes('routine-ex-prescription-head')
-    ? html.slice(html.indexOf('routine-ex-prescription-head')).split('</div>')[0]
-    : '';
-  return { app: fresh, html, head, rows };
+  const lines = html.split('<p class="routine-ex-prescription">').slice(1)
+    .map((s) => s.slice(0, s.indexOf('</p>')));
+  return { app: fresh, html, lines };
 }
 
 const SAME_VALUE_ROUTINE = {
@@ -2396,34 +2395,28 @@ const SAME_VALUE_ROUTINE = {
   ]
 };
 
-test('처방 표 — 전 종목이 같은 값이어도 세트·RIR을 종목 줄마다 적는다', () => {
-  const { html, head, rows } = step2Rows(SAME_VALUE_ROUTINE);
+test('처방 한 줄 — 종목마다 자기 줄을 갖고, 단위가 붙어 머리글 없이 읽힌다', () => {
+  const { html, lines } = step2Lines(SAME_VALUE_ROUTINE);
 
-  // 머리글은 5열(무게·반복·세트·RIR·휴식)이 그대로 있어야 한다
-  ['무게', '반복', '세트', 'RIR', '휴식'].forEach((c) => {
-    assert.ok(head.includes('<p>' + c + '</p>'), '머리글에 ' + c + ' 열이 없다');
-  });
-  const gridOf = (s) => (s.match(/grid-template-columns:\s*([^;"]+)/) || [])[1];
-  const headGrid = gridOf(head);
-  assert.ok(headGrid, '머리글에 격자 지정이 없다: ' + head.slice(0, 120));
-  assert.equal(headGrid.split('fr)').length - 1, 5, '머리글 격자가 5열이 아니다: ' + headGrid);
+  assert.equal(lines.length, 3, '종목 수만큼 처방 줄이 있어야 한다');
+  // ★회귀 지점: 값이 전 종목 같다고 위로 접으면 그 종목의 세트를 종목 줄에서 못 읽는다
+  assert.ok(!html.includes('전 종목'), "공통값을 '전 종목 …' 한 줄로 올리면 안 된다");
+  assert.ok(!html.includes('routine-ex-prescription-head'), '머리글 표는 폐기됐다 — 되살아나면 안 된다');
 
-  // ★회귀 지점: 공통값을 머리글 위로 올리는 요약 줄이 다시 생기면 안 된다
-  assert.ok(!html.includes('전 종목'), "공통값을 '전 종목 …' 한 줄로 올리면 종목 줄에서 세트를 못 읽는다");
-
-  assert.equal(rows.length, 3, '종목 수만큼 처방 줄이 있어야 한다');
-  rows.forEach((row, i) => {
-    const cells = (row.match(/routine-ex-stat-value/g) || []).length;
-    assert.equal(cells, 5, i + 1 + '번 종목 줄의 칸 수가 머리글(5열)과 다르다: ' + row);
-    // 격자가 머리글과 같아야 값이 라벨 아래로 줄을 맞춘다
-    assert.equal(gridOf(row), headGrid, i + 1 + '번 종목 줄의 격자가 머리글과 다르다');
-    assert.ok(/>3<\/p>/.test(row), i + 1 + '번 종목 줄에 세트 수(3)가 없다: ' + row);
+  lines.forEach((line, i) => {
+    const where = i + 1 + '번 종목 줄: ' + line;
+    assert.ok(/\d+kg/.test(line), '무게에 단위가 없다 — ' + where);
+    assert.ok(/\d+(~\d+)?회/.test(line), '반복에 단위가 없다 — ' + where);
+    assert.ok(/3세트/.test(line), '세트 수가 없다 — ' + where);
+    assert.ok(/휴식 [\d.]+(~[\d.]+)?분/.test(line), '휴식이 없다 — ' + where);
+    // 범위는 물결로 적는다 — '5-8' 은 뺄셈으로 읽힌다
+    assert.ok(!/\d-\d/.test(line), "범위에 '-' 가 남아 있다 — " + where);
   });
 });
 
-test('처방 표 — 표의 값은 [시작] 이 실제로 만들 세트에서 온다 (AI 원본이 아니라)', () => {
+test('처방 한 줄 — 값은 [시작] 이 실제로 만들 세트에서 온다 (AI 원본이 아니라)', () => {
   const fresh = loadApp();
-  // 수행 기록이 있으면 세션은 점진적 과부하 추천 무게로 시작한다 → 표도 그 무게를 적어야 한다.
+  // 수행 기록이 있으면 세션은 점진적 과부하 추천 무게로 시작한다 → 처방 줄도 그 무게를 적어야 한다.
   fresh.state.data.workoutLog = [{
     date: fresh.getTodayStr(),
     exercises: [{ name: '머신 체스트 프레스', setsDetail: [
@@ -2434,30 +2427,36 @@ test('처방 표 — 표의 값은 [시작] 이 실제로 만들 세트에서 �
 
   const ex = { name: '머신 체스트 프레스', type: '머신', sets: 3, reps: '10-12', weight: 60, rir: 2, rest: '120' };
   const plan = fresh.getRoutinePreviewPlan(ex);
+  const p = fresh.buildPrescriptionValues(ex, plan);
   const first = plan.sets.filter((s) => !s.isWarmup)[0];
   assert.notEqual(plan.weight, ex.weight, '기록 기반 추천이 AI 무게와 같으면 이 검사가 헛돈다');
+  assert.notEqual(p.rest, fresh.restSecToMin(Number(ex.rest)), 'AI 휴식과 실제 휴식이 같으면 이 검사가 헛돈다');
 
   fresh.state.workoutWizardStep = 2;
   fresh.state.selectedBodyPart = 'push';
   fresh.state.routineLoading = false;
   fresh.state.generatedRoutine = { bodyPart: 'push', headline: 'x', duration: 50, totalSets: 3,
     intensity: 'moderate', reason: '', caution: '', exercises: [ex] };
-  const row = fresh.renderWorkoutStep2().split('<div class="routine-ex-prescription"')[1].split('</div>')[0];
+  const line = fresh.renderWorkoutStep2()
+    .split('<p class="routine-ex-prescription">')[1].split('</p>')[0];
 
-  assert.ok(row.includes('>' + plan.weight + '<span'), '무게가 추천값(' + plan.weight + ')이 아니다: ' + row);
-  assert.ok(!row.includes('>' + ex.weight + '<span'), 'AI 원본 무게(' + ex.weight + ')가 그대로 보인다');
-  assert.ok(row.includes('>' + first.rir + '</p>'), 'RIR이 세트 역할이 정한 값(' + first.rir + ')이 아니다: ' + row);
-  assert.ok(row.includes('>' + (first.rest / 60) + '분</p>'), '휴식이 실제 세트 값이 아니다: ' + row);
+  assert.ok(line.includes(plan.weight + 'kg'), '무게가 추천값(' + plan.weight + ')이 아니다: ' + line);
+  assert.ok(!line.includes(ex.weight + 'kg'), 'AI 원본 무게(' + ex.weight + ')가 그대로 보인다: ' + line);
+  assert.ok(line.includes(p.sets + '세트'), '세트 수가 계획과 다르다: ' + line);
+  assert.ok(line.includes(String(p.reps).replace(/-/g, '~') + '회'), '반복이 계획과 다르다: ' + line);
+  // 휴식은 AI가 준 값이 아니라 종목 클래스·세트 역할이 정한 값이다
+  assert.equal(p.rest, fresh.restSecToMin(first.rest), '휴식이 실제 세트 값에서 오지 않았다');
+  assert.ok(line.includes('휴식 ' + p.rest), '휴식이 줄에 안 적혔다: ' + line);
 
   // 대화 미리보기도 같은 값을 말해야 한다 (두 화면이 다른 숫자를 말하면 안 된다)
   fresh.state.workoutWizardStep = 3;
   fresh.state.routinePreviewExpanded = true;
   fresh.state.routineChatHistory = [];
-  assert.ok(fresh.renderWorkoutStep3().includes(plan.weight + 'kg × '), '대화 미리보기 무게가 표와 다르다');
+  assert.ok(fresh.renderWorkoutStep3().includes(plan.weight + 'kg × '), '대화 미리보기 무게가 처방 줄과 다르다');
 });
 
 test('처방 표 — 고중량 복합에 탑세트+백오프 구조를 적는다 (스트레이트는 적지 않는다)', () => {
-  const { app, html } = step2Rows(SAME_VALUE_ROUTINE);
+  const { app, html } = step2Lines(SAME_VALUE_ROUTINE);
 
   // 화면 문구의 숫자·비율은 세션이 실제로 만드는 세트 배열에서 와야 한다 — 여기서 그걸 대조한다.
   const plan = app.getSessionSetPlan('덤벨 벤치 프레스', 30, '5-8', { sets: 3, warmup: false });

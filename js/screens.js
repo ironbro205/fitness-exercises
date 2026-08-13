@@ -1012,6 +1012,7 @@ window.startGeneratedRoutine = function() {
   };
   // FREE·AI 루틴은 세션 타입이 없을 수 있어, 종목 목록에서 웜업 부위를 유도한다(buildWarmupPlan 내부).
   attachWarmupToSession(state.activeSession);
+  state.sessionMuscleFoldOpen = null;   // 새 세션은 자극 근육을 접은 채로 시작한다
   saveActiveSession();
 
   // 마법사 상태 리셋 (운동이 시작됐으니 마법사는 비움)
@@ -1075,44 +1076,28 @@ function renderWorkoutStep2() {
       '</div>';
   }
   
-  // 강도 표시 — 이모지 신호등 대신 말로. 색은 "지금 눌러야 할 것"에만 쓴다.
-  var intensityLabel = {
-    light: '가볍게',
-    moderate: '적당히',
-    challenging: '도전'
-  }[routine.intensity] || '적당히';
-
-  // ── 처방 표: 머리글(무게/반복/세트/RIR/휴식)은 목록 맨 위에 한 번만 두고,
-  //    값은 **종목마다 전부** 적는다. 카드마다 라벨을 붙이면 6종목 × 4라벨 = 24개라 값보다
-  //    라벨이 많아지지만, 값까지 접어(공통값을 머리글로 올려) 버리면 "이 종목이 몇 세트인지"를
-  //    종목 줄에서 못 읽는다 — 그건 표가 아니라 요약이다. 라벨만 접고 값은 접지 않는다.
+  // ── 처방은 종목 카드마다 **한 줄**로 적는다: "20kg × 8~12회 × 3세트 · 휴식 2분".
+  //    표(머리글 + 5열 격자)는 종목 6개면 라벨 24개짜리 격자가 되어, 정작 읽어야 할
+  //    "무엇을 몇 번" 이 숫자 더미에 묻혔다. 단위를 값에 붙이면 머리글 없이도 읽힌다.
   var exList = routine.exercises || [];
-  // 표에 적는 값은 전부 **[시작]을 누르면 실제로 만들어질 세트**에서 온다(getRoutinePreviewPlan).
-  // AI가 준 원본(ex.weight/ex.rir/ex.rest)을 그대로 적으면 화면이 거짓말을 한다 — 세션은
-  // 기록 기반 추천 무게로 시작하고, RIR·휴식은 종목 클래스와 세트 역할이 정한다.
+  // 적는 값은 전부 **[시작]을 누르면 실제로 만들어질 세트**에서 온다(getRoutinePreviewPlan).
+  // AI가 준 원본(ex.weight/ex.rest)을 그대로 적으면 화면이 거짓말을 한다 — 세션은
+  // 기록 기반 추천 무게로 시작하고, 휴식은 종목 클래스와 세트 역할이 정한다.
   var plans = exList.map(function(ex) { return getRoutinePreviewPlan(ex); });
   var pres = exList.map(function(ex, i) { return buildPrescriptionValues(ex, plans[i]); });
-  // 열 자체는 값이 하나라도 있을 때만 만든다(전 종목 맨몸이면 '무게' 열은 —만 6줄이 된다).
-  var showWeight = pres.some(function(p) { return p.weight !== null; });
-  var statCell = function(v) {
-    return '<p class="routine-ex-stat-value regular">' +
-      ((v === null || v === undefined || v === '') ? '<span class="text-stone-500">—</span>' : escapeHtml(v)) +
-    '</p>';
+  // 값이 없는 조각은 통째로 뺀다 — '—' 를 채워 넣으면 없는 정보를 있는 척하게 된다.
+  var prescriptionLine = function(p, ex) {
+    var parts = [];
+    if (p.weight !== null && p.weight !== undefined && p.weight !== '') {
+      parts.push((isReverseProgression(ex.name) ? '보조 ' : '') + escapeHtml(p.weight) + 'kg');
+    }
+    // 범위 표기는 물결로 — '8-12' 은 뺄셈으로 읽힐 수 있다.
+    if (p.reps) parts.push(escapeHtml(String(p.reps).replace(/-/g, '~')) + '회');
+    if (p.sets) parts.push(escapeHtml(p.sets) + '세트');
+    var line = parts.join(' × ');
+    if (p.rest) line += (line ? ' · ' : '') + '휴식 ' + escapeHtml(String(p.rest).replace(/-/g, '~'));
+    return line;
   };
-  // 열 폭은 그 열이 담는 값에 맞춘다 — 세트·RIR은 한 자리, 휴식은 '1.5-2분'까지 온다.
-  // 다섯 열을 똑같이 나누면 좁은 폰(360px)에서 휴식·반복이 두 줄로 접힌다.
-  var cols = [];
-  if (showWeight) cols.push({ label: '무게', w: 1.2 });
-  cols.push({ label: '반복', w: 1.2 });
-  cols.push({ label: '세트', w: 0.6 });
-  cols.push({ label: 'RIR', w: 0.7 });
-  cols.push({ label: '휴식', w: 1.4 });
-  var colStyle = ' style="grid-template-columns: ' +
-    cols.map(function(c) { return 'minmax(0, ' + c.w + 'fr)'; }).join(' ') + ';"';
-  var prescriptionHead =
-    '<div class="routine-ex-prescription-head"' + colStyle + '>' +
-      cols.map(function(c) { return '<p>' + c.label + '</p>'; }).join('') +
-    '</div>';
 
   // 종목 카드 렌더
   var exercisesHtml = '';
@@ -1135,20 +1120,9 @@ function renderWorkoutStep2() {
             '</div>' +
           '</div>' +
         '</div>' +
-        '<div class="routine-ex-prescription"' + colStyle + '>' +
-          (showWeight
-            ? '<p class="routine-ex-stat-value">' +
-                (p.weight !== null
-                  ? (isReverseProgression(ex.name) ? '<span class="text-[11px] text-stone-500">보조 </span>' : '') +
-                    escapeHtml(p.weight) + '<span class="text-[11px] text-stone-500">kg</span>'
-                  : '<span class="text-stone-500">—</span>') +
-              '</p>'
-            : '') +
-          statCell(p.reps) +
-          statCell(p.sets) +
-          statCell(p.rir) +
-          statCell(p.rest) +
-        '</div>' +
+        (function(line) {
+          return line ? '<p class="routine-ex-prescription">' + line + '</p>' : '';
+        })(prescriptionLine(p, ex)) +
         // 세트 열의 숫자가 어떻게 나뉘는지 (스트레이트면 적지 않는다 — 세트 열이 이미 말한 사실)
         (structure ? '<p class="routine-ex-scheme">' + escapeHtml(structure) + '</p>' : '') +
       '</div>';
@@ -1186,27 +1160,15 @@ function renderWorkoutStep2() {
       '</div>' +
     '</div>' +
     
-    // AI 이유 / 주의사항
-    (routine.reason ? 
-      '<div class="routine-insight">' +
-        '<p class="routine-insight-label accent">왜 이렇게 구성했나</p>' +
-        '<p class="text-sm text-stone-200 leading-relaxed">' + escapeHtml(routine.reason) + '</p>' +
-      '</div>' : '') +
-    
-    (routine.caution ? 
+    // 주의사항 (안전에 관한 것만 남긴다 — 구성 이유는 종목 목록이 이미 보여 준다)
+    (routine.caution ?
       '<div class="routine-insight warning">' +
         '<p class="routine-insight-label" style="color: var(--warn);">주의사항</p>' +
         '<p class="text-sm text-stone-200 leading-relaxed">' + escapeHtml(routine.caution) + '</p>' +
       '</div>' : '') +
-    
-    // 강도 + 종목 헤더
-    '<div class="flex items-center justify-between mt-5 mb-1 px-1">' +
-      '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">추천 루틴</p>' +
-      '<p class="text-[11px] font-mono text-stone-400">강도 ' + intensityLabel + '</p>' +
-    '</div>' +
-    prescriptionHead +
 
-    // 종목 리스트
+    // 종목 리스트 (처방은 카드마다 한 줄 — 머리글 없음)
+    '<div style="margin-top: 18px;"></div>' +
     exercisesHtml +
 
     // 액션 버튼 (수정/시작)
@@ -1478,6 +1440,7 @@ window.startSession = function(sessionType) {
   };
   // 그날 부위 맞춤 웜업(일반 유산소 3분 + 동적 드릴)을 본운동 앞에 붙인다 — 건너뛰기 가능.
   attachWarmupToSession(state.activeSession);
+  state.sessionMuscleFoldOpen = null;   // 새 세션은 자극 근육을 접은 채로 시작한다
   saveActiveSession();
 
   render();
@@ -2045,6 +2008,21 @@ window.completeSet = function() {
     return;
   }
 
+  // 바로 뒤가 드롭 세트면 쉬지 않는다 — 드롭은 직전 세트의 **연장**이라, 쉬는 순간
+  // 그 세트가 노리던 피로가 풀려 드롭을 붙인 뜻이 사라진다. 타이머 대신 세트 목록 위에
+  // "바로 이어가요" 한 줄을 띄운다(renderWorkoutSession 의 dropCueHtml).
+  var nextSet = exercise.sets[s.setIdx + 1];
+  if (!set.isWarmup && nextSet && nextSet.role === 'drop' && !nextSet.completed) {
+    state.editingSet = null;
+    state.restTimer = null;
+    saveActiveSession();
+    saveRestTimer();
+    state._justCompletedSet = { ex: s.exerciseIdx, set: s.setIdx };
+    render();
+    setTimeout(function() { state._justCompletedSet = null; }, 600);
+    return;
+  }
+
   // 휴식 시간 결정 — 판정 원천을 종목 클래스 하나로 통합했다(resolveRestSec).
   // 옛 로직은 키워드 배열로 복합/고립을 따로 판정해 getExerciseClass와 어긋날 수 있었고,
   // 기본값도 근거보다 짧았다(고립 90초 → 120초, 고중량 복합 150초 → 180초).
@@ -2152,6 +2130,16 @@ function startRestTimerTick() {
     render();
   }, 1000);
 }
+
+// 세션 화면 '자극 근육' 펼침 상태.
+// <details> 의 펼침은 DOM 에만 남는데 휴식 타이머가 매초 render()로 화면을 통째로 새로 그린다 —
+// 그래서 쉬는 동안 펴 둔 인체도가 1초 만에 도로 접혔다. 여기서 state 에만 적고 **재렌더는 하지 않는다**
+// (브라우저가 이미 열고 닫은 뒤라 다시 그릴 이유가 없고, 그리면 스크롤이 튄다).
+// 값은 "펼쳐 둔 종목 번호" — 종목이 바뀌면 비교가 어긋나 자동으로 접힌다(따로 지울 필요 없음).
+window.setSessionMuscleFold = function(open) {
+  state.sessionMuscleFoldOpen = (open && state.activeSession)
+    ? state.activeSession.currentExerciseIdx : null;
+};
 
 // 종목 변경 (이동)
 window.goToExercise = function(idx) {
@@ -2302,20 +2290,6 @@ window.releaseSuperset = function() {
   saveActiveSession();
   render();
   showToast('슈퍼세트를 풀었어요 — 따로 진행해요');
-};
-
-// 드롭세트·마이오렙 제안 수락/거절 (자동 적용 금지 — 반드시 사용자가 눌러야 반영)
-window.acceptTechniqueSuggestion = function(schemeId) {
-  window.applySetScheme(schemeId);
-};
-
-window.dismissTechniqueSuggestion = function() {
-  var session = state.activeSession;
-  if (!session) return;
-  if (!session.techDismissed) session.techDismissed = {};
-  session.techDismissed[session.currentExerciseIdx] = true;
-  saveActiveSession();
-  render();
 };
 
 // 종목 후보 목록 HTML. 검색어 없음 = 같은 부위(기존 동작), 검색어 있음 = 전체 종목 검색.
@@ -2546,7 +2520,7 @@ function buildSessionExercise(name) {
 }
 
 // 종목 배열 중간에 하나를 끼워 넣으면 **저장돼 있던 종목 index가 전부 한 칸씩 밀린다.**
-// 슈퍼세트 짝·제안 무시 기록·휴식 타이머·편집 중 세트·채팅 신호가 전부 index로 종목을 가리키므로
+// 슈퍼세트 짝·휴식 타이머·편집 중 세트·채팅 신호가 전부 index로 종목을 가리키므로
 // splice 전에 여기서 같이 밀어 준다. 안 밀면 엉뚱한 종목에 기록이 붙는다.
 function shiftSessionExerciseIndexes(session, insertAt) {
   var bump = function(v) { return (typeof v === 'number' && v >= insertAt) ? v + 1 : v; };
@@ -2554,14 +2528,6 @@ function shiftSessionExerciseIndexes(session, insertAt) {
   session.exercises.forEach(function(ex) {
     if (typeof ex.supersetWith === 'number') ex.supersetWith = bump(ex.supersetWith);
   });
-
-  if (session.techDismissed) {
-    var moved = {};
-    Object.keys(session.techDismissed).forEach(function(k) {
-      moved[String(bump(parseInt(k, 10)))] = session.techDismissed[k];
-    });
-    session.techDismissed = moved;
-  }
 
   if (state.restTimer) {
     state.restTimer.exerciseIdx = bump(state.restTimer.exerciseIdx);
@@ -2731,7 +2697,11 @@ function renderWorkoutSession() {
       setClass += ' warmup';
       labelClass += ' warmup-label';
     }
-    
+
+    // 드롭 세트는 독립 세트가 아니라 **직전 본세트의 연장**이다 — 들여쓰고 연결선으로 묶어
+    // "이건 새 세트가 아니라 방금 그 세트를 무게만 낮춰 잇는 것"이 한눈에 보이게 한다.
+    if (set.role === 'drop') setClass += ' drop-linked';
+
     if (set.completed) {
       setClass += ' completed';
       labelClass += ' done';
@@ -2837,6 +2807,24 @@ function renderWorkoutSession() {
       '</div>';
   }
   
+  // 드롭 세트 차례 — 휴식 타이머 자리에 "쉬지 말고 이어가요" 한 줄.
+  // 완료 시점이 아니라 **지금 상태**에서 뽑으므로(직전 세트 완료 + 지금 차례가 드롭),
+  // 드롭을 끝내면 저절로 사라지고 새로고침 뒤에도 그대로 뜬다.
+  var dropCueHtml = '';
+  var activeSet = activeSetIdx >= 0 ? exercise.sets[activeSetIdx] : null;
+  var beforeActive = activeSetIdx > 0 ? exercise.sets[activeSetIdx - 1] : null;
+  if (!state.restTimer && activeSet && activeSet.role === 'drop' && beforeActive && beforeActive.completed) {
+    dropCueHtml =
+      '<div class="rest-timer-wrap">' +
+        '<div class="rest-timer drop-cue">' +
+          '<div class="flex items-center gap-3">' +
+            '<span class="drop-cue-icon">' + icon('info', 16) + '</span>' +
+            '<p class="text-sm font-display">쉬지 말고 무게만 낮춰 바로 이어가요</p>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
   // 세트 편집 시트
   // 종목 고르기 시트 — 교체 모드와 추가 모드가 이 시트를 공유한다 (문구만 다름)
   var swapSheetHtml = '';
@@ -3042,7 +3030,7 @@ function renderWorkoutSession() {
       '<div class="flex items-center gap-1">' + exerciseDots + '</div>' +
     '</div>' +
     
-    '<div class="px-5' + (state._exSwipeDir ? ' ex-slide-' + state._exSwipeDir : '') + '" style="padding-bottom: ' + (state.restTimer ? '180px' : '120px') + ';">' +
+    '<div class="px-5' + (state._exSwipeDir ? ' ex-slide-' + state._exSwipeDir : '') + '" style="padding-bottom: ' + ((state.restTimer || dropCueHtml) ? '180px' : '120px') + ';">' +
 
       // 현재 종목 정보
       '<div class="exercise-info-card">' +
@@ -3061,15 +3049,18 @@ function renderWorkoutSession() {
           : '') +
       '</div>' +
 
-      // 스트레이트 안내 · 강도기법 제안 카드
-      buildSetSchemeNoticeHtml(session, exercise) +
-
       // 자극 근육 인체도 (앞/뒤). 매핑 없는 종목이면 빈 문자열 → 아무것도 안 그림.
       // 세션 화면에서는 접어 둔다 — 200px 을 쓰면서 알려주는 건 근육 이름 두 단어뿐이었다.
-      buildMuscleMapBlock(exercise.name, { fold: true }) +
+      // 펼침 상태는 state 가 들고 있다 (휴식 타이머의 매초 재렌더에 접히지 않도록 — setSessionMuscleFold).
+      buildMuscleMapBlock(exercise.name, {
+        fold: true,
+        foldOpen: state.sessionMuscleFoldOpen === session.currentExerciseIdx,
+        foldToggle: 'setSessionMuscleFold(this.open)'
+      }) +
 
-      // 이전 기록
-      // 지난 기록 + 다음 추천 카드 (점진적 과부하)
+      // 도전 권장 · 지난 기록 카드 (점진적 과부하) — 문장이 아니라 숫자로 읽는 카드다.
+      // 라벨(무엇을 할지) + 큰 숫자(얼마로) + 참고 한 줄(지난 기록)만 남긴다.
+      // 설명 문장(prog.note)은 걷었다 — 세트 목록에 이미 같은 무게가 찍혀 있어서 두 번 말하는 셈이었다.
       (function() {
         var prog = getProgressiveRecommendation(exercise.name, exercise.targetReps);
         // 큰 숫자는 "지금 들 무게" 하나. 추정 1RM 은 헬스장에서 맞출 수 없는 소수점을 버린다.
@@ -3077,37 +3068,46 @@ function renderWorkoutSession() {
         if (rm) rm = Math.round(rm);
         if (!prog && !rm) return '';
 
-        var html = '<div class="rm-card">';
-
         var isReverse = isReverseProgression(exercise.name);
         // 어시스트 종목은 숫자 앞에 '보조'를 붙여야 뜻이 통한다 (40kg = 40kg만큼 도와준다).
         var unitPrefix = isReverse ? '보조 ' : '';
 
-        // 참고 숫자(지난 기록·추정 1RM)는 카드 맨 아래 한 줄로 합친다 — 큰 숫자는 "지금 들 무게" 하나뿐.
-        // prog 가 실제 수행 기록을 못 찾았을 때만 옛 표기(prevText)를 참고로 쓴다.
+        // 큰 숫자 한 덩이. 무게가 바뀌는 날은 "이전 → 새 무게"로 이어 붙인다(이전은 작고 흐리게).
+        // 어시스트는 보조가 **줄어드는** 쪽이 증량이라, 같은 화살표가 반대 방향의 진행을 뜻한다.
+        var weightLine = function(weight, prevWeight, color) {
+          var changed = (prevWeight !== null && prevWeight !== undefined && String(prevWeight) !== String(weight));
+          return '<p class="rm-weight" style="color: ' + color + ';">' +
+              (isReverse ? '<span class="rm-weight-pre">보조</span>' : '') +
+              (changed
+                ? '<span class="rm-weight-prev">' + escapeHtml(prevWeight) + '<span class="rm-unit">kg</span></span>' +
+                  '<span class="rm-weight-arrow">→</span>'
+                : '') +
+              // 숫자와 단위는 한 덩이로 묶는다 — 따로 두면 flex 간격이 '65 kg' 처럼 벌어진다.
+              '<span class="rm-weight-now">' + escapeHtml(weight) + '<span class="rm-unit">kg</span></span>' +
+            '</p>';
+        };
+
+        var html = '<div class="rm-card">';
         var refs = [];
-        if (!prog || prog.source === 'rm_estimate') refs.push('지난 기록 ' + prevText);
+        var hasHead = false;
 
         if (prog && prog.source !== 'rm_estimate' && prog.previousWeight !== undefined) {
           // 실제 수행 기록이 있는 경우
-          var prevRepsStr = (prog.previousReps || []).join(', ') + '회';
-          var color = prog.source === 'progress' ? 'var(--success)' : 'var(--accent)';
-          var label = prog.source === 'progress' ? (isReverse ? '보조 낮추기 (증량)' : '도전 권장')
+          // 색은 세 갈래다: 나아가는 날(초록) · 멈춰 세우는 날(앰버, 통증·재활) · 그대로 가는 날(주황).
+          var color = (prog.source === 'progress' || prog.graduated) ? 'var(--success)'
+            : (prog.source === 'rehab' || prog.painGated) ? 'var(--warn)'
+            : 'var(--accent)';
+          var label = prog.source === 'progress' ? (isReverse ? '보조 낮추기 — 증량' : '도전 권장')
             : prog.graduated ? '맨몸 졸업'
             : prog.source === 'rehab' ? '재활 — 무게 유지'
-            : prog.painGated ? (isReverse ? '통증 기록 — 보조 유지' : '통증 기록 — 증량 보류')
+            : prog.painGated ? (isReverse ? '통증 — 보조 유지' : '통증 — 증량 보류')
             : (isReverse ? '동일 보조' : '동일 무게');
-          refs.push('지난 기록 ' + unitPrefix + escapeHtml(prog.previousWeight) + 'kg × ' + escapeHtml(prevRepsStr));
-          html +=
-            '<div class="flex items-end justify-between gap-3">' +
-              '<div style="flex:1; min-width:0;">' +
-                '<p class="text-[11px] font-mono uppercase tracking-widest" style="color: ' + color + ';">' + label + '</p>' +
-                '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + prog.note + '</p>' +
-              '</div>' +
-              '<p class="font-bebas text-4xl" style="color: ' + color + '; flex-shrink:0;">' +
-                (isReverse ? '<span class="text-xs text-stone-400">보조 </span>' : '') +
-                prog.weight + '<span class="text-xs text-stone-400">kg</span></p>' +
-            '</div>';
+          var prevReps = (prog.previousReps || []).filter(function(r) { return r; });
+          html += '<p class="rm-label" style="color: ' + color + ';">' + label + '</p>' +
+            weightLine(prog.weight, prog.previousWeight, color);
+          hasHead = true;
+          refs.push('지난 기록 ' + unitPrefix + escapeHtml(prog.previousWeight) + 'kg' +
+            (prevReps.length ? ' × ' + escapeHtml(prevReps.join('·')) + '회' : ''));
         } else if (prog && prog.source === 'rm_estimate') {
           // 첫 시도 - 1RM 기반
           // ⚠️ 카드와 세트가 어긋나지 않게 **실제로 배정된 첫 워킹세트 무게**를 보여준다.
@@ -3117,39 +3117,21 @@ function renderWorkoutSession() {
             return !s.isWarmup && !isSetExtension(s);
           })[0];
           var shownWeight = (firstWorking && firstWorking.weight) ? firstWorking.weight : prog.weight;
-          html +=
-            '<div class="flex items-end justify-between gap-3">' +
-              '<div style="flex:1; min-width:0;">' +
-                '<p class="text-[11px] font-mono uppercase tracking-widest accent">첫 시도 추천</p>' +
-                '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + prog.note + '</p>' +
-              '</div>' +
-              '<p class="font-bebas text-4xl accent" style="flex-shrink:0;">' +
-                (isReverse ? '<span class="text-xs text-stone-400">보조 </span>' : '') +
-                shownWeight + '<span class="text-xs text-stone-400">kg</span></p>' +
-            '</div>';
+          html += '<p class="rm-label accent">첫 시도 추천</p>' +
+            weightLine(shownWeight, null, 'var(--accent)');
+          hasHead = true;
+          refs.push('지난 기록 ' + prevText);
+        } else {
+          // 추천을 못 만든 종목(기록도 1RM 추정도 없음) — 참고 줄만 남는다.
+          refs.push('지난 기록 ' + prevText);
         }
 
-        if (rm) {
-          refs.push('추정 1RM ' + rm + 'kg');
-        } else if (isReverse) {
-          // 어시스트 종목의 진행 지표는 e1RM이 아니라 **보조 무게 감소 추이**다.
-          // (보조로 계산한 e1RM은 강해질수록 내려가는 뒤집힌 값이라 아예 추적하지 않는다.)
-          var trend = getAssistProgressTrend(exercise.name, 4);
-          var netNow = assistNetLoad(exercise.name, prog ? prog.weight : null);
-          var trendStr = '';
-          if (trend && trend.sessions > 1) {
-            trendStr = '보조 추이 ' + trend.values.slice().reverse().join(' → ') + 'kg' +
-              (trend.delta > 0 ? ' (−' + trend.delta + 'kg 진행)' : '');
-          } else {
-            trendStr = '진행 지표 = 보조 무게가 줄어드는 것';
-          }
-          if (netNow !== null && netNow > 0) trendStr += ' · 실질 약 ' + netNow + 'kg';
-          refs.push(escapeHtml(trendStr));
-        }
+        if (rm) refs.push('추정 1RM ' + rm + 'kg');
 
         if (refs.length) {
           // refs 의 조각들은 담을 때 이미 이스케이프했다 — 여기서 또 하면 &lt; 가 &amp;lt; 로 두 번 죽는다.
-          html += '<p class="text-[11px] font-mono text-stone-500 mt-3">' + refs.join(' · ') + '</p>';
+          html += (hasHead ? '<div class="rm-divider"></div>' : '') +
+            '<p class="rm-ref">' + refs.join(' · ') + '</p>';
         }
         html += '</div>';
         return html;
@@ -3189,78 +3171,13 @@ function renderWorkoutSession() {
     '</div>' +
     
     restTimerHtml +
+    dropCueHtml +
     sheetHtml +
     exerciseMenuHtml +
     swapSheetHtml +
     buildSetSchemeSheetHtml(session, exercise) +
     buildSessionChatSheetHtml(session, exercise) +
     buildMuscleMapZoomHtml();
-}
-
-// 세트법 안내 한 줄 + 드롭세트·마이오렙 제안 카드.
-// 제안은 **자동 적용하지 않는다** — 근비대 이득은 동등할 뿐이고 이득은 오직 시간이므로,
-// 시간 압박이 실제로 있을 때만 값어치가 있다(§4-C). 사용자가 눌러야 반영된다.
-function buildSetSchemeNoticeHtml(session, exercise) {
-  var html = '';
-  var scheme = sessionSchemeOf(exercise);
-
-  // 어시스트 종목은 "가볍게 = 보조를 더" 라서 안내 문구를 그대로 두면 정반대로 읽힌다.
-  var rev = isReverseProgression(exercise.name);
-
-  // 스킴별 한 줄 안내 (v2 §4-C③). 해요체 · 한 문장. 어시스트 종목은 방향이 뒤집혀 따로 적는다.
-  var notice = '';
-  if (scheme === 'straight') {
-    notice = rev
-      ? '뒤 세트에서 반복이 1~2회 줄어드는 건 정상이에요. 보조를 늘리지 말고 그대로 하세요.'
-      : '뒤 세트에서 반복이 1~2회 줄어드는 건 정상이에요. 무게를 낮추지 말고 그대로 하세요.';
-  } else if (scheme === 'top_backoff') {
-    // 마지막 백오프만 RIR 0~1 이라는 처방(v2 §2-E②)은 세트 목록에 안 나오므로 여기서 말해 준다.
-    notice = (rev
-      ? '탑세트 1개를 <b>가장 낮은 보조</b>로, 백오프는 보조를 한 칸 올려 <b>같은 횟수</b>를 노려요.'
-      : '탑세트 1개를 가장 무겁게, 백오프는 90% 무게로 <b>같은 횟수</b>를 노려요.') +
-      ' <b>마지막 백오프</b>만 더 못 할 때까지 밀어요.';
-  } else if (scheme === 'top_backdown') {
-    notice = rev
-      ? '탑세트 뒤 백다운은 보조를 크게 올려요. 대신 <b>더 못 할 때까지</b> 밀어요.'
-      : '백다운은 가볍게, 대신 <b>더 못 할 때까지</b> 밀어요.';
-  } else if (scheme === 'pyramid') {
-    notice = '첫 세트는 여유 있게. <b>마지막 세트</b>가 진짜예요.';
-  } else if (scheme === 'rpt') {
-    notice = rev
-      ? '첫 세트가 보조가 가장 적어요. 뒤로 갈수록 횟수를 늘려요.'
-      : '첫 세트가 가장 무거워요. 뒤로 갈수록 횟수를 늘려요.';
-  }
-  if (notice) html += '<p class="text-[11px] font-mono text-stone-500 px-1 mb-2">' + notice + '</p>';
-
-  // 왜 이 숫자인지 — 접어 둔다(디자인 규칙: 카드당 1줄, 더 필요하면 noteBlock).
-  if (scheme === 'top_backdown') {
-    html += noteBlock('왜 82.5%인가요?',
-      '70%로 낮추면 15회가 한계가 아니라 여유가 돼요(RIR 5~6). 82.5%여야 12~15회에서 한계가 와요 — Nuzzo 2023 부하-반복 자료 기준.');
-  } else if (scheme === 'pyramid' || scheme === 'rpt') {
-    html += noteBlock('근육이 더 크나요?',
-      '아니에요. 12주 실험에서 스트레이트와 같았어요(근단면적 +7.5% vs +7.6%, Angleri 2017). 취향으로 고르는 거예요.');
-  }
-
-  var dismissed = session.techDismissed && session.techDismissed[session.currentExerciseIdx];
-  if (!dismissed) {
-    var suggested = suggestIntensityTechnique(exercise.name, session);
-    if (suggested) {
-      var kr = SET_SCHEMES[suggested].kr;
-      html +=
-        '<div class="rm-card mb-3">' +
-          '<p class="text-[11px] font-mono uppercase tracking-widest accent" style="display:flex;align-items:center;gap:4px;">' + icon('clock', 12) + kr + ' 제안</p>' +
-          '<p class="text-xs text-stone-300 mt-1 mb-2">남은 시간이 빠듯해요. 마지막 세트를 ' + kr +
-            '으로 바꾸면 시간은 절반 이하, 근비대는 그대로예요.</p>' +
-          noteBlock('왜 같은가요?',
-            '근거: Sødal 2023 메타 — 드롭세트와 전통 세트의 근비대 차이 없음(p=0.392), 시간은 1/2~1/3. 대신 피로가 크니 이번 한 종목만.') +
-          '<div class="flex gap-2 mt-2">' +
-            '<button class="adj-btn accent-btn" style="flex:1;" onclick="acceptTechniqueSuggestion(\'' + suggested + '\')">' + kr + '으로 바꾸기</button>' +
-            '<button class="adj-btn" style="flex:1;" onclick="dismissTechniqueSuggestion()">그냥 할게요</button>' +
-          '</div>' +
-        '</div>';
-    }
-  }
-  return html;
 }
 
 // 세트법 바꾸기 시트
@@ -4040,43 +3957,9 @@ function buildMobilityGuideHtml(kind) {
   var amountText = isTime ? cardioFmtClock(remain) : (seg.reps + '회');
   var segFillPct = isTime && seg.sec > 0 ? Math.min(100, Math.max(0, ((seg.sec - remain) / seg.sec) * 100)) : 0;
 
-  // 이른 아침 경고 (§4-E) — 자는 동안 디스크가 물을 먹어 기상 직후 굽힘 응력이 약 300% 높다.
-  var morningWarn = '';
-  if (isWarmup) {
-    var kstHour = getKstHour();
-    if (kstHour >= 4 && kstHour < 9) {
-      morningWarn =
-        '<div class="mobility-note mobility-note-warn">' +
-          '아침엔 디스크에 물이 차 있어서 허리를 숙이는 동작이 하루 중 가장 위험해요. ' +
-          '캣-카멜은 아주 살살, 하체 웜업은 조금 더 천천히 하세요.' +
-        '</div>';
-    }
-  }
-
-  // 등록된 부상이 있으면 "통증 없는 범위" 한 줄 (§3-D 주의)
-  var injuryNote = '';
-  var injuries = (typeof getUserInjuryAreas === 'function') ? getUserInjuryAreas() : [];
-  if (injuries && injuries.length) {
-    var injuryKr = injuries.map(function(a) {
-      return (typeof INJURY_AREAS !== 'undefined' && INJURY_AREAS[a] && INJURY_AREAS[a].kr) ? INJURY_AREAS[a].kr : a;
-    }).join(' · ');
-    // "어깨 이 등록돼" 같은 조사 오류를 피하려고 부위 이름 뒤에 '부상이'를 붙인다(받침 유무와 무관).
-    injuryNote =
-      '<div class="mobility-note">' +
-        '기억 노트에 <b>' + escapeHtml(injuryKr) + '</b> 부상이 등록돼 있어요. 전부 <b>통증 없는 범위</b>까지만 하세요.' +
-      '</div>';
-  }
-
+  // 동작별 짧은 주의만 남긴다 — 지금 하는 동작에서 다칠 수 있는 지점 하나.
   var warnLine = seg.warn ? '<p class="mobility-warn">' + escapeHtml(seg.warn) + '</p>' : '';
   var optionalTag = seg.optional ? '<span class="mobility-tag">선택</span>' : '';
-  var omittedLine = (g.omitted > 0)
-    ? '<p class="mobility-omitted">시간 수지에 맞춰 ' + g.omitted + '개 동작을 뺐어요 (' + (isWarmup ? '웜업 ' + MOBILITY_WARMUP_LIMIT : '스트레칭 ' + MOBILITY_STRETCH_LIMIT) + '동작 상한)</p>'
-    : '';
-
-  // 두 화면의 정직성 문구 — 근거가 말하는 것 이상을 약속하지 않는다.
-  var honesty = isWarmup
-    ? '길게 늘이는 정적 스트레칭은 <b>운동이 끝난 뒤</b> 하세요. 본세트 전에 한 근육을 60초 넘게 늘이면 그날 최대근력이 약 5% 떨어집니다 (Simic 2013).'
-    : '이 스트레칭이 근거로 해주는 건 <b>유연성 유지</b> 하나예요. 근육통·부상 예방·근성장 효과는 기대하지 마세요 (2025 국제 전문가 합의).';
 
   var modeToggle = '';
   if (isWarmup) {
@@ -4104,9 +3987,6 @@ function buildMobilityGuideHtml(kind) {
 
     '<div class="px-5" style="padding-bottom:150px;">' +
 
-      morningWarn +
-      injuryNote +
-
       // 동작 이름
       '<div class="text-center" style="margin-top:14px;">' +
         '<p class="mobility-name">' + escapeHtml(mobilitySegmentLabel(seg)) + optionalTag + '</p>' +
@@ -4124,13 +4004,12 @@ function buildMobilityGuideHtml(kind) {
       // 전환 예고 배너 (3초 전)
       '<div id="mob-precue" class="mobility-precue" style="display:none;"></div>' +
 
-      // 자세 지시(준비 → 동작 → 기준) + 왜 하는지(why)
+      // 자세 지시(준비 → 동작 → 기준)
       '<div class="card" style="margin-top:16px;">' +
         mobilityStepLine('준비', seg.prep) +
         mobilityStepLine('동작', seg.cue) +
         mobilityStepLine('기준', seg.std) +
         warnLine +
-        (seg.why ? '<p class="mobility-why">ⓘ ' + escapeHtml(seg.why) + '</p>' : '') +
       '</div>' +
 
       // 진행 버튼
@@ -4150,10 +4029,7 @@ function buildMobilityGuideHtml(kind) {
         '</p>' +
       '</div>' +
 
-      omittedLine +
       modeToggle +
-
-      '<p class="mobility-honesty">' + honesty + '</p>' +
 
       '<button class="option-card" style="width:100%;margin-top:14px;text-align:center;padding:14px 0;" onclick="mobilitySkipAll()">' +
         '<p class="text-sm font-mono accent">' + (isWarmup ? '웜업 건너뛰고 바로 시작 →' : '스트레칭 그만하기') + '</p>' +
@@ -6785,26 +6661,6 @@ function renderRunning() {
       modeCard('walk', 'treadmill', '경사 걷기', '정속 · 무릎 편함') +
     '</div>';
 
-  // 정직한 톤 배너 — 모드별로 다르되 과장은 금지(docs/research/incline-walking.md §0·§1-1: '지방 연소' 문구 금지)
-  var banner = isWalk ?
-    '<div class="card mb-4" style="margin-top:12px;border-color:rgba(var(--accent-rgb),0.15);">' +
-      '<p class="text-xs font-display mb-2" style="line-height:1.65;">경사 10% 걷기는 평지 조깅의 <b>약 90% 열량</b>을 쓰면서, 무릎 충격은 걷기 수준으로 남아요.</p>' +
-      noteBlock('살은 얼마나 빠지나요?', '살 빠짐은 총 소비와 식사로 정해져요. 주 4회 45분씩 해도 운동만으로는 주 0.2kg 남짓이에요.') +
-    '</div>' :
-    '<div class="card mb-4" style="margin-top:12px;border-color:rgba(var(--accent-rgb),0.15);">' +
-      '<p class="text-xs font-display mb-2" style="line-height:1.65;">살 빠짐은 <b>총 소비와 식사</b>로 정해져요. 유산소는 소비를 안전하게 늘리는 방법이에요.</p>' +
-      noteBlock('근육은 안 빠지나요?', '유산소만 하면 근육이 빠질 수 있어요. 웨이트와 단백질을 함께 챙기세요.') +
-    '</div>';
-
-  // 경사 걷기 안전 안내(§5-2 · §5-4) — 손잡이 규칙이 이 모드의 가장 중요한 실행 규칙이다.
-  var safetyNote = isWalk ?
-    '<div class="card mb-4" style="border-color:rgba(var(--warn-rgb),0.25);">' +
-      '<p class="text-[11px] font-mono mb-2" style="color:var(--warn);line-height:1.7;">손잡이는 놓으세요. 균형이 필요하면 손가락만 가볍게 얹기.</p>' +
-      noteBlock('왜 놓아야 하나요?',
-        '<b>손잡이를 놓을 수 없다면 경사가 너무 높다는 신호</b>예요 — 잡고 12%보다, 놓고 8%가 실제로 더 센 운동이에요.<br>' +
-        '세션 뒤 종아리 스트레칭 30초씩 2번. 도입 2~3주엔 종아리·아킬레스가 가장 먼저 아파요.') +
-    '</div>' : '';
-
   // 시간 입력 + 구성 버튼 + 빠른 선택 칩
   var quickChips = [15, 20, 30, 40, 50].map(function(m) {
     return '<button class="option-card" style="flex:1;padding:9px 0;text-align:center;" onclick="buildCardioPlan(' + m + ')"><p class="text-xs font-mono">' + m + '</p></button>';
@@ -6823,8 +6679,7 @@ function renderRunning() {
   // 로딩 / 미리보기
   var mid = '';
   if (c.loading) {
-    mid = '<div class="card mb-4 text-center" style="padding:28px 0;"><p class="text-sm font-mono accent">AI가 구성 중…</p><p class="text-[11px] font-mono text-stone-500 mt-2">' +
-      (isWalk ? '시간에 딱 맞게 몸풀기·본 구간·정리를 짜요' : '시간에 딱 맞게 워밍업·인터벌·쿨다운을 짜요') + '</p></div>';
+    mid = '<div class="card mb-4 text-center" style="padding:28px 0;"><p class="text-sm font-mono accent">AI가 구성 중…</p></div>';
   } else if (c.plan) {
     var plan = c.plan;
     var segRow = function(s) {
@@ -6862,14 +6717,6 @@ function renderRunning() {
     } else {
       segBlock = segList;
     }
-    // 경사 걷기: 예상 소모 열량을 "대략"으로만 (ACSM 공식은 실측 대비 약 +6% 과대추정 — §1-2·§7-8)
-    var kcalLine = '';
-    if (isWalk && typeof cardioWalkKcal === 'function') {
-      var kcal = cardioWalkKcal(plan.segments.map(function(s) {
-        return { sec: s.endSec - s.startSec, targetSpeed: s.speed, incline: s.incline };
-      }), cardioWalkBodyWeight());
-      if (kcal > 0) kcalLine = '<p class="text-[11px] font-mono text-stone-500 mt-2">예상 소모 <b>대략 ' + kcal + ' kcal</b> · 추정값이라 오차가 있어요</p>';
-    }
     mid =
       '<div class="card mb-4">' +
         '<div class="flex items-center justify-between mb-1">' +
@@ -6878,8 +6725,7 @@ function renderRunning() {
         '</div>' +
         (plan.headline ? '<p class="text-sm font-display mb-2">' + escapeHtml(plan.headline) + '</p>' : '') +
         (plan.source === 'fallback' ? '<p class="text-[11px] font-mono" style="color:var(--warn);">AI 키가 없어 기본 구성을 썼어요</p>' : '') +
-        '<div class="mt-2">' + segBlock + '</div>' + kcalLine +
-        (plan.note ? '<p class="text-[11px] font-mono text-stone-400 mt-3" style="line-height:1.6;">' + escapeHtml(plan.note) + '</p>' : '') +
+        '<div class="mt-2">' + segBlock + '</div>' +
         '<button class="sheet-submit" style="margin-top:14px;" onclick="startCardio()">시작</button>' +
         '<button class="option-card" style="width:100%;margin-top:8px;text-align:center;" onclick="resetCardioPlan()"><p class="text-xs font-mono text-stone-400">다시 구성</p></button>' +
       '</div>';
@@ -6898,7 +6744,7 @@ function renderRunning() {
   return '' +
     '<div class="px-5 pt-12 pb-32">' +
       '<p class="text-xs font-mono text-stone-400">' + (isWalk ? '러닝머신 경사 걷기 · 정속 한 구간' : '러닝머신 인터벌 · 시간만 정하면 AI가 구성') + '</p>' +
-      modeToggle + banner + safetyNote + input + mid + recent +
+      modeToggle + input + mid + recent +
     '</div>';
 }
 
