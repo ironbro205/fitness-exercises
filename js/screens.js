@@ -2217,7 +2217,9 @@ function restoreSkippedSets(ex) {
 }
 
 // 진행 중인 종목의 **미완료 세트만** 현재 세트법 기준으로 다시 만든다 (완료한 기록은 그대로 보존).
-function rebuildPendingSets(ex) {
+// opts.recalcWeight = true 면 기준 무게도 e1RM에서 다시 역산한다 — **세트법을 바꿀 때만** 켠다.
+// 종목 교체·되돌리기처럼 세트법이 그대로인 재구성에서 켜면, 손대지도 않은 무게가 조용히 바뀐다.
+function rebuildPendingSets(ex, opts) {
   restoreSkippedSets(ex);   // 건너뛴 종목의 세트를 다시 짜면 건너뛰기는 자동으로 풀린다
   var doneSets = (ex.sets || []).filter(function(s) { return s.completed; });
   var pendingWorking = (ex.sets || []).filter(function(s) {
@@ -2227,7 +2229,8 @@ function rebuildPendingSets(ex) {
   // "드롭만 남은 상태에서 스트레이트로 바꾸기"가 완료 3세트 뒤에 새 3세트를 덧붙인다.
   var plan = getSessionSetPlan(ex.name, ex.lastWeight, ex.targetReps, {
     sets: pendingWorking,
-    warmup: doneSets.length === 0   // 이미 시작한 종목에 워밍업을 새로 끼워 넣지 않는다
+    warmup: doneSets.length === 0,  // 이미 시작한 종목에 워밍업을 새로 끼워 넣지 않는다
+    recalcWeight: !!(opts && opts.recalcWeight)
   });
   ex.targetReps = repRangeToStr(plan.repRange);
   ex.scheme = plan.scheme;
@@ -2259,6 +2262,26 @@ window.closeSetSchemeSheet = function() {
   render();
 };
 
+// 세트법 전환 토스트 문구. 세트법마다 기준 무게를 다시 잡으므로(deriveSchemeSwitchWeight)
+// **바뀐 무게를 같이 알려야** 사용자가 바로 원판을 맞출 수 있다.
+// 무게를 모르는 종목(맨몸·미측정)은 붙일 숫자가 없으니 기존 문구 그대로.
+function schemeChangeToastText(exerciseName, requestedScheme, plan) {
+  // 무게를 모르는 종목에서는 감량 기반 스킴이 스트레이트로 접힌다 — 그때 "피라미드로 바꿨어요"라고
+  // 알리면 화면(스트레이트)과 말이 어긋난다. **실제로 적용된 스킴**을 알린다.
+  var applied = (plan && plan.scheme) || requestedScheme;
+  var kr = (SET_SCHEMES[applied] && SET_SCHEMES[applied].kr) || '';
+  if (applied !== requestedScheme) {
+    return kr + '로 했어요 — 무게를 모르는 종목이라 감량을 못 해요';
+  }
+  var w = plan ? plan.weight : null;
+  var reverse = isReverseProgression(exerciseName);
+  if (typeof w !== 'number' || (reverse ? w < 0 : w <= 0)) return kr + '로 바꿨어요';
+  // 램프 스킴은 이 무게가 **탑세트** 무게다(나머지 단은 여기서 감량된다) → 어느 세트 값인지 밝힌다.
+  var hasTop = (plan.sets || []).some(function(s) { return s && s.role === 'top'; });
+  var label = reverse ? '보조 ' : (hasTop ? '탑 ' : '');
+  return kr + '로 바꿨어요 — ' + label + (Math.round(w * 10) / 10) + 'kg';
+}
+
 // 사용자가 세트법을 고름 — 종목별 override로 저장되어 다음 세션에도 유지된다.
 window.applySetScheme = function(schemeId) {
   var session = state.activeSession;
@@ -2269,16 +2292,13 @@ window.applySetScheme = function(schemeId) {
     showToast('재활 종목은 세트법을 바꿀 수 없어요');
     return;
   }
-  var plan = rebuildPendingSets(ex);
+  // 세트법을 바꾸는 이 순간이 기준 무게를 다시 잡는 **유일한** 지점이다 (다음 세션부터는
+  // 기존 더블 프로그레션이 기록된 무게를 이어받는다).
+  var plan = rebuildPendingSets(ex, { recalcWeight: true });
   state.setSchemeOpen = false;
   saveActiveSession();
   render();
-  // 무게를 모르는 종목에서는 감량 기반 스킴이 스트레이트로 접힌다 — 그때 "피라미드로 바꿨어요"라고
-  // 알리면 화면(스트레이트)과 말이 어긋난다. **실제로 적용된 스킴**을 알린다.
-  var applied = (plan && plan.scheme) || schemeId;
-  showToast(applied === schemeId
-    ? SET_SCHEMES[applied].kr + '로 바꿨어요'
-    : SET_SCHEMES[applied].kr + '로 했어요 — 무게를 모르는 종목이라 감량을 못 해요');
+  showToast(schemeChangeToastText(ex.name, schemeId, plan));
 };
 
 // 슈퍼세트 제안 해제 (기구가 붐비거나 힘들 때 — 사용자 판단 존중)
@@ -3093,18 +3113,33 @@ function renderWorkoutSession() {
 
         if (prog && prog.source !== 'rm_estimate' && prog.previousWeight !== undefined) {
           // 실제 수행 기록이 있는 경우
+          // ⚠️ 큰 숫자는 **실제로 배정된 기준 세트 무게**다 (아래 rm_estimate 갈래와 같은 이유).
+          // 세트법을 바꾼 세션은 기준 무게를 다시 잡으므로(deriveSchemeSwitchWeight) prog.weight 를
+          // 그대로 찍으면 "동일 무게 90kg" 카드 밑에 탑세트 95kg 세트가 깔린다.
+          var workingWeights = (exercise.sets || []).filter(function(s) {
+            return !s.isWarmup && !isSetExtension(s) && typeof s.weight === 'number';
+          }).map(function(s) { return s.weight; });
+          // 기준 세트 = 가장 **어려운** 세트 (정방향=최대 무게 / 역방향=최소 보조).
+          var assigned = hardestWeight(exercise.name, workingWeights);
+          var shown = (assigned === null || assigned === undefined) ? prog.weight : assigned;
+
+          // 라벨·색은 추천 갈래가 아니라 **지난 기록과의 비교**로 정한다 — 그래야 세트법 전환처럼
+          // 추천 갈래(maintain)와 실제 무게가 갈라지는 날에도 카드가 사실만 말한다.
+          var heavier = isReverse ? (shown < prog.previousWeight) : (shown > prog.previousWeight);
+          var lighter = isReverse ? (shown > prog.previousWeight) : (shown < prog.previousWeight);
           // 색은 세 갈래다: 나아가는 날(초록) · 멈춰 세우는 날(앰버, 통증·재활) · 그대로 가는 날(주황).
-          var color = (prog.source === 'progress' || prog.graduated) ? 'var(--success)'
+          var color = (heavier || prog.graduated) ? 'var(--success)'
             : (prog.source === 'rehab' || prog.painGated) ? 'var(--warn)'
             : 'var(--accent)';
-          var label = prog.source === 'progress' ? (isReverse ? '보조 낮추기 — 증량' : '도전 권장')
-            : prog.graduated ? '맨몸 졸업'
+          var label = prog.graduated ? '맨몸 졸업'
             : prog.source === 'rehab' ? '재활 — 무게 유지'
             : prog.painGated ? (isReverse ? '통증 — 보조 유지' : '통증 — 증량 보류')
+            : heavier ? (isReverse ? '보조 낮추기 — 증량' : '도전 권장')
+            : lighter ? (isReverse ? '보조 올리기' : '무게 낮추기')
             : (isReverse ? '동일 보조' : '동일 무게');
           var prevReps = (prog.previousReps || []).filter(function(r) { return r; });
           html += '<p class="rm-label" style="color: ' + color + ';">' + label + '</p>' +
-            weightLine(prog.weight, prog.previousWeight, color);
+            weightLine(shown, prog.previousWeight, color);
           hasHead = true;
           refs.push('지난 기록 ' + unitPrefix + escapeHtml(prog.previousWeight) + 'kg' +
             (prevReps.length ? ' × ' + escapeHtml(prevReps.join('·')) + '회' : ''));

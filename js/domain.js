@@ -590,11 +590,97 @@ function calculateRollingMax1RM(exerciseName, windowSessions) {
   return { value: Math.round(max * 10) / 10, sessions: recent.length };
 }
 
+// ═══════════════════════════════════════════════
+// 세트법 전환 시 기준 무게 역산 (#67 후속)
+// ═══════════════════════════════════════════════
+// 세트법마다 **기준 세트(감량하지 않는 가장 무거운 세트)가 노리는 강도**가 다르다.
+// 탑세트의 탑은 RIR 1~2, 스트레이트의 워킹세트는 RIR 2~3 — 같은 무게일 수가 없다.
+// 그런데 지금까지는 세트법을 바꿔도 기준 무게가 지난 기록 그대로여서, "탑세트로 바꿨는데
+// 탑 무게가 스트레이트 때와 똑같은" 상태가 됐다.
+// 그래서 **바꾸는 그 순간에만** 롤링 추정 1RM에서 그 세트법의 목표 강도로 무게를 역산한다.
+// 다음 세션부터는 기존 더블 프로그레션이 기록된 무게를 이어받는다 — 진행 엔진은 손대지 않는다.
+//
+// 공식(Epley 역산): e1RM = w × (1 + reps/30) → w = e1RM / (1 + repsTotal/30)
+//   repsTotal = 기준 단의 목표 반복(클래스 반복 상단) + 기준 RIR
+//   RIR = 남겨 두는 반복. "8회 × RIR 2" = 한계까지 10회 되는 무게라는 뜻이라 그대로 더한다.
+// 근거: Epley는 10회 이하에서 오차가 가장 작고(Reynolds 2006 · Mayhew 2008), 목표 반복 + RIR을
+//   한계 반복으로 환산해 %1RM을 잡는 절차는 RIR 기반 자가조절의 표준이다(Helms 2016 RPE/RIR 척도,
+//   Zourdos 2016). docs/research/set-schemes-v2.md §1-B가 백오프 90%를 검산한 방식과 같은 계산이다.
+
+// RIR 밴드 문자열 → 중앙값 ('1-2' → 1.5, '0' → 0). 못 읽으면 null.
+function rirMidpoint(band) {
+  if (band === null || band === undefined) return null;
+  var parts = String(band).split('-');
+  var lo = parseFloat(parts[0]);
+  if (isNaN(lo)) return null;
+  var hi = parseFloat(parts[parts.length - 1]);
+  if (isNaN(hi)) hi = lo;
+  return (lo + hi) / 2;
+}
+
+// 기준 단이 따로 없는 세트법(스트레이트·드롭)의 RIR. RIR 2~3 = 스트레이트 워킹세트의 표준 처방
+// (buildSchemeSets 의 uniform 경로가 복합에 붙이는 '2-3'과 같은 값).
+var SCHEME_DEFAULT_RIR = 2.5;
+
+// 그 세트법의 **기준 단**(배율 1.00 = 감량하지 않는 가장 무거운 단)이 노리는 RIR.
+// 스킴 표(SET_SCHEMES[].build.steps)의 rir 문자열에서 읽는다 — 상수 표를 따로 두면
+// 스킴이 늘 때마다 두 곳을 고쳐야 하고, 한 곳을 잊으면 조용히 틀린 무게가 나간다(v2 §4-A 원칙).
+function schemeReferenceRir(scheme) {
+  var b = SET_SCHEMES[scheme] && SET_SCHEMES[scheme].build;
+  if (!b || !Array.isArray(b.steps)) return SCHEME_DEFAULT_RIR;
+  for (var i = 0; i < b.steps.length; i++) {
+    var st = b.steps[i];
+    if (typeof st.pct === 'number' && st.pct >= 1) {
+      var mid = rirMidpoint(st.rir);
+      if (mid !== null) return mid;
+    }
+  }
+  return SCHEME_DEFAULT_RIR; // 드롭처럼 기준 단이 없는 연장 스킴 → 스트레이트와 같게 본다
+}
+
+// 세트법을 바꾼 **그 순간**의 기준 무게. 못 구하면 null → 호출부는 기존 경로를 그대로 쓴다.
+// baseWeight = 지금 세션이 쓰고 있는 기준 무게(상한 캡의 기준점). 안 주면 진행 추천에서 가져온다.
+function deriveSchemeSwitchWeight(exerciseName, scheme, targetReps, baseWeight) {
+  // 역방향(어시스트)은 1RM 추적 대상이 아니다 — 보조 무게로 뽑은 e1RM은 부호가 뒤집힌 지표다(get1RM 주석).
+  if (isReverseProgression(exerciseName)) return null;
+  // 재활은 무게 진행 금지가 원칙이라 세트법이 바뀌어도 무게를 다시 잡지 않는다.
+  if (getExerciseClass(exerciseName) === 'rehab') return null;
+
+  var e1rm = get1RM(exerciseName);
+  if (!e1rm || e1rm <= 0) return null;
+
+  var range = clampRepsToClass(exerciseName, targetReps);
+  var repsTotal = range.high + schemeReferenceRir(scheme);
+  if (!(repsTotal > 0)) return null;
+
+  var derived = snapWeightToEquipment(e1rm / (1 + repsTotal / 30), exerciseName);
+  if (!derived || derived <= 0) return null;
+
+  // 상한 캡 — 전환 한 번으로 두 칸 이상 뛰지 않는다. e1RM은 컨디션 좋은 날 한 세트에서 나온
+  // 추정치라, 캡이 없으면 "세트법을 바꿨더니 갑자기 15kg 무거워짐"이 된다. 하향은 제한하지 않는다
+  // (덜 드는 쪽은 안전하고, 그 세트법이 실제로 요구하는 강도이기 때문).
+  var anchor = (typeof baseWeight === 'number' && baseWeight > 0) ? baseWeight : null;
+  if (anchor === null) {
+    var prog = getProgressiveRecommendation(exerciseName, targetReps);
+    if (prog && typeof prog.weight === 'number' && prog.weight > 0) anchor = prog.weight;
+  }
+  // 최근 2주 통증 기록이면 상향 자체를 막는다 — getProgressiveRecommendation 의 가드레일과 같은 규칙.
+  var painGated = hasRecentPain(exerciseName, 14);
+  if (anchor === null) return painGated ? null : derived;
+
+  var cap = painGated ? anchor : anchor + getWeightIncrement(exerciseName);
+  // cap 은 실행 가능한 무게(기록에 남은 무게 + 장비 한 단위)라 다시 스냅하지 않는다 —
+  // 스냅하면 격자 밖 기록(32kg)에서 캡이 기준 무게보다 **아래로** 내려가 상향 캡이 감량이 된다.
+  return derived > cap ? cap : derived;
+}
+
 // 세션 세트 구성용 시작 무게·횟수 — 추천 카드(getProgressiveRecommendation)와 반드시 일치.
 // · 수행 기록 있음: 추천 무게 그대로 (유지=지난 실제 무게, 증량=스냅된 새 무게 — 5kg처럼 격자 밖 무게도 보존)
 // · 기록 없음: AI/템플릿 제안 무게를 장비 단위로 스냅
 // · 횟수: 유지/재활이면 지난 세션 최고 반복(범위로 클램프) = "지난 기록에 도전", 증량이면 범위 하단부터 다시
 // · sets: 세트법(스킴)에 따라 만들어진 세트 배열 — opts = { sets: 워킹세트 수, warmup: bool }
+// · opts.recalcWeight: **세트법을 바꾸는 그 순간에만** true. 기준 무게를 e1RM에서 다시 역산한다
+//   (deriveSchemeSwitchWeight). 세션 시작·루틴 미리보기 등 다른 호출부는 넘기지 않으므로 동작이 같다.
 function getSessionSetPlan(exerciseName, fallbackWeight, targetReps, opts) {
   var range = clampRepsToClass(exerciseName, targetReps);
   var prog = getProgressiveRecommendation(exerciseName, targetReps);
@@ -620,9 +706,21 @@ function getSessionSetPlan(exerciseName, fallbackWeight, targetReps, opts) {
     reps = Math.min(Math.max(lastMax, range.low), range.high);
   }
 
+  // 세트법 전환 순간에만 기준 무게를 다시 잡는다. 역산에 실패하면(1RM 없음·어시스트·재활)
+  // null 이 돌아오고 위에서 정한 무게가 그대로 쓰인다 — 전환이 무게를 지우는 일은 없다.
+  // 기준 RIR은 **사용자가 방금 고른 스킴**(getSetScheme)으로 읽는다. effectiveSetScheme 은
+  // 무게가 정해져야 접힘 여부를 알 수 있어, 여기서 부르면 순서가 뒤엉킨다.
+  var recalculated = null;
+  if (opts && opts.recalcWeight) {
+    recalculated = deriveSchemeSwitchWeight(exerciseName, getSetScheme(exerciseName), targetReps, weight);
+    if (recalculated !== null) weight = recalculated;
+  }
+
   var scheme = effectiveSetScheme(exerciseName, weight);
   return {
     weight: weight, reps: reps, repRange: range, prog: prog,
+    // 전환으로 무게를 다시 잡았을 때만 채워진다 (토스트가 "무게가 바뀌었다"를 말할 근거).
+    recalculatedWeight: recalculated,
     scheme: scheme,
     // 세트 배열. 기존 4개 필드는 그대로 둔다(하위호환) — 호출부가 sets를 쓰지 않아도 깨지지 않는다.
     sets: buildSchemeSets(exerciseName, weight, reps, range, scheme, opts)

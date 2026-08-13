@@ -1,5 +1,5 @@
 {
-  "functionCount": 443,
+  "functionCount": 447,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -155,6 +155,7 @@
     "deleteItem",
     "deleteMemoryNote",
     "deleteSet",
+    "deriveSchemeSwitchWeight",
     "deriveWarmupGroups",
     "describeSetStructure",
     "detectPlateauSignals",
@@ -365,6 +366,7 @@
     "restSecToMin",
     "restoreFromBackup",
     "restoreSkippedSets",
+    "rirMidpoint",
     "rolling1RMMaxReps",
     "sanitizeBackupData",
     "sanitizeIdentifier",
@@ -381,8 +383,10 @@
     "saveProfileEdit",
     "saveRestTimer",
     "saveWizard",
+    "schemeChangeToastText",
     "schemeNeedsWeight",
     "schemeReductionRungs",
+    "schemeReferenceRir",
     "schemeRestForRole",
     "scrollChatToBottom",
     "scrollCoachToBottom",
