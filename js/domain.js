@@ -634,14 +634,18 @@ function recentTopWeight(exerciseName, windowSessions) {
   }
   if (!byDate.length) return null;
 
-  byDate.sort(function(a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
-  var recent = byDate.slice(-n);
+  // 최신 n세션. 정렬은 저장소 공용 sortByDateDesc 를 쓴다 — 인라인 비교자는 date 가 없는 항목끼리
+  // 전부 0을 돌려줘 정렬이 로그 순서(최신 우선)로 남고, slice(-n) 이 **가장 오래된 4개**를 골랐다.
+  var recent = sortByDateDesc(byDate).slice(0, n);
   var best = hardestWeight(exerciseName, recent.map(function(r) { return r.weight; }));
   if (typeof best !== 'number') return null;
   // 정방향 종목의 0kg 기록은 "맨몸으로 했다"는 뜻이라 탑세트 무게로 미리 채울 값이 없다.
   // 역방향(어시스트)은 보조 0kg = 맨몸이 곧 가장 어려운 값이라 유효하다.
   if (!isReverseProgression(exerciseName) && !(best > 0)) return null;
-  return snapWeightToEquipment(best, exerciseName);
+  // 격자로 스냅하지 않는다. 이 값은 "실제로 든 무게"라고 화면에 적히는데, 반올림은 22.5kg 기록을
+  // 25kg 으로 **올려** 든 적 없는 무게를 사실처럼 말하게 된다. getSessionSetPlan 이 유지일에
+  // 격자 밖 무게를 그대로 보존하는 것과 같은 원칙이다.
+  return best;
 }
 
 // 세션 세트 구성용 시작 무게·횟수 — 추천 카드(getProgressiveRecommendation)와 반드시 일치.
@@ -952,6 +956,33 @@ function sessionReferenceSet(exercise) {
   return rows[0];
 }
 
+// **앞으로 들 세트**의 기준 세트 = 남은 워킹세트 중 가장 어려운 세트 (없으면 null).
+// 세트법 전환이 물려줄 무게와 전환 토스트의 before/after 가 이걸 본다.
+// sessionReferenceSet 과 나뉘는 이유: 완료한 탑까지 세면 "다음에 들 무게"가 아니라 세션 최중량이
+// 기준이 되어, 자동 디로드로 내려간 백오프가 **방금 실패한 탑 무게**로 되올라가고(3차 H5)
+// 남은 세트가 아무리 바뀌어도 before == after 라 토스트가 숫자를 감춘다(3차 M2).
+// 화면 카드의 큰 숫자는 그대로 sessionReferenceSet 이다 — 두 용도는 서로 다른 질문에 답한다.
+function pendingReferenceSet(exercise) {
+  var rows = pendingWorkingSets(exercise).filter(function(s) { return typeof s.weight === 'number'; });
+  if (!rows.length) return null;
+  var target = hardestWeight(exercise && exercise.name, rows.map(function(s) { return s.weight; }));
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].weight === target) return rows[i];
+  }
+  return rows[0];
+}
+
+// 이 종목에서 **이미 끝낸 탑세트** (없으면 null). 마지막 것을 돌려준다 — applyTopSetAutoDeload 와
+// 같은 세트를 가리켜야 한다. 두 곳이 이 판정을 공유한다:
+//  · 세트 재구성: 남은 자리에 탑을 또 만들지 않는다 (한 종목에 탑은 하나다)
+//  · 탑 무게 수정: 확정 무게가 끝낸 탑을 넘지 못하게 막는다 (백오프가 탑보다 무거워진다 — 3차 M1)
+function completedTopSet(exercise) {
+  var rows = ((exercise && exercise.sets) || []).filter(function(s) {
+    return s && s.completed && !s.isWarmup && s.role === 'top';
+  });
+  return rows.length ? rows[rows.length - 1] : null;
+}
+
 // 볼륨 카운트용 워킹세트 수.
 // 드롭·마이오렙 세트는 **마지막 워킹세트의 연장**이지 독립 세트가 아니다. 그대로 세면
 // 3세트 종목이 5세트로 잡혀 주간 볼륨 폐루프(AI 프롬프트·부족 부위 판정)가 부풀려진다.
@@ -1031,8 +1062,12 @@ function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
     // opts.topDone = 탑세트를 **이미 끝냈다**(완료 기록에 role:'top' 이 있다). 그러면 남은 자리에
     // 탑을 또 만들면 안 된다 — 한 종목에 탑이 둘이 되어 뱃지·자동 디로드의 last-top 스캔·
     // 다음 세션 reachedTopAt 필터가 전부 엉킨다. 남은 자리는 나머지 단(백오프)이 채운다.
+    //
+    // **탑세트(autoDeload 스킴)에서만** 걸러낸다. top 은 top_backoff 전용 역할이 아니다 —
+    // 피라미드의 마지막 단(100%)·역피라미드의 첫 단도 role:'top' 이라, 무조건 지우면 그 스킴의
+    // 사다리 꼭대기가 통째로 사라진다(피라미드가 92.5% 에서 끝난다 — 3차 M3).
     var rampBuild = build;
-    if (opts && opts.topDone) {
+    if (opts && opts.topDone && build.autoDeload) {
       var rest = (build.steps || []).filter(function(st) { return st.role !== 'top'; });
       if (rest.length) {
         rampBuild = {};
