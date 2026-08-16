@@ -1232,28 +1232,32 @@ test('[이관] init() 이 세션을 복원하기 전에 이관을 끝낸다 (앱
   seedLog([]);
 });
 
+
 // ═══ 11. 세트법 전환 시 기준 무게 역산 (deriveSchemeSwitchWeight) ═══
-// 세트법마다 기준 세트가 노리는 강도가 다르다(탑 RIR 1~2 vs 스트레이트 RIR 2~3).
-// 그래서 **바꾸는 그 순간에만** 롤링 추정 1RM에서 Epley 역산으로 기준 무게를 다시 잡는다.
+// 세트법을 바꾸면 세트 구성이 통째로 바뀐다. 그 순간에만 최근 로그의 롤링 추정 1RM에서
+// **그 세션이 처방하는 반복**으로 기준 무게를 Epley 역산한다.
 // 핵심 계약:
-//  · w = e1RM / (1 + (클래스 반복 상단 + 기준 RIR)/30), 결과는 장비 격자로 스냅
-//  · 상한은 "지난 기록 기준 무게 + 장비 한 단위" — 전환 한 번으로 두 칸 이상 뛰지 않는다
-//  · 최근 2주 통증 기록이면 상향 금지 (진행 엔진의 가드레일과 같은 규칙)
-//  · 역산 불가(1RM 없음·어시스트·재활)면 null → 호출부는 기존 경로 그대로
+//  · w = e1RM / (1 + 반복/30) — RIR을 더하지 않는다. 추적 e1RM 자체가 "기록 반복 = 한계" 잣대라
+//    되더하면 기록 무게보다 구조적으로 가벼워진다. 세트법별 강도차는 사다리가 만든다.
+//  · 상한 캡은 "지금 배정된 무게(또는 지난 세션 실측 무게 중 낮은 쪽) + 장비 한 단위"를
+//    **격자 위로 내린 값** — 없는 무게(덤벨 17kg)를 처방하지 않는다
+//  · 최근 2주 통증 기록이면 상향 금지
+//  · 역산 근거가 없으면(로그 e1RM 없음·무게 미상·어시스트·재활·드롭) null → 무게를 건드리지 않는다
 //  · opts.recalcWeight 를 넘기지 않는 호출부(세션 시작·루틴 미리보기)는 동작이 변하지 않는다
+// 아래 테스트는 전부 **실제 데이터 경로**(로그 → 롤링 e1RM → 역산 → 캡)로 검증한다.
+// 1RM을 손으로 심거나 캡을 무력화하는 픽스처는 쓰지 않는다 — 그러면 앱이 실제로 내는 값을 못 본다.
 
-const HACK_E1RM = 130;   // 핵 스쿼트(고중량 복합 5~8회, 5kg 격자) — 격자에서 스킴 차이가 드러나는 값
-
-function seedRecalc(oneRm, log) {
+// 로그만 심는다. 추적 1RM은 로그에서 나오는 값(calculateRollingMax1RM)이 유일한 근거다.
+function seedRecalc(log, oneRm) {
   resetOverrides();
   app.storage.set(app.KEYS.ONE_RM_DATA, oneRm || {});
   seedLog(log || []);
 }
-// 핵 스쿼트 한 세션 기록 (워킹 3세트)
-function hackSession(weight, reps, days, extra) {
+// 한 종목 한 세션 (워킹 3세트, 같은 무게·반복). 로그 배열은 **최신이 앞**이다.
+function session(name, weight, reps, days, extra) {
   return {
     date: daysAgo(days), sessionType: 'legs',
-    exercises: [Object.assign({ name: '핵 스쿼트', setsDetail: [
+    exercises: [Object.assign({ name: name, setsDetail: [
       set(weight, reps), set(weight, reps), set(weight, reps)
     ] }, extra || {})]
   };
@@ -1269,7 +1273,13 @@ function startSession(name) {
   };
   return app.state.activeSession.exercises[0];
 }
-const workingSets = (ex) => ex.sets.filter((s) => !s.isWarmup);
+function endSession() {
+  app.state.activeSession = null;
+  app.state.setSchemeOpen = false;
+  seedRecalc([]);
+}
+const workingSets = (ex) => ex.sets.filter((s) => !s.isWarmup && !app.isSetExtension(s));
+const weightsOf = (ex) => workingSets(ex).map((s) => s.weight);
 // 토스트를 가로채 문구를 확인한다 (화면 대신)
 function captureToast(fn) {
   const original = app.showToast;
@@ -1278,157 +1288,294 @@ function captureToast(fn) {
   try { fn(); } finally { app.showToast = original; }
   return last;
 }
+const cardWeight = (html) => {
+  const m = html.match(/rm-weight-now">([\d.]+)</);
+  return m ? Number(m[1]) : null;
+};
+const cardLabel = (html) => {
+  const m = html.match(/<p class="rm-label" style="color: ([^"]+);">([^<]+)</);
+  return m ? { text: m[2], color: m[1] } : null;
+};
 
-test('[역산] 기준 RIR은 스킴 표의 기준 단(배율 1.00)에서 읽는다 — 없으면 스트레이트와 같게', () => {
-  assert.equal(app.rirMidpoint('1-2'), 1.5);
-  assert.equal(app.rirMidpoint('0'), 0);
-  assert.equal(app.rirMidpoint('0-2'), 1);
-  assert.equal(app.rirMidpoint(undefined), null);
-
-  assert.equal(app.schemeReferenceRir('top_backoff'), 1.5);   // 탑 rir '1-2'
-  assert.equal(app.schemeReferenceRir('pyramid'), 0.5);       // 마지막 탑 단 rir '0-1'
-  assert.equal(app.schemeReferenceRir('rpt'), 1);             // 첫 탑 단 rir '0-2'
-  assert.equal(app.schemeReferenceRir('straight'), app.SCHEME_DEFAULT_RIR); // 기준 단 없음 → 2.5
-  assert.equal(app.schemeReferenceRir('drop'), app.SCHEME_DEFAULT_RIR);     // 연장 스킴도 같다
+test('[역산] 기록한 그 반복으로 되돌리면 무게가 그대로다 — RIR 이중 계산 없음 (S-1)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 8, 3), session('핵 스쿼트', 90, 8, 6)]);
+  // 앱이 추적하는 e1RM은 90 × (1 + 8/30) = 114 — "8회가 곧 한계"라는 잣대로 계산된 값이다.
+  assert.equal(app.calculateRollingMax1RM('핵 스쿼트').value, 114);
+  // 그래서 8회로 되돌리면 정확히 90kg이 나와야 한다. RIR을 더하면 85kg으로 깎인다.
+  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'straight', 8, 90), 90);
+  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'top_backoff', 8, 90), 90,
+    '세트법이 달라도 기준 무게는 같다 — 강도차는 사다리가 만든다');
+  // 반복이 적을수록 무거워진다 (Epley 역산의 방향)
+  assert.ok(app.deriveSchemeSwitchWeight('핵 스쿼트', 'straight', 5, 100) >
+            app.deriveSchemeSwitchWeight('핵 스쿼트', 'straight', 8, 100));
+  seedRecalc([]);
 });
 
-test('[역산] Epley 역산 수치 — 반복 상단 + 기준 RIR을 한계 반복으로 환산한다', () => {
-  seedRecalc({ '핵 스쿼트': HACK_E1RM });
-  const raw = (rir) => HACK_E1RM / (1 + (8 + rir) / 30);   // 고중량 복합 상단 = 8회
-  const derive = (scheme) => app.deriveSchemeSwitchWeight('핵 스쿼트', scheme, '5-8', 1e6); // 캡 무력화
+test('[역산] 증량이 확정된 날 전환해도 추천 무게 아래로 내려가지 않는다 (S-1)', () => {
+  // 리뷰 재현: 90kg×8을 2세션 → 더블 프로그레션이 95kg 추천 → 전환하면 탑 85kg으로 **감량**됐다.
+  seedRecalc([session('핵 스쿼트', 90, 8, 3), session('핵 스쿼트', 90, 8, 6)]);
+  assert.equal(app.getProgressiveRecommendation('핵 스쿼트', '5-8').weight, 95, '전제: 증량일');
 
-  assert.equal(Math.round(raw(2.5) * 100) / 100, 96.3);
-  assert.equal(Math.round(raw(1.5) * 100) / 100, 98.73);
-  assert.equal(derive('straight'), 95);      // 96.30 → 5kg 격자
-  assert.equal(derive('top_backoff'), 100);  // 98.73 → 5kg 격자
-  assert.equal(derive('pyramid'), 100);      // 101.30
-  assert.equal(derive('rpt'), 100);          // 100.00
-  assert.ok(derive('top_backoff') > derive('straight'), 'RIR이 낮은 세트법이 더 무겁다');
+  const ex = startSession('핵 스쿼트');            // 핵 스쿼트 기본값 = 탑세트
+  assert.equal(weightsOf(ex)[0], 95, '전제: 탑 95kg으로 시작');
+
+  captureToast(() => app.applySetScheme('straight'));
+  assert.deepEqual([...weightsOf(ex)], [95, 95, 95], '전환이 무게를 깎지 않는다');
+  captureToast(() => app.applySetScheme('top_backoff'));
+  assert.equal(weightsOf(ex)[0], 95, '되돌려도 95kg 그대로 — 세션 안에서 복구 가능하다');
+  endSession();
 });
 
-test('[역산] 결과는 그 종목 장비 격자에 떨어진다 (덤벨 2kg / 그 외 5kg)', () => {
-  seedRecalc({ '덤벨 벤치 프레스': 55, '핵 스쿼트': HACK_E1RM });
-  const db = (scheme) => app.deriveSchemeSwitchWeight('덤벨 벤치 프레스', scheme, '5-8', 1e6);
-  assert.equal(db('straight'), 40);      // 55/1.35 = 40.74 → 2kg 격자
-  assert.equal(db('top_backoff'), 42);   // 55/1.31667 = 41.77 → 2kg 격자
-  assert.equal(db('straight') % 2, 0);
-  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'top_backoff', '5-8', 1e6) % 5, 0);
+test('[역산] 반복은 그 세션 처방값을 쓴다 — 범위 상단이 아니다 (M-6)', () => {
+  // 지난 세션이 100kg×5회(상단 8회 미달) → 이번에도 5회 처방. 무게도 5회 기준으로 잡아야 한다.
+  seedRecalc([session('핵 스쿼트', 100, 5, 3)]);
+  assert.equal(app.calculateRollingMax1RM('핵 스쿼트').value, 116.7);
+
+  const plan = app.getSessionSetPlan('핵 스쿼트', null, '5-8',
+    { sets: 3, warmup: false, recalcWeight: true, anchorWeight: 100 });
+  assert.equal(plan.reps, 5, '전제: 이 세션의 처방 반복은 5회');
+  assert.equal(plan.weight, 100, '5회 기준 역산 = 100kg');
+  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'straight', 8, 100), 90,
+    '범위 상단(8회)으로 역산하면 90kg — 처방 5회와 어긋난 값이다');
+  // 세트에 적히는 목표 반복도 같은 값이어야 한다 (무게·반복·RIR 표기가 한 곳을 본다)
+  assert.equal(workingSets({ sets: plan.sets })[0].repsTarget, 5);
+  seedRecalc([]);
 });
 
-test('[역산] 상한 캡 — 지난 기록 기준 무게 + 장비 한 단위를 넘지 않는다', () => {
-  seedRecalc({ '핵 스쿼트': HACK_E1RM }, [hackSession(90, 8, 3)]);
-  assert.equal(app.getProgressiveRecommendation('핵 스쿼트', '5-8').weight, 90, '전제: 기준 무게 90kg');
-  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'top_backoff', '5-8', 1e6), 100, '전제: 캡 없으면 100kg');
-  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'top_backoff', '5-8'), 95, '90 + 5kg 한 단위');
-  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'top_backoff', '5-8', 90), 95, '기준 무게를 직접 줘도 같다');
+test('[역산] 캡 기준점은 지금 배정된 무게 — 수동 조정·자동 디로드·증량일을 존중한다 (H-4)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 8, 3), session('핵 스쿼트', 90, 8, 6)]);
+  // 5회 역산값은 114/(1+5/30) = 97.7 → 100kg. 캡이 없으면 그대로 나간다.
+  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'straight', 5, 200), 100, '전제: 캡 없으면 100kg');
+  // 컨디션이 나빠 80kg으로 손수 낮춰 둔 세션 → 캡은 85kg
+  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'straight', 5, 80), 85);
+  // 증량일: 배정 무게는 95지만 **실제로 든 무게는 90** → 캡은 95 (탭 한 번에 두 칸 금지)
+  const plan = app.getSessionSetPlan('핵 스쿼트', null, '5-8',
+    { sets: 3, warmup: false, recalcWeight: true, anchorWeight: 95 });
+  assert.equal(plan.prog.previousWeight, 90, '전제: 지난 세션 실측 90kg');
+  assert.equal(plan.weight, 95, '지난 실측 + 한 단위까지만');
+  seedRecalc([]);
 });
 
-test('[역산] 하향에는 캡이 없다 — 그 세트법이 요구하는 강도까지 내려간다', () => {
-  seedRecalc({ '핵 스쿼트': HACK_E1RM }, [hackSession(100, 8, 3)]);
-  assert.equal(app.getProgressiveRecommendation('핵 스쿼트', '5-8').weight, 100, '전제: 기준 무게 100kg');
-  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'straight', '5-8'), 95);
+test('[역산] 캡이 걸려도 모든 세트가 장비 격자에 떨어진다 (M-3)', () => {
+  // 격자 밖 기록(덤벨 15kg)에 한 단위를 그냥 더하면 17kg — 없는 덤벨이다.
+  seedRecalc([
+    { date: daysAgo(3), exercises: [{ name: '덤벨 벤치 프레스', setsDetail: [set(15, 8), set(15, 8), set(15, 8)] }] },
+    { date: daysAgo(10), exercises: [{ name: '덤벨 벤치 프레스', setsDetail: [set(30, 5), set(30, 5)] }] }
+  ]);
+  assert.equal(app.calculateRollingMax1RM('덤벨 벤치 프레스').value, 35, '전제: 최근 e1RM은 35');
+  assert.equal(app.getProgressiveRecommendation('덤벨 벤치 프레스', '5-8').weight, 15, '전제: 기준 무게 15kg');
+
+  const capped = app.deriveSchemeSwitchWeight('덤벨 벤치 프레스', 'top_backoff', 8, 15);
+  assert.equal(capped, 16, '15 + 2 = 17 → 격자 위로 내려 16kg');
+  assert.ok(capped > 15 && capped <= 17, '캡은 기준 무게보다 위, 한 단위 이내');
+
+  app.setSetSchemeOverride('덤벨 벤치 프레스', 'straight');
+  const ex = startSession('덤벨 벤치 프레스');
+  captureToast(() => app.applySetScheme('top_backoff'));
+  assert.deepEqual([...weightsOf(ex)], [16, 14, 14], '캡이 걸려도 사다리(탑·백오프)는 그대로 남는다');
+  weightsOf(ex).forEach((w) => assert.equal(w % 2, 0, `격자 밖 무게: ${w}kg`));
+  endSession();
 });
 
-test('[역산] 최근 2주 통증 기록이면 상향 금지 — 기준 무게가 그대로 상한이 된다', () => {
-  seedRecalc({ '핵 스쿼트': HACK_E1RM }, [hackSession(90, 8, 3, { painFlag: true })]);
+test('[역산] 최근 2주 통증 기록이면 상향 금지 — 배정된 무게 그대로', () => {
+  seedRecalc([session('핵 스쿼트', 90, 8, 3, { painFlag: true })]);
   assert.equal(app.hasRecentPain('핵 스쿼트', 14), true, '전제: 통증 기록');
-  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'top_backoff', '5-8'), 90, '90kg를 넘지 못한다');
+  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'straight', 5, 90), 90, '올리지 않는다');
   // 통증이 있어도 **하향**은 막지 않는다 (덜 드는 쪽은 안전하다)
-  seedRecalc({ '핵 스쿼트': HACK_E1RM }, [hackSession(100, 8, 3, { painFlag: true })]);
-  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'straight', '5-8'), 95);
+  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'straight', 8, 100), 90);
+  seedRecalc([]);
 });
 
-test('[역산] 역산할 수 없으면 null — 1RM 없음 · 어시스트 · 재활', () => {
-  seedRecalc({});
-  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'top_backoff', '5-8'), null, '추정 1RM이 없다');
+test('[역산] 역산할 수 없으면 null — 어시스트 · 재활 · 드롭 · 무게 미상 · 로그 e1RM 없음', () => {
+  seedRecalc([session('핵 스쿼트', 90, 8, 3)]);
+  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'drop', 8, 90), null,
+    '드롭은 마지막 워킹세트의 연장이라 본 세트 강도를 다시 잡지 않는다');
+  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'top_backoff', 8, null), null,
+    '무게를 모르는 종목은 캡 기준점이 없다');
+  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'top_backoff', 8, 0), null);
 
-  seedRecalc({ '어시스트 풀업': 80, '페이스 풀': 30 });
-  assert.equal(app.deriveSchemeSwitchWeight('어시스트 풀업', 'top_backoff', '5-8', 30), null,
+  seedRecalc([], { '핵 스쿼트': 130 });
+  assert.equal(app.deriveSchemeSwitchWeight('핵 스쿼트', 'top_backoff', 8, 90), null,
+    '로그가 없으면 저장된 1RM이 있어도 역산하지 않는다');
+
+  seedRecalc([session('어시스트 풀업', 30, 8, 3), session('페이스 풀', 20, 15, 3)]);
+  assert.equal(app.deriveSchemeSwitchWeight('어시스트 풀업', 'top_backoff', 8, 30), null,
     '어시스트는 1RM 추적 대상이 아니다 — 보조 무게 e1RM은 부호가 뒤집힌다');
-  assert.equal(app.deriveSchemeSwitchWeight('페이스 풀', 'straight', '15-20', 20), null,
-    '재활은 무게 진행 금지');
+  assert.equal(app.deriveSchemeSwitchWeight('페이스 풀', 'straight', 15, 20), null, '재활은 무게 진행 금지');
+  seedRecalc([]);
+});
+
+test('[역산] 처방 반복이 e1RM 상한을 넘는 종목은 시드 1RM으로 역산하지 않는다 (S-3)', () => {
+  // 경량 고립은 앱이 15~25회를 처방하는데 e1RM 신뢰 상한은 12회 → 후보 세트가 하나도 없다.
+  // 그 상태에서 get1RM(=INITIAL_1RM 시드)로 역산하면 12kg → 8kg(−33%)이 되고 되돌릴 수도 없다.
+  seedRecalc([session('덤벨 사이드 레터럴 레이즈', 12, 20, 3), session('덤벨 사이드 레터럴 레이즈', 12, 20, 6)]);
+  assert.equal(app.calculateRollingMax1RM('덤벨 사이드 레터럴 레이즈'), null, '전제: 유효 e1RM 없음');
+  assert.equal(app.INITIAL_1RM['덤벨 사이드 레터럴 레이즈'] > 0, true, '전제: 시드 1RM은 존재한다');
+  assert.equal(app.deriveSchemeSwitchWeight('덤벨 사이드 레터럴 레이즈', 'pyramid', 20, 12), null);
+
+  const ex = startSession('덤벨 사이드 레터럴 레이즈');
+  assert.deepEqual([...weightsOf(ex)], [12, 12, 12], '전제: 12kg 3세트');
+  const toast = captureToast(() => app.applySetScheme('pyramid'));
+  const w = weightsOf(ex);
+  assert.equal(app.hardestWeight('덤벨 사이드 레터럴 레이즈', w), 12, '기준 무게는 12kg 그대로');
+  assert.equal(/\d+kg/.test(toast), false, `무게가 안 바뀌었으면 숫자를 말하지 않는다: ${toast}`);
+  endSession();
+});
+
+test('[역산] 맨몸으로 기록해 온 종목에는 없던 무게를 처방하지 않는다 (S-5)', () => {
+  // 딥스를 0kg(맨몸)으로 기록해 왔는데 과거 중량 세트 등으로 저장된 1RM이 남아 있는 경우.
+  seedRecalc([{ date: daysAgo(3), exercises: [{ name: '딥스',
+    setsDetail: [set(0, 10), set(0, 9), set(0, 8)] }] }], { '딥스': 100 });
+  const ex = startSession('딥스');
+  assert.deepEqual([...weightsOf(ex)], [null, null, null], '전제: 무게 없이 시작');
+
+  const toast = captureToast(() => app.applySetScheme('pyramid'));
+  assert.deepEqual([...weightsOf(ex)], [null, null, null], '없던 무게가 생기지 않는다');
+  assert.equal(/\d+kg/.test(toast), false, `맨몸 종목에 무게를 말하면 안 된다: ${toast}`);
+  endSession();
 });
 
 test('[역산] opts.recalcWeight 를 안 넘긴 호출부는 무게가 그대로다 (세션 시작·루틴 미리보기)', () => {
-  seedRecalc({ '핵 스쿼트': HACK_E1RM }, [hackSession(90, 8, 3)]);
+  seedRecalc([session('핵 스쿼트', 100, 5, 3)]);
   const plain = app.getSessionSetPlan('핵 스쿼트', null, '5-8', { sets: 3, warmup: false });
-  assert.equal(plain.weight, 90);
-  assert.equal(plain.recalculatedWeight, null);
-  assert.equal(app.buildSessionExercise('핵 스쿼트').sets.filter((s) => !s.isWarmup)[0].weight, 90);
-  assert.equal(app.getRoutinePreviewPlan({ name: '핵 스쿼트', sets: 3, reps: '5-8' }).weight, 90);
-
-  const recalc = app.getSessionSetPlan('핵 스쿼트', null, '5-8', { sets: 3, warmup: false, recalcWeight: true });
-  assert.equal(recalc.weight, 95);
-  assert.equal(recalc.recalculatedWeight, 95);
+  assert.equal(plain.weight, 100);
+  assert.equal(app.buildSessionExercise('핵 스쿼트').sets.filter((s) => !s.isWarmup)[0].weight, 100);
+  assert.equal(app.getRoutinePreviewPlan({ name: '핵 스쿼트', sets: 3, reps: '5-8' }).weight, 100);
+  seedRecalc([]);
 });
 
-test('[전환] 스트레이트 → 탑세트: 기준 무게가 오르고 백오프는 그 90%다', () => {
-  seedRecalc({ '핵 스쿼트': HACK_E1RM }, [hackSession(90, 8, 3)]);
+test('[전환] 스트레이트 ↔ 탑세트 왕복 — 무게가 드리프트하지 않는다 (S-1/S-2)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);          // 상단 미달 → 유지일
   app.setSetSchemeOverride('핵 스쿼트', 'straight');
   const ex = startSession('핵 스쿼트');
-  assert.equal(workingSets(ex)[0].weight, 90, '전제: 전환 전 90kg');
-
-  const toast = captureToast(() => app.applySetScheme('top_backoff'));
-  const w = workingSets(ex);
-  assert.equal(ex.scheme, 'top_backoff');
-  assert.equal(w[0].role, 'top');
-  assert.equal(w[0].weight, 95, '기존 무게(90) 초과 · 캡(+5kg) 이내');
-  assert.equal(w[1].weight, 85, '백오프 = 탑의 90% (95×0.9=85.5 → 5kg 격자)');
-  assert.equal(w[1].pct, app.BACKOFF_PCT, '화면에 적히는 명목 배율은 90%');
-  assert.equal(toast, '탑세트로 바꿨어요 — 탑 95kg');
-});
-
-test('[전환] 탑세트 → 스트레이트: 기준 무게가 그 세트법 강도까지 내려간다', () => {
-  seedRecalc({ '핵 스쿼트': HACK_E1RM }, [hackSession(100, 8, 3)]);
-  const ex = startSession('핵 스쿼트');           // 핵 스쿼트 기본값 = 탑세트
-  assert.equal(ex.scheme, 'top_backoff');
-  assert.equal(workingSets(ex)[0].weight, 100, '전제: 전환 전 탑 100kg');
-
-  const toast = captureToast(() => app.applySetScheme('straight'));
-  const w = workingSets(ex);
-  assert.equal(ex.scheme, 'straight');
-  assert.deepEqual([...w.map((s) => s.weight)], [95, 95, 95]);
-  assert.equal(toast, '스트레이트로 바꿨어요 — 95kg');
-});
-
-test('[전환] 피라미드·역피라미드는 재계산한 탑 위에서 사다리 비율을 유지한다', () => {
-  seedRecalc({ '핵 스쿼트': HACK_E1RM }, [hackSession(90, 8, 3)]);
-  app.setSetSchemeOverride('핵 스쿼트', 'straight');
-  const pyr = startSession('핵 스쿼트');
-  captureToast(() => app.applySetScheme('pyramid'));
-  const pw = workingSets(pyr);
-  assert.deepEqual([...pw.map((s) => s.weight)], [80, 90, 95], '가벼운 세트 → 탑 (오름 사다리)');
-  assert.equal(pw[pw.length - 1].role, 'top');
-  assert.deepEqual([...pw.map((s) => s.pct)], [app.PYRAMID_PCTS[0], app.PYRAMID_PCTS[1], undefined]);
-
-  seedRecalc({ '핵 스쿼트': HACK_E1RM }, [hackSession(90, 8, 3)]);
-  app.setSetSchemeOverride('핵 스쿼트', 'straight');
-  const rpt = startSession('핵 스쿼트');
-  captureToast(() => app.applySetScheme('rpt'));
-  const rw = workingSets(rpt);
-  assert.deepEqual([...rw.map((s) => s.weight)], [95, 85, 75], '탑 → 가벼운 세트 (내림 사다리)');
-  assert.equal(rw[0].role, 'top');
-  assert.deepEqual([...rw.map((s) => s.pct)], [undefined, app.RPT_PCTS[1], app.RPT_PCTS[2]]);
-});
-
-test('[전환] 운동 중 전환 — 완료 세트는 그대로, 남은 세트만 새 무게, 웜업은 새로 안 붙는다', () => {
-  seedRecalc({ '핵 스쿼트': HACK_E1RM }, [hackSession(90, 8, 3)]);
-  app.setSetSchemeOverride('핵 스쿼트', 'straight');
-  const ex = startSession('핵 스쿼트');
-  workingSets(ex).slice(0, 2).forEach((s) => { s.completed = true; s.reps = 8; });
+  assert.deepEqual([...weightsOf(ex)], [90, 90, 90], '전제: 스트레이트 90kg 3세트');
 
   captureToast(() => app.applySetScheme('top_backoff'));
-  assert.equal(ex.sets.filter((s) => s.isWarmup).length, 0, '이미 시작한 종목에 워밍업을 새로 끼우지 않는다');
-  const done = ex.sets.filter((s) => s.completed);
-  assert.equal(done.length, 2);
-  assert.deepEqual([...done.map((s) => s.weight)], [90, 90], '완료 기록은 재계산 대상이 아니다');
-  const pending = ex.sets.filter((s) => !s.completed);
-  assert.equal(pending.length, 1, '남은 워킹세트 수는 그대로');
-  assert.equal(pending[0].weight, 95);
+  assert.deepEqual([...weightsOf(ex)], [90, 80, 80], '탑은 그대로, 백오프만 90%로 내려간다');
+  assert.equal(workingSets(ex)[0].role, 'top');
+  assert.equal(workingSets(ex)[1].pct, app.BACKOFF_PCT, '화면에 적히는 명목 배율은 90%');
+
+  captureToast(() => app.applySetScheme('straight'));
+  assert.deepEqual([...weightsOf(ex)], [90, 90, 90], '되돌리면 원래대로');
+  captureToast(() => app.applySetScheme('top_backoff'));
+  assert.deepEqual([...weightsOf(ex)], [90, 80, 80], '두 번째 왕복도 같은 값 — 누적 드리프트 없음');
+  endSession();
 });
 
-test('[전환] 토스트 — 해요체 · 40자 이내 · 무게를 모르면 기존 문구', () => {
-  seedRecalc({ '핵 스쿼트': HACK_E1RM }, [hackSession(90, 8, 3)]);
+test('[전환] 세트법을 돌아가며 바꿔도 기준 무게는 같다 (경로 독립)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex = startSession('핵 스쿼트');
+  ['pyramid', 'rpt', 'top_backoff', 'straight'].forEach((id) => {
+    captureToast(() => app.applySetScheme(id));
+    assert.equal(app.hardestWeight('핵 스쿼트', weightsOf(ex)), 90, `${id} 에서 기준 무게가 흔들렸다`);
+  });
+  // 사다리는 세트법마다 다르게 남는다 (강도차는 무게가 아니라 구성이 만든다)
+  captureToast(() => app.applySetScheme('pyramid'));
+  const pyr = weightsOf(ex);
+  assert.equal(workingSets(ex)[workingSets(ex).length - 1].role, 'top', '피라미드는 마지막이 탑');
+  assert.ok(pyr[0] < pyr[pyr.length - 1], '오름 사다리');
+  captureToast(() => app.applySetScheme('rpt'));
+  const rpt = weightsOf(ex);
+  assert.equal(workingSets(ex)[0].role, 'top', '역피라미드는 첫 세트가 탑');
+  assert.ok(rpt[0] > rpt[rpt.length - 1], '내림 사다리');
+  endSession();
+});
+
+test('[전환] 드롭세트는 본 세트 무게를 건드리지 않는다 (H-3)', () => {
+  // 최근 e1RM(116.7)이 지금 배정 무게(85)보다 높아, 다른 세트법이면 역산이 실제로 올라가는 상태.
+  const log = [
+    { date: daysAgo(3), exercises: [{ name: '핵 스쿼트', setsDetail: [set(85, 6), set(85, 6), set(85, 6)] }] },
+    { date: daysAgo(10), exercises: [{ name: '핵 스쿼트', setsDetail: [set(100, 5), set(100, 5)] }] }
+  ];
+  seedRecalc(log);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex = startSession('핵 스쿼트');
+  assert.deepEqual([...weightsOf(ex)], [85, 85, 85], '전제: 85kg 3세트');
+
+  const toast = captureToast(() => app.applySetScheme('drop'));
+  assert.deepEqual([...weightsOf(ex)], [85, 85, 85], '본 세트는 그대로');
+  const drops = ex.sets.filter((s) => app.isSetExtension(s));
+  assert.equal(drops.length, 2, '드롭 단 2개');
+  assert.ok(drops[0].weight < 85 && drops[1].weight < drops[0].weight, '직전 세트에서 −25%씩 이어진다');
+  assert.equal(/\d+kg/.test(toast), false, `본 세트가 안 바뀌었으면 무게를 말하지 않는다: ${toast}`);
+
+  // 같은 상태에서 탑세트로 바꾸면 역산이 실제로 동작한다 — 위가 "드롭이라서" 안 바뀐 게 맞다
+  seedRecalc(log);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex2 = startSession('핵 스쿼트');
+  captureToast(() => app.applySetScheme('top_backoff'));
+  assert.equal(weightsOf(ex2)[0], 90, '탑세트 전환은 캡(85+5)까지 올라간다');
+  endSession();
+});
+
+test('[전환] 운동 중 전환 — 완료 세트 뒤에 탑세트가 새로 생기지 않는다 (H-2)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex = startSession('핵 스쿼트');
+  workingSets(ex).slice(0, 2).forEach((s) => { s.completed = true; s.reps = 7; });
+
+  const toast = captureToast(() => app.applySetScheme('top_backoff'));
+  assert.equal(ex.sets.filter((s) => s.isWarmup).length, 0, '이미 시작한 종목에 워밍업을 새로 끼우지 않는다');
+  const done = ex.sets.filter((s) => s.completed);
+  assert.deepEqual([...done.map((s) => s.weight)], [90, 90], '완료 기록은 재계산 대상이 아니다');
+
+  const pending = ex.sets.filter((s) => !s.completed);
+  assert.equal(pending.length, 1, '남은 워킹세트 수는 그대로');
+  assert.equal(pending[0].role, 'backoff', '탑세트는 이미 지나간 자리 — 남는 건 백오프다');
+  assert.equal(pending[0].weight, 80);
+  assert.equal(toast, '탑세트로 바꿨어요 — 80kg', '실제로 들 무게를 말한다');
+  endSession();
+});
+
+test('[전환] 자동 디로드 무게가 캡 기준점이 된다 — 실패한 무게보다 무겁게 처방하지 않는다 (S-4)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  const ex = startSession('핵 스쿼트');                  // 기본값 = 탑세트 [90, 80, 80]
+  const top = workingSets(ex)[0];
+  top.completed = true; top.reps = 4;                    // 목표 7회를 4회로 실패
+  assert.equal(app.applyTopSetAutoDeload(ex), 2, '전제: 남은 백오프가 75kg으로 자동 디로드');
+  assert.deepEqual([...weightsOf(ex).slice(1)], [75, 75]);
+
+  captureToast(() => app.applySetScheme('pyramid'));
+  const pending = ex.sets.filter((s) => !s.completed && !s.isWarmup);
+  assert.equal(pending.length, 2, '남은 세트 수는 그대로');
+  assert.ok(app.hardestWeight('핵 스쿼트', pending.map((s) => s.weight)) <= 80,
+    '디로드된 75kg + 한 단위가 상한 — 방금 실패한 90kg 위로 올라가지 않는다');
+  assert.equal(pending.some((s) => s.weight >= 90), false, '실패한 무게 이상을 다시 시키지 않는다');
+  endSession();
+});
+
+test('[전환] 이미 쓰고 있는 세트법을 다시 눌러도 아무것도 바뀌지 않는다 (H-1)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  const ex = startSession('핵 스쿼트');                  // 기본값 = 탑세트
+  workingSets(ex)[0].weight = 85;                        // 손수 고친 무게
+  const before = JSON.stringify(ex.sets);
+
+  const toast = captureToast(() => app.applySetScheme('top_backoff'));
+  assert.equal(JSON.stringify(ex.sets), before, '세트가 그대로여야 한다 (손수 고친 무게 보존)');
+  assert.equal(toast, '이미 쓰고 있는 세트법이에요');
+  assert.equal(app.state.setSchemeOpen, false, '시트는 닫힌다');
+  endSession();
+});
+
+test('[전환] 남은 워킹세트가 없으면 전환을 막는다 (H-1/M-4)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex = startSession('핵 스쿼트');
+  ex.sets.forEach((s) => { s.completed = true; s.reps = 7; });
+  const before = JSON.stringify(ex.sets);
+
+  const toast = captureToast(() => app.applySetScheme('top_backoff'));
+  assert.equal(JSON.stringify(ex.sets), before, '완료 기록 위에 새 구성이 얹히지 않는다');
+  assert.equal(ex.scheme, 'straight', '세트법 표기도 그대로');
+  assert.equal(app.getSetScheme('핵 스쿼트'), 'straight', '저장된 선택도 바뀌지 않는다');
+  assert.equal(toast, '남은 세트가 없어요 — 다음 세션에 바꿔요');
+  assert.equal(/\d+kg/.test(toast), false, '없는 무게를 말하지 않는다');
+  endSession();
+});
+
+test('[전환] 토스트는 실제로 바뀐 무게만 말한다 · 해요체 40자 (M-4)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
   app.setSetSchemeOverride('핵 스쿼트', 'straight');
   const ex = startSession('핵 스쿼트');
   const msgs = [];
@@ -1437,60 +1584,74 @@ test('[전환] 토스트 — 해요체 · 40자 이내 · 무게를 모르면 �
   });
   msgs.forEach((m) => {
     assert.ok(m.length <= 40, `40자 초과: ${m} (${m.length}자)`);
-    assert.ok(/어요$|어요 —/.test(m) || m.indexOf('어요') !== -1, `해요체가 아니다: ${m}`);
+    assert.ok(m.indexOf('어요') !== -1, `해요체가 아니다: ${m}`);
     assert.equal(/[!]|합니다|됩니다/.test(m), false, `느낌표·합쇼체 금지: ${m}`);
+    assert.equal(/\d+kg/.test(m), false, `기준 무게가 안 바뀐 전환은 숫자를 말하지 않는다: ${m}`);
   });
-  assert.ok(msgs[0].indexOf('탑 ') !== -1, '램프 스킴은 어느 세트 무게인지 밝힌다');
+
+  // 무게가 실제로 바뀌는 전환에서는 **그 무게**를 말한다 (탑세트면 어느 세트인지도)
+  seedRecalc([
+    { date: daysAgo(3), exercises: [{ name: '핵 스쿼트', setsDetail: [set(85, 6), set(85, 6), set(85, 6)] }] },
+    { date: daysAgo(10), exercises: [{ name: '핵 스쿼트', setsDetail: [set(100, 5), set(100, 5)] }] }
+  ]);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex2 = startSession('핵 스쿼트');
+  const changed = captureToast(() => app.applySetScheme('top_backoff'));
+  assert.equal(changed, '탑세트로 바꿨어요 — 탑 90kg');
+  assert.equal(weightsOf(ex2)[0], 90, '토스트 숫자 = 화면 세트 무게');
 
   // 무게를 모르는 종목 — 붙일 숫자가 없으니 문구를 그대로 둔다
-  seedRecalc({});
+  seedRecalc([]);
   const unknown = startSession('사장님표 특수 운동');
   assert.equal(unknown.sets[0].weight, null, '전제: 무게 미상');
-  assert.equal(captureToast(() => app.applySetScheme('straight')), '스트레이트로 바꿨어요');
-
-  // 감량이 불가능한 저중량 — 실제로 적용된 스킴(스트레이트)을 알린다 (기존 동작)
-  seedRecalc({}, [hackSession(5, 8, 3)]);
-  const tiny = startSession('핵 스쿼트');
-  const folded = captureToast(() => app.applySetScheme('pyramid'));
-  assert.equal(tiny.scheme, 'straight');
-  assert.equal(folded, '스트레이트로 했어요 — 무게를 모르는 종목이라 감량을 못 해요');
-
-  app.state.activeSession = null;
-  app.state.setSchemeOpen = false;
-  seedRecalc({});
+  assert.equal(captureToast(() => app.applySetScheme('pyramid')),
+    '스트레이트로 했어요 — 무게를 모르는 종목이라 감량을 못 해요');
+  endSession();
 });
 
-test('[전환] 추천 카드의 큰 숫자 = 실제로 배정된 기준 세트 무게 (카드와 세트가 어긋나지 않는다)', () => {
-  const bigWeight = (html) => {
-    const m = html.match(/rm-weight-now">([\d.]+)</);
-    return m ? Number(m[1]) : null;
-  };
-  seedRecalc({ '핵 스쿼트': HACK_E1RM }, [hackSession(90, 8, 3)]);
-  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+test('[표시] 추천 카드 큰 숫자 = 남은 워킹세트 기준 최중량 (M-1)', () => {
+  seedRecalc([session('핵 스쿼트', 100, 7, 3)]);
+  const ex = startSession('핵 스쿼트');                  // 기본값 = 탑세트 [100, 90, 90]
+  app.state.setSchemeOpen = false;
+  assert.equal(cardWeight(app.renderWorkoutSession()), 100, '전제: 탑 100kg');
+
+  const top = workingSets(ex)[0];
+  top.completed = true; top.reps = 7;                    // 탑세트를 끝냈다
+  const toast = captureToast(() => app.applySetScheme('straight'));
+  const html = app.renderWorkoutSession();
+  const pending = ex.sets.filter((s) => !s.completed);
+  assert.equal(cardWeight(html), pending[0].weight, '카드와 남은 세트가 같은 값');
+  assert.equal(cardWeight(html), 95, '완료한 100kg이 아니라 이제부터 들 95kg');
+  assert.equal(toast, '스트레이트로 바꿨어요 — 95kg', '토스트도 같은 값');
+  assert.equal(cardLabel(html).text, '무게 낮추기');
+  endSession();
+});
+
+test('[표시] 통증·재활 라벨은 앰버다 — 라벨과 색이 같은 순서로 판정된다 (M-2)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 8, 3), session('핵 스쿼트', 90, 8, 6)]);
+  startSession('핵 스쿼트');
+  app.state.setSchemeOpen = false;
+  const before = cardLabel(app.renderWorkoutSession());
+  assert.deepEqual(before, { text: '도전 권장', color: 'var(--success)' }, '전제: 증량일은 초록');
+
+  // 세트는 95kg 그대로인데 통증이 기록된 상태 (세션 중 채팅·통증 체크)
+  seedLog([session('핵 스쿼트', 90, 8, 3, { painFlag: true }), session('핵 스쿼트', 90, 8, 6)]);
+  const after = cardLabel(app.renderWorkoutSession());
+  assert.equal(after.text, '통증 — 증량 보류');
+  assert.equal(after.color, 'var(--warn)', '경고는 var(--warn) — 초록으로 칠하지 않는다');
+  endSession();
+});
+
+test('[표시] 첫 시도(rm_estimate) 갈래도 같은 기준 세트를 쓴다 (M-5)', () => {
+  seedRecalc([], { '핵 스쿼트': 130 });
+  app.setSetSchemeOverride('핵 스쿼트', 'pyramid');
   const ex = startSession('핵 스쿼트');
   app.state.setSchemeOpen = false;
-
-  const before = app.renderWorkoutSession();
-  assert.equal(bigWeight(before), 90);
-  assert.ok(before.includes('동일 무게'), '전제: 지난 기록과 같은 무게로 시작한다');
-
-  captureToast(() => app.applySetScheme('top_backoff'));
-  const after = app.renderWorkoutSession();
-  assert.equal(bigWeight(after), 95, '탑세트 무게를 그대로 말해야 한다');
-  assert.equal(workingSets(ex)[0].weight, 95, '세트와 같은 값이어야 한다');
-  assert.equal(after.includes('동일 무게'), false, '무게가 바뀐 날 "동일 무게"라고 하면 안 된다');
-  assert.ok(after.includes('도전 권장'), '지난 기록보다 무거우면 도전 권장');
-
-  // 내려가는 전환에서도 카드가 따라간다
-  seedRecalc({ '핵 스쿼트': HACK_E1RM }, [hackSession(100, 8, 3)]);
-  const down = startSession('핵 스쿼트');   // 기본값 = 탑세트, 탑 100kg
-  app.state.setSchemeOpen = false;
-  captureToast(() => app.applySetScheme('straight'));
-  const downHtml = app.renderWorkoutSession();
-  assert.equal(bigWeight(downHtml), 95);
-  assert.equal(workingSets(down)[0].weight, 95);
-  assert.ok(downHtml.includes('무게 낮추기'));
-
-  app.state.activeSession = null;
-  seedRecalc({});
+  const html = app.renderWorkoutSession();
+  assert.ok(html.includes('첫 시도 추천'), '전제: 기록이 없는 첫 시도');
+  const w = weightsOf(ex);
+  assert.ok(w[0] < w[w.length - 1], '전제: 피라미드 = 오름 사다리');
+  assert.equal(cardWeight(html), app.hardestWeight('핵 스쿼트', w),
+    '첫 세트(가장 가벼운 세트)가 아니라 기준 세트를 말한다');
+  endSession();
 });

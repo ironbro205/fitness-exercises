@@ -2216,25 +2216,42 @@ function restoreSkippedSets(ex) {
   return true;
 }
 
+// 세트 배열 앞에서 워킹세트 n개를 덜어낸다 (워밍업·연장 세트는 개수에 넣지 않고 그대로 둔다).
+function dropLeadingWorkingSets(sets, n) {
+  var left = n;
+  if (!(left > 0)) return sets || [];
+  return (sets || []).filter(function(s) {
+    if (left > 0 && s && !s.isWarmup && !isSetExtension(s)) { left--; return false; }
+    return true;
+  });
+}
+
 // 진행 중인 종목의 **미완료 세트만** 현재 세트법 기준으로 다시 만든다 (완료한 기록은 그대로 보존).
 // opts.recalcWeight = true 면 기준 무게도 e1RM에서 다시 역산한다 — **세트법을 바꿀 때만** 켠다.
 // 종목 교체·되돌리기처럼 세트법이 그대로인 재구성에서 켜면, 손대지도 않은 무게가 조용히 바뀐다.
+//
+// 구성은 **원래 총 워킹세트 수**로 한 번에 만든 뒤, 이미 끝낸 개수만큼 앞에서 잘라낸 나머지를 배정한다.
+// 남은 개수만으로 만들면 램프가 처음부터 다시 펼쳐져, 두 세트를 끝낸 뒤 전환했을 때 그 세션 최고 무게인
+// 탑세트가 **완료 세트 뒤에** 새로 생긴다 (지친 상태에서 최고 무게 = 탑세트의 정의와 정반대).
 function rebuildPendingSets(ex, opts) {
   restoreSkippedSets(ex);   // 건너뛴 종목의 세트를 다시 짜면 건너뛰기는 자동으로 풀린다
   var doneSets = (ex.sets || []).filter(function(s) { return s.completed; });
-  var pendingWorking = (ex.sets || []).filter(function(s) {
-    return !s.completed && !s.isWarmup && !isSetExtension(s);
+  var doneWorking = doneSets.filter(function(s) {
+    return !s.isWarmup && !isSetExtension(s);
   }).length;
-  // pendingWorking이 0이면 본 세트를 이미 다 끝냈다는 뜻이다. 여기서 3으로 되돌리면
-  // "드롭만 남은 상태에서 스트레이트로 바꾸기"가 완료 3세트 뒤에 새 3세트를 덧붙인다.
+  var pendingWorking = pendingWorkingSets(ex).length;
+  // 총 세트 수는 **완료 + 남은** 개수다. 여기에 기본값 3을 쓰면 "드롭만 남은 상태에서
+  // 스트레이트로 바꾸기"가 완료 3세트 뒤에 새 3세트를 덧붙인다.
+  var anchorSet = pendingReferenceSet(ex);
   var plan = getSessionSetPlan(ex.name, ex.lastWeight, ex.targetReps, {
-    sets: pendingWorking,
+    sets: doneWorking + pendingWorking,
     warmup: doneSets.length === 0,  // 이미 시작한 종목에 워밍업을 새로 끼워 넣지 않는다
-    recalcWeight: !!(opts && opts.recalcWeight)
+    recalcWeight: !!(opts && opts.recalcWeight),
+    anchorWeight: anchorSet ? anchorSet.weight : null
   });
   ex.targetReps = repRangeToStr(plan.repRange);
   ex.scheme = plan.scheme;
-  ex.sets = doneSets.concat(plan.sets);
+  ex.sets = doneSets.concat(dropLeadingWorkingSets(plan.sets, doneWorking));
   return plan;
 }
 
@@ -2262,24 +2279,23 @@ window.closeSetSchemeSheet = function() {
   render();
 };
 
-// 세트법 전환 토스트 문구. 세트법마다 기준 무게를 다시 잡으므로(deriveSchemeSwitchWeight)
-// **바뀐 무게를 같이 알려야** 사용자가 바로 원판을 맞출 수 있다.
-// 무게를 모르는 종목(맨몸·미측정)은 붙일 숫자가 없으니 기존 문구 그대로.
-function schemeChangeToastText(exerciseName, requestedScheme, plan) {
+// 세트법 전환 토스트 문구. **실제로 바뀐 무게만** 말한다 —
+// 전환 전후로 들 무게가 같은데 숫자를 붙이면, 화면 어디에도 없는 수를 말하게 된다.
+// before/after = 전환 전후의 기준 세트(pendingReferenceSet) = 카드 큰 숫자와 같은 값.
+function schemeChangeToastText(exerciseName, requestedScheme, appliedScheme, beforeSet, afterSet) {
   // 무게를 모르는 종목에서는 감량 기반 스킴이 스트레이트로 접힌다 — 그때 "피라미드로 바꿨어요"라고
   // 알리면 화면(스트레이트)과 말이 어긋난다. **실제로 적용된 스킴**을 알린다.
-  var applied = (plan && plan.scheme) || requestedScheme;
+  var applied = appliedScheme || requestedScheme;
   var kr = (SET_SCHEMES[applied] && SET_SCHEMES[applied].kr) || '';
   if (applied !== requestedScheme) {
     return kr + '로 했어요 — 무게를 모르는 종목이라 감량을 못 해요';
   }
-  var w = plan ? plan.weight : null;
-  var reverse = isReverseProgression(exerciseName);
-  if (typeof w !== 'number' || (reverse ? w < 0 : w <= 0)) return kr + '로 바꿨어요';
+  var after = afterSet ? afterSet.weight : null;
+  var before = beforeSet ? beforeSet.weight : null;
+  if (typeof after !== 'number' || after === before) return kr + '로 바꿨어요';
   // 램프 스킴은 이 무게가 **탑세트** 무게다(나머지 단은 여기서 감량된다) → 어느 세트 값인지 밝힌다.
-  var hasTop = (plan.sets || []).some(function(s) { return s && s.role === 'top'; });
-  var label = reverse ? '보조 ' : (hasTop ? '탑 ' : '');
-  return kr + '로 바꿨어요 — ' + label + (Math.round(w * 10) / 10) + 'kg';
+  var label = isReverseProgression(exerciseName) ? '보조 ' : (afterSet.role === 'top' ? '탑 ' : '');
+  return kr + '로 바꿨어요 — ' + label + (Math.round(after * 10) / 10) + 'kg';
 }
 
 // 사용자가 세트법을 고름 — 종목별 override로 저장되어 다음 세션에도 유지된다.
@@ -2288,17 +2304,38 @@ window.applySetScheme = function(schemeId) {
   if (!session) return;
   var ex = session.exercises[session.currentExerciseIdx];
   if (!ex) return;
-  if (!setSetSchemeOverride(ex.name, schemeId)) {
+  // setSetSchemeOverride 와 같은 판정 (재활 잠금 · 없는 스킴 id). 아래 가드보다 먼저 걸러야
+  // 재활 종목이 "이미 쓰고 있어요"가 아니라 이유를 그대로 듣는다.
+  var rules = EXERCISE_CLASS_RULES[getExerciseClass(ex.name)];
+  if (rules.lockScheme || !SET_SCHEMES[schemeId]) {
     showToast('재활 종목은 세트법을 바꿀 수 없어요');
     return;
   }
+  // 시트는 지금 쓰는 세트법도 그대로 눌리게 둔다. 그걸 다시 눌렀을 때 세트를 새로 만들면
+  // 손수 고친 무게·자동 디로드가 조용히 날아간다 — 바뀐 게 없으면 아무것도 하지 않는다.
+  if (schemeId === getSetScheme(ex.name)) {
+    state.setSchemeOpen = false;
+    render();
+    showToast('이미 쓰고 있는 세트법이에요');
+    return;
+  }
+  // 남은 워킹세트가 없으면 바꿀 세트가 없다. 그래도 구성을 다시 만들면 완료 기록 위에
+  // 하지도 않은 세트법 머리글만 얹힌다.
+  if (!pendingWorkingSets(ex).length) {
+    state.setSchemeOpen = false;
+    render();
+    showToast('남은 세트가 없어요 — 다음 세션에 바꿔요');
+    return;
+  }
+  setSetSchemeOverride(ex.name, schemeId);
+  var before = pendingReferenceSet(ex);
   // 세트법을 바꾸는 이 순간이 기준 무게를 다시 잡는 **유일한** 지점이다 (다음 세션부터는
   // 기존 더블 프로그레션이 기록된 무게를 이어받는다).
   var plan = rebuildPendingSets(ex, { recalcWeight: true });
   state.setSchemeOpen = false;
   saveActiveSession();
   render();
-  showToast(schemeChangeToastText(ex.name, schemeId, plan));
+  showToast(schemeChangeToastText(ex.name, schemeId, plan.scheme, before, pendingReferenceSet(ex)));
 };
 
 // 슈퍼세트 제안 해제 (기구가 붐비거나 힘들 때 — 사용자 판단 존중)
@@ -3111,25 +3148,26 @@ function renderWorkoutSession() {
         var refs = [];
         var hasHead = false;
 
+        // ⚠️ 큰 숫자는 **지금부터 들 무게**다 — 남은 워킹세트 중 가장 어려운 세트(pendingReferenceSet).
+        // ① prog.weight 를 그대로 찍으면 "동일 무게 90kg" 카드 밑에 탑세트 95kg 세트가 깔리고,
+        // ② 완료 세트까지 섞으면 탑세트 100kg 을 끝낸 뒤 스트레이트로 바꿔도 카드가 100kg 에 멈춘다.
+        // 세트가 하나도 안 남았을 때만 추천값으로 돌아간다.
+        var refSet = pendingReferenceSet(exercise);
+
         if (prog && prog.source !== 'rm_estimate' && prog.previousWeight !== undefined) {
           // 실제 수행 기록이 있는 경우
-          // ⚠️ 큰 숫자는 **실제로 배정된 기준 세트 무게**다 (아래 rm_estimate 갈래와 같은 이유).
-          // 세트법을 바꾼 세션은 기준 무게를 다시 잡으므로(deriveSchemeSwitchWeight) prog.weight 를
-          // 그대로 찍으면 "동일 무게 90kg" 카드 밑에 탑세트 95kg 세트가 깔린다.
-          var workingWeights = (exercise.sets || []).filter(function(s) {
-            return !s.isWarmup && !isSetExtension(s) && typeof s.weight === 'number';
-          }).map(function(s) { return s.weight; });
-          // 기준 세트 = 가장 **어려운** 세트 (정방향=최대 무게 / 역방향=최소 보조).
-          var assigned = hardestWeight(exercise.name, workingWeights);
-          var shown = (assigned === null || assigned === undefined) ? prog.weight : assigned;
+          var shown = refSet ? refSet.weight : prog.weight;
 
           // 라벨·색은 추천 갈래가 아니라 **지난 기록과의 비교**로 정한다 — 그래야 세트법 전환처럼
           // 추천 갈래(maintain)와 실제 무게가 갈라지는 날에도 카드가 사실만 말한다.
           var heavier = isReverse ? (shown < prog.previousWeight) : (shown > prog.previousWeight);
           var lighter = isReverse ? (shown > prog.previousWeight) : (shown < prog.previousWeight);
           // 색은 세 갈래다: 나아가는 날(초록) · 멈춰 세우는 날(앰버, 통증·재활) · 그대로 가는 날(주황).
-          var color = (heavier || prog.graduated) ? 'var(--success)'
+          // **라벨과 같은 순서로 판정한다** — 어긋나면 "통증 — 증량 보류"가 초록으로 칠해진다
+          // (저장소 디자인 규칙: 경고는 var(--warn)).
+          var color = prog.graduated ? 'var(--success)'
             : (prog.source === 'rehab' || prog.painGated) ? 'var(--warn)'
+            : heavier ? 'var(--success)'
             : 'var(--accent)';
           var label = prog.graduated ? '맨몸 졸업'
             : prog.source === 'rehab' ? '재활 — 무게 유지'
@@ -3144,14 +3182,10 @@ function renderWorkoutSession() {
           refs.push('지난 기록 ' + unitPrefix + escapeHtml(prog.previousWeight) + 'kg' +
             (prevReps.length ? ' × ' + escapeHtml(prevReps.join('·')) + '회' : ''));
         } else if (prog && prog.source === 'rm_estimate') {
-          // 첫 시도 - 1RM 기반
-          // ⚠️ 카드와 세트가 어긋나지 않게 **실제로 배정된 첫 워킹세트 무게**를 보여준다.
-          // getSessionSetPlan은 rm_estimate일 때 템플릿/AI가 준 무게(fallbackWeight)를 우선하는데,
-          // 여기서 prog.weight(1RM 추정값)를 그대로 찍으면 "75kg 추천" 옆 세트가 60kg으로 뜬다.
-          var firstWorking = (exercise.sets || []).filter(function(s) {
-            return !s.isWarmup && !isSetExtension(s);
-          })[0];
-          var shownWeight = (firstWorking && firstWorking.weight) ? firstWorking.weight : prog.weight;
+          // 첫 시도 - 1RM 기반. 위와 **같은 기준 세트**를 쓴다 —
+          // 갈래마다 다른 세트를 찍으면 오름 사다리(피라미드)에서 카드는 첫 세트, 토스트는 탑세트를 말한다.
+          // 어시스트 맨몸(보조 0kg)은 falsy 지만 유효한 값이라 != null 로 본다.
+          var shownWeight = (refSet && refSet.weight != null) ? refSet.weight : prog.weight;
           html += '<p class="rm-label accent">첫 시도 추천</p>' +
             weightLine(shownWeight, null, 'var(--accent)');
           hasHead = true;
