@@ -9,7 +9,8 @@
 //  · 세트 생성 규칙은 코드가 아니라 SET_SCHEMES[].build 데이터에 있다 (v2 §4-A)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadApp } from './_harness.mjs';
+import fs from 'node:fs';
+import { loadApp, readAppSource } from './_harness.mjs';
 
 const app = loadApp();
 
@@ -1230,4 +1231,986 @@ test('[이관] init() 이 세션을 복원하기 전에 이관을 끝낸다 (앱
   app.storage.set(app.KEYS.ACTIVE_SESSION, null);
   resetOverrides();
   seedLog([]);
+});
+
+
+
+// ═══ 11. 세트법 전환 · 탑세트 무게 입력 (#72 3차 재설계) ═══
+// 배경: 세트법 버튼이 추정 1RM에서 무게를 다시 매기던 채널(deriveSchemeSwitchWeight)은 폐기했다.
+// 증량 엔진(더블 프로그레션)과 같은 무게를 서로 모르게 고쳐 써서, 처방대로 한 사용자가 감량되고
+// 게이트를 우회한 증량이 세션마다 쌓였다(2차 리뷰 #2·#3·#4·#5·#6·#12).
+//
+// 지금의 계약
+//  · 세트법 전환은 **무게를 건드리지 않는다.** 그 세션의 기준 세트 무게를 그대로 물려주고
+//    사다리(SET_SCHEMES[].build.steps 의 배율)만 새로 만든다.
+//  · 탑세트만 예외이고, 그것도 계산이 아니라 **질문**이다: 최근 실측을 미리 채운 입력 시트를 열고
+//    사용자가 확인을 눌러야 세트가 바뀐다. 취소하면 아무것도 안 바뀐다.
+//  · 기준 세트(sessionReferenceSet)는 **완료 여부를 보지 않는다** — 탑을 끝냈다고 카드가 뒤집히면 안 된다.
+//
+// 픽스처 주의(2차 리뷰 §6·§8): 옛 세션이 더 강한 로그·세트마다 무게가 다른 로그·일부 완료 상태를
+// 반드시 섞는다. 같은 세션만 쓰면 모든 값이 항등식이 되어 결함이 드러나지 않는다.
+// seedLog 는 _lastSetsCache 를 비운다 — 로그 길이가 같으면 캐시가 낡은 추천을 돌려준다.
+
+function seedRecalc(log, oneRm) {
+  resetOverrides();
+  app.storage.set(app.KEYS.ONE_RM_DATA, oneRm || {});
+  seedLog(log || []);
+}
+// 한 종목 한 세션 (워킹 3세트, 같은 무게·반복)
+function session(name, weight, reps, days, extra) {
+  return {
+    date: daysAgo(days), sessionType: 'legs',
+    exercises: [Object.assign({ name: name, setsDetail: [
+      set(weight, reps), set(weight, reps), set(weight, reps)
+    ] }, extra || {})]
+  };
+}
+// 세트마다 무게가 다른 세션 (탑 100×5 / 백오프 90×8 — 2차 §6 맹점 픽스처)
+function mixedSession(name, detail, days) {
+  return { date: daysAgo(days), sessionType: 'legs', exercises: [{ name: name, setsDetail: detail }] };
+}
+function startSession(name) {
+  app.state.restTimer = null;
+  app.state.editingSet = null;
+  app.state.sessionChatPending = null;
+  app.state.topSetSheet = null;
+  app.state.setSchemeOpen = true;
+  app.state.activeSession = {
+    sessionType: 'legs', sessionName: '테스트', startTime: Date.now() - 600000,
+    currentExerciseIdx: 0, exercises: [app.buildSessionExercise(name)]
+  };
+  return app.state.activeSession.exercises[0];
+}
+function endSession() {
+  app.state.activeSession = null;
+  app.state.setSchemeOpen = false;
+  app.state.topSetSheet = null;
+  seedRecalc([]);
+}
+const workingSets = (ex) => ex.sets.filter((s) => !s.isWarmup && !app.isSetExtension(s));
+const weightsOf = (ex) => workingSets(ex).map((s) => s.weight);
+const rolesOf = (ex) => ex.sets.filter((s) => !s.isWarmup).map((s) => s.role);
+// 토스트를 가로채 문구를 확인한다 (화면 대신)
+function captureToast(fn) {
+  const original = app.showToast;
+  let last = '';
+  app.showToast = (m) => { last = m; };
+  try { fn(); } finally { app.showToast = original; }
+  return last;
+}
+// 세트법 시트에서 한 항목을 누른다
+function tapScheme(id) {
+  app.state.setSchemeOpen = true;
+  return captureToast(() => app.applySetScheme(id));
+}
+// 탑세트를 눌러 시트를 연 뒤(입력값을 바꿔) 확인까지 누른다. weight 를 안 주면 미리 채운 값 그대로.
+function tapTopSet(weight) {
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  if (weight !== undefined && app.state.topSetSheet) app.state.topSetSheet.weight = weight;
+  return captureToast(() => app.confirmTopSetWeight());
+}
+const cardWeight = (html) => {
+  const m = html.match(/rm-weight-now">([\d.]+)</);
+  return m ? Number(m[1]) : null;
+};
+const cardLabel = (html) => {
+  const m = html.match(/<p class="rm-label" style="color: ([^"]+);">([^<]+)</);
+  return m ? { text: m[2], color: m[1] } : null;
+};
+
+// ── A. 역산 채널 제거 ─────────────────────────────────────
+
+test('[제거] 추정 1RM 역산 채널이 코드에 남아 있지 않다', () => {
+  // 되살아나면 증량 엔진과 다시 충돌한다 — 이름만 남은 배관도 금지한다.
+  assert.equal(typeof app.deriveSchemeSwitchWeight, 'undefined');
+  assert.equal(typeof app.schemeReferenceRir, 'undefined');
+  assert.equal(typeof app.rirMidpoint, 'undefined');
+  const plan = app.getSessionSetPlan('핵 스쿼트', null, '5-8', { sets: 3, warmup: false });
+  assert.equal(plan.recalculatedWeight, undefined, '죽은 필드도 남기지 않는다');
+});
+
+test('[불변] 세트법을 바꿔도 기준 무게는 그대로다 — 다섯 세트법 전부', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);          // 상단 미달 → 유지일
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex = startSession('핵 스쿼트');
+  assert.deepEqual([...weightsOf(ex)], [90, 90, 90], '전제: 스트레이트 90kg 3세트');
+
+  ['pyramid', 'rpt', 'drop', 'straight'].forEach((id) => {
+    tapScheme(id);
+    assert.equal(app.hardestWeight('핵 스쿼트', weightsOf(ex)), 90, id + ' 에서 기준 무게가 흔들렸다');
+  });
+  // 사다리는 세트법마다 다르게 남는다 — 강도차는 무게가 아니라 구성이 만든다
+  tapScheme('pyramid');
+  const pyr = weightsOf(ex);
+  assert.ok(pyr[0] < pyr[pyr.length - 1], '피라미드는 오름 사다리');
+  assert.equal(workingSets(ex)[workingSets(ex).length - 1].role, 'top', '피라미드는 마지막이 탑');
+  tapScheme('rpt');
+  const rpt = weightsOf(ex);
+  assert.ok(rpt[0] > rpt[rpt.length - 1], '역피라미드는 내림 사다리');
+  assert.equal(workingSets(ex)[0].role, 'top', '역피라미드는 첫 세트가 탑');
+  endSession();
+});
+
+test('[불변] 세트마다 무게가 다른 로그에서도 기준 무게가 안 내려간다 (2차 #2)', () => {
+  // 탑 100×5 / 백오프 90×8 을 그대로 따른 사용자. 옛 역산은 e1RM(탑)과 반복(백오프)을 섞어
+  // 90kg 으로 깎았다 — 세션 안에서 복구 불가, 다음 세션 previousWeight 까지 90 으로 굳었다.
+  const detail = [set(100, 5), set(90, 8), set(90, 8)];
+  seedRecalc([mixedSession('핵 스쿼트', detail, 3), mixedSession('핵 스쿼트', detail, 10)]);
+  const ex = startSession('핵 스쿼트');                   // 기본값 = 탑세트
+  assert.equal(app.hardestWeight('핵 스쿼트', weightsOf(ex)), 100, '전제: 탑 100kg');
+
+  tapScheme('straight');
+  assert.deepEqual([...weightsOf(ex)], [100, 100, 100], '스트레이트는 기준 무게를 그대로 쓴다');
+  tapScheme('rpt');
+  assert.equal(weightsOf(ex)[0], 100, '역피라미드도 탑은 100kg');
+  endSession();
+});
+
+test('[불변] 옛 세션이 더 강해도 전환이 증량하지 않는다 (2차 #3 래칫)', () => {
+  // 10일 전 90×8(e1RM 114) · 3일 전 90×6 → 엔진 판정은 maintain 90.
+  // 옛 역산은 "4세션 최대 e1RM ÷ 직전 세션 반복" 이라 전 세트를 95kg 으로 올렸다.
+  seedRecalc([session('핵 스쿼트', 90, 6, 3), session('핵 스쿼트', 90, 8, 10)]);
+  assert.equal(app.getProgressiveRecommendation('핵 스쿼트', '5-8').weight, 90, '전제: 유지일');
+  const ex = startSession('핵 스쿼트');
+  assert.equal(app.hardestWeight('핵 스쿼트', weightsOf(ex)), 90);
+
+  ['straight', 'pyramid', 'rpt', 'straight'].forEach((id) => {
+    tapScheme(id);
+    assert.equal(app.hardestWeight('핵 스쿼트', weightsOf(ex)), 90, id + ' 에서 증량이 새어 나왔다');
+  });
+  endSession();
+});
+
+test('[불변] 손수 고친 무게가 전환으로 사라지지 않는다 (2차 #4)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  let ex = startSession('핵 스쿼트');
+  app.state.setSchemeOpen = false;
+  workingSets(ex).forEach((s) => { s.weight = 100; });    // 손수 올림
+  tapScheme('pyramid');
+  assert.equal(app.hardestWeight('핵 스쿼트', weightsOf(ex)), 100, '올린 무게가 그대로 남는다');
+
+  seedRecalc([session('레그 익스텐션', 60, 15, 3)]);
+  ex = startSession('레그 익스텐션');
+  app.state.setSchemeOpen = false;
+  workingSets(ex).forEach((s) => { s.weight = 20; });     // 컨디션이 나빠 손수 내림
+  tapScheme('drop');
+  assert.deepEqual([...weightsOf(ex)], [20, 20, 20], '내린 무게도 그대로다 (옛 PR은 30으로 리셋)');
+  const drops = ex.sets.filter((s) => app.isSetExtension(s));
+  assert.ok(drops.length === 2 && drops[0].weight < 20, '드롭은 그 무게에서 이어진다');
+  endSession();
+});
+
+test('[불변] 경량 고립에 저반복 기록이 섞여도 무게를 외삽하지 않는다 (2차 #6)', () => {
+  // 사이드 레터럴 10kg×20(상한 초과) + 16kg×10(포함) — 옛 역산은 이 e1RM 을 20회로 외삽했다.
+  seedRecalc([mixedSession('덤벨 사이드 레터럴 레이즈',
+    [set(10, 20), set(16, 10), set(10, 20)], 3)]);
+  const ex = startSession('덤벨 사이드 레터럴 레이즈');
+  const before = app.hardestWeight('덤벨 사이드 레터럴 레이즈', weightsOf(ex));
+  tapScheme('pyramid');
+  assert.equal(app.hardestWeight('덤벨 사이드 레터럴 레이즈', weightsOf(ex)), before,
+    '기준 무게가 그대로여야 한다');
+  assert.ok(weightsOf(ex).every((w) => w % 2 === 0), '덤벨 2kg 격자 위에 떨어진다');
+  endSession();
+});
+
+test('[불변] 세트를 일부 끝낸 뒤 왕복해도 무게가 내려가지 않는다 (2차 #12)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  const ex = startSession('핵 스쿼트');                   // 탑세트 [90, 80, 80]
+  app.state.setSchemeOpen = false;
+  assert.deepEqual([...weightsOf(ex)], [90, 80, 80]);
+  workingSets(ex)[0].completed = true;                    // 탑 완료 — 남은 최중량은 80이다
+  workingSets(ex)[0].reps = 7;
+
+  tapScheme('straight');
+  assert.equal(app.hardestWeight('핵 스쿼트', weightsOf(ex)), 90, '기준은 완료한 탑세트(90)다');
+  tapScheme('rpt');
+  assert.equal(app.hardestWeight('핵 스쿼트', weightsOf(ex)), 90, '두 번째 왕복도 90 그대로');
+  endSession();
+});
+
+test('[불변] 어시스트·재활도 전환이 보조 무게를 되돌리지 않는다 (2차 #5)', () => {
+  seedRecalc([session('어시스트 풀업', 30, 8, 3)]);
+  const ex = startSession('어시스트 풀업');
+  app.state.setSchemeOpen = false;
+  workingSets(ex).forEach((s) => { s.weight = 40; });     // 보조를 더 줘 쉽게 해 둔 상태
+  tapScheme('straight');
+  assert.deepEqual([...weightsOf(ex)], [40, 40, 40], '보조 40kg 이 그대로 남는다');
+  endSession();
+
+  seedRecalc([session('페이스 풀', 20, 15, 3)]);
+  const rehab = startSession('페이스 풀');
+  const toast = tapScheme('drop');
+  assert.equal(toast, '재활 종목은 세트법을 바꿀 수 없어요');
+  assert.equal(app.sessionSchemeOf(rehab), 'straight');
+  endSession();
+});
+
+// ── B. 탑세트 무게 입력 시트 ──────────────────────────────
+
+test('[탑세트] 스트레이트에서 탭하면 오늘 쓰는 무게가 미리 채워진다 (3차 H3)', () => {
+  // 이 기능의 **주 사용 흐름**: 스트레이트로 시작한 종목에서 '탑세트'를 고른다.
+  // 3일 전 90kg, 10일 전 100kg — 지난 실측 최고는 100 이지만 오늘 세션이 쓰는 무게는 90 이다.
+  // 지난 실측을 집으면 다른 세트법 전환(전부 그 세션 무게를 물려받는다)과 혼자 어긋난다.
+  seedRecalc([session('핵 스쿼트', 90, 7, 3), session('핵 스쿼트', 100, 5, 10)]);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex = startSession('핵 스쿼트');
+  assert.equal(app.recentTopWeight('핵 스쿼트'), 100, '전제: 지난 실측 최고는 100');
+
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  assert.ok(app.state.topSetSheet, '시트가 열린다');
+  assert.equal(app.state.topSetSheet.weight, 90, '미리 채운 값 = 오늘 이 세션의 기준 세트');
+  assert.equal(app.state.topSetSheet.source, 'session');
+  assert.equal(app.state.topSetSheet.exName, '핵 스쿼트', '대상 종목을 못박는다');
+  assert.equal(app.state.setSchemeOpen, false, '세트법 시트는 닫힌다');
+  assert.equal(app.sessionSchemeOf(ex), 'straight', '확인 전에는 세트법이 안 바뀐다');
+  assert.deepEqual([...weightsOf(ex)], [90, 90, 90], '확인 전에는 세트도 안 바뀐다');
+  endSession();
+});
+
+test('[탑세트] 손수 올린 무게·증량일의 새 무게가 프리필에 그대로 산다 (3차 H3)', () => {
+  // (a) 손수 올린 무게 — 옛 코드는 지난 세션 실측(90)으로 되돌려 −20kg 였다
+  seedRecalc([session('벤치 프레스', 90, 7, 3)]);
+  app.setSetSchemeOverride('벤치 프레스', 'straight');
+  let ex = startSession('벤치 프레스');
+  app.state.setSchemeOpen = false;
+  workingSets(ex).forEach((s) => { s.weight = 110; });
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  assert.equal(app.state.topSetSheet.weight, 110, '손수 올린 110 이 그대로');
+  captureToast(() => app.confirmTopSetWeight());
+  assert.equal(app.hardestWeight('벤치 프레스', weightsOf(ex)), 110, '탑이 110 으로 선다');
+  endSession();
+
+  // (b) 증량일 — 무게만 지난 세션 값으로 되돌아가면 더블 프로그레션 게이트가 얼어붙는다
+  seedRecalc([session('핵 스쿼트', 100, 8, 3), session('핵 스쿼트', 100, 8, 10)]);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  ex = startSession('핵 스쿼트');
+  assert.equal(app.hardestWeight('핵 스쿼트', weightsOf(ex)), 105, '전제: 2세션 상단 달성 → 105');
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  assert.equal(app.state.topSetSheet.weight, 105, '증량된 105 가 미리 채워진다 (옛 코드는 100)');
+  endSession();
+});
+
+test('[탑세트] 오늘 세트에 무게가 없을 때만 지난 실측으로 내려간다', () => {
+  // 직전 세션이 반복 0(기록만 남고 수행 안 함) → 추천 엔진이 무게를 못 낸다 → 오늘 세트도 무게 미상.
+  // 그때 비로소 최근 4세션 실측(100kg)이 프리필이 된다.
+  seedRecalc([
+    mixedSession('핵 스쿼트', [set(100, 0), set(100, 0), set(100, 0)], 3),
+    session('핵 스쿼트', 100, 8, 10)
+  ]);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex = startSession('핵 스쿼트');
+  assert.equal(weightsOf(ex)[0], null, '전제: 오늘 세트는 무게 미상');
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  assert.equal(app.state.topSetSheet.source, 'recent');
+  assert.equal(app.state.topSetSheet.weight, 100);
+  endSession();
+});
+
+test('[탑세트] 통증으로 잠긴 종목은 프리필이 처방을 넘지 못한다 (3차 H1)', () => {
+  // 3일 전 통증 기록(80kg) · 12일 전 95kg → 엔진은 painGated maintain 80.
+  // 옛 코드는 "최근 4세션 실측 최고"만 봐서 통증 이전 세션의 95를 미리 채웠다 —
+  // "통증 — 증량 보류" 카드 밑에 80 → 95 증량 화살표가 뜨는 경로였다.
+  seedRecalc([
+    session('벤치 프레스', 80, 8, 3, { painFlag: true }),
+    session('벤치 프레스', 95, 6, 12)
+  ]);
+  app.setSetSchemeOverride('벤치 프레스', 'straight');
+  const ex = startSession('벤치 프레스');
+  const prog = app.getProgressiveRecommendation('벤치 프레스', ex.targetReps);
+  assert.equal(prog.painGated, true, '전제: 통증 게이트가 걸렸다');
+  assert.equal(app.recentTopWeight('벤치 프레스'), 95, '전제: 지난 실측 최고는 95');
+
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  assert.equal(app.state.topSetSheet.weight, prog.weight, '처방(80)까지만 채운다');
+  assert.ok(app.state.topSetSheet.weight < 95, '통증 이전 세션의 무게로 올라가지 않는다');
+
+  // 확인해도 카드가 "증량 보류"라 말하면서 증량 화살표를 그리지 않는다
+  captureToast(() => app.confirmTopSetWeight());
+  const card = cardLabel(app.renderWorkoutSession());
+  assert.equal(card.text, '통증 — 증량 보류');
+  assert.equal(cardWeight(app.renderWorkoutSession()), prog.weight, '카드 숫자도 처방 그대로');
+  endSession();
+});
+
+test('[탑세트] 지난 실측 갈래도 통증 게이트에 클램프된다 (3차 H1 · 갈래 단위)', () => {
+  // 위 경로는 오늘 세트 무게(=처방)가 먼저 잡혀 안전하다. 그 아래 갈래(지난 실측)도 같은 상한을
+  // 지키는지 직접 확인한다 — 무게를 모르는 상태로 이 갈래에 들어오는 경우의 안전망이다.
+  seedRecalc([
+    session('벤치 프레스', 80, 8, 3, { painFlag: true }),
+    session('벤치 프레스', 95, 6, 12)
+  ]);
+  app.setSetSchemeOverride('벤치 프레스', 'straight');
+  const ex = startSession('벤치 프레스');
+  const prog = app.getProgressiveRecommendation('벤치 프레스', ex.targetReps);
+  workingSets(ex).forEach((s) => { s.weight = null; });     // 기준 세트 갈래를 비운다
+  assert.equal(app.sessionReferenceSet(ex), null);
+
+  const pre = app.topSetPrefill(ex);
+  assert.equal(pre.source, 'recent', '전제: 지난 실측 갈래로 내려왔다');
+  assert.equal(pre.weight, prog.weight, '95가 아니라 처방(80)으로 잘린다');
+  endSession();
+});
+
+test('[탑세트] 취소하면 아무것도 바뀌지 않는다', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex = startSession('핵 스쿼트');
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  app.state.topSetSheet.weight = 120;                     // 만졌다가
+  app.closeTopSetWeightSheet();                           // 취소
+  assert.equal(app.state.topSetSheet, null);
+  assert.equal(app.getSetScheme('핵 스쿼트'), 'straight', '선택도 저장되지 않는다');
+  assert.deepEqual([...weightsOf(ex)], [90, 90, 90]);
+  endSession();
+});
+
+test('[탑세트] 확인하면 웜업 → 피더 → 탑 → 백오프로 구성된다', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex = startSession('핵 스쿼트');
+  const toast = tapTopSet(95);
+
+  assert.equal(app.sessionSchemeOf(ex), 'top_backoff');
+  assert.deepEqual([...rolesOf(ex)], ['top', 'backoff', 'backoff']);
+  assert.deepEqual([...weightsOf(ex)], [95, 85, 85], '백오프 = 탑의 90% (95×0.9=85.5 → 5kg 격자)');
+  assert.equal(workingSets(ex)[0].rir, '1-2', '탑은 RIR 1~2');
+  assert.equal(workingSets(ex)[1].pct, app.BACKOFF_PCT, '화면에 적히는 명목 배율은 90%');
+
+  const warmups = ex.sets.filter((s) => s.isWarmup);
+  const feeder = warmups[warmups.length - 1];
+  assert.equal(feeder.weight, app.reduceWeight(95, app.FEEDER_PCT, '핵 스쿼트'), '피더 = 탑의 90%');
+  assert.equal(feeder.reps, app.FEEDER_REPS);
+  assert.ok(warmups.length >= 2 && warmups[0].weight < feeder.weight, '웜업 램프가 피더 앞에 온다');
+  assert.equal(toast, '탑세트로 바꿨어요 — 탑 95kg');
+  endSession();
+});
+
+test('[탑세트] 이미 탑세트면 같은 시트가 탑 무게 수정용으로 열린다', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  const ex = startSession('핵 스쿼트');                   // 기본값 = 탑세트 [90, 80, 80]
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  assert.equal(app.state.topSetSheet.weight, 90, '지금 탑 무게가 미리 채워진다');
+  assert.equal(app.state.topSetSheet.source, 'current');
+
+  app.state.topSetSheet.weight = 100;
+  const toast = captureToast(() => app.confirmTopSetWeight());
+  assert.deepEqual([...weightsOf(ex)], [100, 90, 90], '탑을 고치면 백오프도 따라간다');
+  assert.equal(toast, '탑세트로 바꿨어요 — 탑 100kg');
+  endSession();
+});
+
+test('[탑세트] 다른 세트법을 다시 누르면 아무것도 안 바뀐다 (실제 적용값 기준)', () => {
+  seedRecalc([session('레그 프레스', 100, 10, 3)]);
+  const ex = startSession('레그 프레스');                  // 중강도 복합 = 스트레이트
+  assert.equal(app.sessionSchemeOf(ex), 'straight');
+  const before = [...weightsOf(ex)];
+  const toast = tapScheme('straight');
+  assert.equal(toast, '이미 쓰고 있는 세트법이에요');
+  assert.deepEqual([...weightsOf(ex)], before);
+  endSession();
+});
+
+test('[탑세트] 실측도 추천도 없으면 빈 칸 + 확인 불가 (없던 무게를 만들지 않는다)', () => {
+  seedRecalc([]);
+  const ex = startSession('사장님표 특수 운동');            // 기록 없음 · 1RM 없음
+  assert.equal(weightsOf(ex)[0], null, '전제: 무게 미상');
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  assert.equal(app.state.topSetSheet.weight, null);
+  assert.equal(app.state.topSetSheet.source, 'none');
+  assert.equal(app.topSetWeightValid(), false, '확인 버튼이 잠긴다');
+  captureToast(() => app.confirmTopSetWeight());
+  assert.equal(weightsOf(ex)[0], null, '확인을 눌러도 무게가 생기지 않는다');
+  endSession();
+
+  // 맨몸으로만 기록해 온 종목도 같다 — 0kg 기록은 "맨몸으로 했다"는 뜻이지 탑 무게가 아니다
+  seedRecalc([mixedSession('딥스', [set(0, 10), set(0, 9), set(0, 8)], 3)], { '딥스': 100 });
+  const dips = startSession('딥스');
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  assert.equal(app.state.topSetSheet.weight, null);
+  assert.equal(app.topSetWeightValid(), false);
+  assert.equal(weightsOf(dips)[0], null);
+  endSession();
+});
+
+test('[탑세트] 첫 시도 종목은 화면에 이미 있는 추천 무게가 미리 채워진다', () => {
+  seedRecalc([], { '핵 스쿼트': 130 });                    // 기록 없음 → rm_estimate 갈래
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex = startSession('핵 스쿼트');
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  // 그 추천값은 이미 오늘 세트에 깔려 있다 → 기준 세트 갈래로 잡힌다(같은 숫자, 더 이른 갈래).
+  assert.equal(app.state.topSetSheet.source, 'session');
+  assert.equal(app.state.topSetSheet.weight, weightsOf(ex)[0], '화면에 이미 있는 무게와 같다');
+  endSession();
+});
+
+test('[탑세트] 스텝퍼·직접 입력은 그 종목 장비 격자로 스냅된다', () => {
+  seedRecalc([session('덤벨 벤치 프레스', 20, 8, 3)]);
+  startSession('덤벨 벤치 프레스');
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  const start = app.state.topSetSheet.weight;
+  app.adjustTopSetWeight(2);
+  assert.equal(app.state.topSetSheet.weight, start + 2, '덤벨은 2kg 단위');
+  app.adjustTopSetWeight(-4);
+  assert.equal(app.state.topSetSheet.weight, start - 2);
+  // 직접 입력은 격자로 반올림한다 (실행 불가 무게·오타 방지)
+  app.state.topSetSheet.weight = app.snapWeightToEquipment(17.4, '덤벨 벤치 프레스');
+  assert.equal(app.state.topSetSheet.weight, 18);
+  // 0kg 아래로는 안 내려가고, 정방향 종목은 0kg 을 확인할 수 없다
+  app.adjustTopSetWeight(-100);
+  assert.equal(app.state.topSetSheet.weight, 0);
+  assert.equal(app.topSetWeightValid(), false);
+  endSession();
+});
+
+test('[탑세트] 운동 중 전환 — 탑세트가 사라지지 않는다 (2차 #7)', () => {
+  seedRecalc([session('핵 스쿼트', 95, 7, 3)]);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex = startSession('핵 스쿼트');
+  app.state.setSchemeOpen = false;
+  workingSets(ex)[0].completed = true;                    // 1세트 완료 (스트레이트 95)
+  workingSets(ex)[0].reps = 7;
+  const warmupsBefore = ex.sets.filter((s) => s.isWarmup).length;
+
+  tapTopSet(95);
+  const pending = workingSets(ex).filter((s) => !s.completed);
+  assert.ok(pending.some((s) => s.role === 'top'), '남은 세트에 탑이 있다 (옛 PR은 통째로 삭제했다)');
+  assert.equal(pending[0].role, 'top', '탑이 먼저다');
+  assert.equal(ex.sets.filter((s) => s.isWarmup).length, warmupsBefore,
+    '이미 시작한 종목에 웜업을 새로 끼우지 않는다 (남은 건 그대로)');
+  endSession();
+});
+
+test('[탑세트] 탑을 이미 끝냈으면 남은 자리에 탑을 또 만들지 않는다', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  const ex = startSession('핵 스쿼트');                   // 탑세트 [90, 80, 80]
+  app.state.setSchemeOpen = false;
+  workingSets(ex)[0].completed = true;
+  workingSets(ex)[0].reps = 7;
+
+  tapScheme('straight');                                  // 다른 세트법으로 갔다가
+  tapTopSet(90);                                          // 다시 탑세트로 돌아온다
+  const tops = ex.sets.filter((s) => s.role === 'top' && !s.isWarmup);
+  assert.equal(tops.length, 1, '한 종목에 탑은 하나다 (뱃지·자동 디로드·PR 판정이 이걸 읽는다)');
+  assert.equal(tops[0].completed, true, '남은 건 방금 한 그 탑이다');
+  endSession();
+});
+
+test('[탑세트] 입력 무게는 그 세션에만 남는다 (저장 키를 새로 만들지 않는다)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex = startSession('핵 스쿼트');
+  const keysBefore = Object.keys(app.KEYS).length;
+  tapTopSet(105);
+  assert.equal(weightsOf(ex)[0], 105);
+  assert.equal(Object.keys(app.KEYS).length, keysBefore, '저장 키가 늘지 않는다');
+  // 다음 세션은 기록(setsDetail)에서 나온 더블 프로그레션이 이어받는다 — 입력값이 따로 살아남지 않는다
+  const next = app.getSessionSetPlan('핵 스쿼트', null, '5-8', { sets: 3, warmup: false });
+  assert.equal(next.weight, 90, '로그가 그대로면 다음 계획도 그대로다');
+  endSession();
+});
+
+// ── C. 표시·가드·되돌리기 ─────────────────────────────────
+
+test('[표시] 탑세트를 끝내도 카드가 "무게 낮추기"로 뒤집히지 않는다 (2차 #1)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 8, 3), session('핵 스쿼트', 90, 8, 10)]);
+  const ex = startSession('핵 스쿼트');                   // 증량일 → [95, 85, 85]
+  app.state.setSchemeOpen = false;
+  assert.deepEqual([...weightsOf(ex)], [95, 85, 85]);
+
+  const before = app.renderWorkoutSession();
+  assert.equal(cardWeight(before), 95);
+  assert.equal(cardLabel(before).text, '도전 권장');
+
+  workingSets(ex)[0].completed = true;                    // 탑 완료
+  workingSets(ex)[0].reps = 5;
+  const afterTop = app.renderWorkoutSession();
+  assert.equal(cardWeight(afterTop), 95, '기준 세트는 완료해도 그대로다');
+  assert.equal(cardLabel(afterTop).text, '도전 권장');
+  assert.equal(cardLabel(afterTop).color, 'var(--success)');
+
+  workingSets(ex)[1].completed = true;                    // 백오프까지 완료
+  workingSets(ex)[1].reps = 8;
+  assert.equal(cardWeight(app.renderWorkoutSession()), 95);
+  endSession();
+});
+
+test('[표시] 첫 시도 갈래도 세트를 다 끝내면 튀지 않는다 (2차 #14)', () => {
+  seedRecalc([], { '핵 스쿼트': 130 });
+  const ex = startSession('핵 스쿼트');
+  app.state.setSchemeOpen = false;
+  const shown = cardWeight(app.renderWorkoutSession());
+  assert.equal(shown, app.hardestWeight('핵 스쿼트', weightsOf(ex)), '카드 = 배정된 기준 세트');
+  workingSets(ex).forEach((s) => { s.completed = true; s.reps = 8; });
+  assert.equal(cardWeight(app.renderWorkoutSession()), shown, '다 끝내도 1RM 추정값으로 튀지 않는다');
+  endSession();
+});
+
+test('[표시] 통증·재활 라벨은 앰버다 (라벨과 색이 같은 순서로 판정된다)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 8, 3, { painFlag: true }), session('핵 스쿼트', 90, 8, 10)]);
+  startSession('핵 스쿼트');
+  app.state.setSchemeOpen = false;
+  const pain = cardLabel(app.renderWorkoutSession());
+  assert.equal(pain.text, '통증 — 증량 보류');
+  assert.equal(pain.color, 'var(--warn)');
+  endSession();
+
+  seedRecalc([session('페이스 풀', 20, 15, 3)]);
+  startSession('페이스 풀');
+  app.state.setSchemeOpen = false;
+  const rehab = cardLabel(app.renderWorkoutSession());
+  assert.equal(rehab.text, '재활 — 무게 유지');
+  assert.equal(rehab.color, 'var(--warn)');
+  endSession();
+});
+
+test('[가드] 본 세트를 다 끝낸 뒤에도 드롭은 붙는다 (2차 #9)', () => {
+  seedRecalc([session('레그 익스텐션', 45, 15, 3)]);
+  const ex = startSession('레그 익스텐션');
+  app.state.setSchemeOpen = false;
+  const base = weightsOf(ex)[0];
+  workingSets(ex).forEach((s) => { s.completed = true; s.reps = 15; });
+
+  const toast = tapScheme('drop');
+  const drops = ex.sets.filter((s) => app.isSetExtension(s));
+  assert.equal(drops.length, 2, '드롭 2단이 붙는다');
+  assert.ok(drops[0].weight < base && drops[1].weight < drops[0].weight, '직전 세트에서 −25%씩');
+  assert.equal(app.getSetScheme('레그 익스텐션'), 'drop', '선택도 저장된다');
+  assert.equal(toast, '드롭세트로 바꿨어요');
+  endSession();
+});
+
+test('[가드] 남은 세트가 없는 다른 세트법은 선택만 저장하고 알린다 (2차 #9)', () => {
+  seedRecalc([session('레그 프레스', 100, 10, 3)]);
+  const ex = startSession('레그 프레스');
+  app.state.setSchemeOpen = false;
+  workingSets(ex).forEach((s) => { s.completed = true; s.reps = 10; });
+  const done = [...weightsOf(ex)];
+
+  const toast = tapScheme('pyramid');
+  assert.equal(app.getSetScheme('레그 프레스'), 'pyramid', '선택은 저장된다 (옛 PR은 버렸다)');
+  assert.deepEqual([...weightsOf(ex)], done, '완료 기록 위에 새 세트를 얹지 않는다');
+  assert.equal(toast, '남은 세트가 없어요 — 다음 세션부터 피라미드예요');
+  endSession();
+});
+
+test('[가드] 무게가 생기면 접혔던 세트법을 복구할 수 있다 (2차 #8)', () => {
+  seedRecalc([session('덤벨 컬', 4, 12, 3)]);
+  app.setSetSchemeOverride('덤벨 컬', 'pyramid');
+  const ex = startSession('덤벨 컬');
+  app.state.setSchemeOpen = false;
+  assert.equal(app.getSetScheme('덤벨 컬'), 'pyramid', '저장된 선택은 피라미드인데');
+  assert.equal(app.sessionSchemeOf(ex), 'straight', '4kg 은 내릴 자리가 없어 스트레이트로 접혔다');
+
+  workingSets(ex).forEach((s) => { s.weight = 12; });     // 무게가 생겼다
+  tapScheme('pyramid');
+  assert.equal(app.sessionSchemeOf(ex), 'pyramid', '이제 실제로 적용된다');
+  assert.equal(app.hardestWeight('덤벨 컬', weightsOf(ex)), 12);
+  endSession();
+});
+
+test('[가드] 건너뛴 종목은 세트법 변경으로 조용히 되살아나지 않는다 (2차 #13)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  const ex = startSession('핵 스쿼트');
+  app.state.setSchemeOpen = false;
+  app.applySkipExercise(0);
+  app.state.activeSession.currentExerciseIdx = 0;
+  assert.equal(ex.skipped, true);
+
+  tapScheme('straight');
+  assert.equal(ex.skipped, true, '확인을 거치기 전에는 그대로 건너뛴 상태다');
+  assert.equal(ex.sets.filter((s) => !s.completed).length, 0);
+  // 카드도 떼어 둔 세트의 숫자를 말하지 않는다
+  assert.equal(cardWeight(app.renderWorkoutSession()),
+    app.getProgressiveRecommendation('핵 스쿼트', '5-8').weight);
+  endSession();
+});
+
+test('[되돌리기] 세트법을 왕복해도 자동 디로드를 되돌릴 수 있다 (2차 #11)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  const ex = startSession('핵 스쿼트');                   // 탑세트 [90, 80, 80]
+  app.state.setSchemeOpen = false;
+  let top = workingSets(ex)[0];
+  top.completed = true;
+  top.reps = 4;                                            // 목표(7회) 미달 → 백오프 한 스텝 더 내린다
+  assert.equal(app.applyTopSetAutoDeload(ex), 2);
+  assert.deepEqual([...weightsOf(ex)], [90, 75, 75]);
+  assert.equal(workingSets(ex)[1].autoDeloaded, true);
+
+  tapScheme('straight');
+  tapTopSet(90);                                           // 왕복
+  assert.deepEqual([...weightsOf(ex)], [90, 75, 75], '디로드한 무게가 살아남는다');
+  assert.equal(workingSets(ex)[1].autoDeloaded, true, '표식도 살아남는다');
+
+  // 반복 수를 정정하면 디로드가 풀린다 (양방향 멱등)
+  ex.sets.filter((s) => s.role === 'top')[0].reps = 7;
+  assert.equal(app.applyTopSetAutoDeload(ex), 2);
+  assert.deepEqual([...weightsOf(ex)], [90, 80, 80], '평소 백오프로 복원된다');
+  endSession();
+});
+
+test('[되돌리기] 미완료 워밍업은 세트법을 바꿔도 사라지지 않는다 (2차 #17)', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  const ex = startSession('핵 스쿼트');
+  app.state.setSchemeOpen = false;
+  const warmups = ex.sets.filter((s) => s.isWarmup).length;
+  assert.ok(warmups >= 2, '전제: 워밍업 2개 이상');
+  ex.sets.filter((s) => s.isWarmup)[0].completed = true;
+
+  tapScheme('pyramid');
+  assert.equal(ex.sets.filter((s) => s.isWarmup).length, warmups, '남은 워밍업이 그대로 있다');
+  assert.equal(ex.sets.filter((s) => s.isWarmup && s.completed).length, 1);
+  endSession();
+});
+
+test('[교체] 종목 교체·건너뛰기 되돌리기도 같은 재구성 규칙을 쓴다 (2차 #10)', () => {
+  seedRecalc([session('레그 프레스', 100, 10, 3), session('핵 스쿼트', 90, 7, 3)]);
+  const ex = startSession('레그 프레스');
+  app.state.setSchemeOpen = false;
+  workingSets(ex).slice(0, 2).forEach((s) => { s.completed = true; s.reps = 10; });
+
+  app.state.exerciseSwapOpen = true;
+  captureToast(() => app.applyExerciseSwap(ex, '핵 스쿼트'));
+  assert.equal(ex.name, '핵 스쿼트');
+  assert.equal(app.sessionSchemeOf(ex), 'top_backoff');
+  const pending = workingSets(ex).filter((s) => !s.completed);
+  assert.equal(pending.length, 1, '남은 세트 수는 그대로');
+  assert.equal(pending[0].role, 'top', '자리가 하나면 핵심 세트(탑)를 남긴다');
+  assert.equal(ex.sets.filter((s) => s.isWarmup).length, 0,
+    '옛 종목 무게로 만든 웜업은 버린다 (새 종목엔 안 맞는다)');
+  endSession();
+});
+
+test('[문구] 접힘 토스트가 원인을 정확히 말한다 (2차 #15)', () => {
+  // (a) 무게는 아는데 한 칸 아래가 없다
+  seedRecalc([session('덤벨 컬', 4, 12, 3)]);
+  const light = startSession('덤벨 컬');
+  app.state.setSchemeOpen = false;
+  assert.equal(weightsOf(light)[0], 4, '전제: 화면에 4kg 이 보인다');
+  assert.equal(tapScheme('pyramid'), '스트레이트로 했어요 — 무게가 낮아 감량할 자리가 없어요');
+  endSession();
+
+  // (b) 무게 자체를 모른다
+  seedRecalc([]);
+  const unknown = startSession('사장님표 특수 운동');
+  app.state.setSchemeOpen = false;
+  assert.equal(weightsOf(unknown)[0], null);
+  assert.equal(tapScheme('pyramid'), '스트레이트로 했어요 — 무게를 모르는 종목이라 감량을 못 해요');
+  endSession();
+});
+
+test('[문구] 세트법 토스트는 해요체 · 40자 이내 · 안 바뀐 무게는 말하지 않는다', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  app.setSetSchemeOverride('핵 스쿼트', 'straight');
+  startSession('핵 스쿼트');
+  const msgs = [
+    tapScheme('pyramid'), tapScheme('rpt'), tapScheme('drop'), tapScheme('straight'),
+    tapTopSet(95), tapScheme('straight')
+  ];
+  msgs.forEach((m) => {
+    assert.ok(m.length <= 40, '40자 초과: ' + m + ' (' + m.length + '자)');
+    assert.ok(m.indexOf('어요') !== -1, '해요체가 아니다: ' + m);
+    assert.equal(/[!]|합니다|됩니다/.test(m), false, '느낌표·합쇼체 금지: ' + m);
+  });
+  // 무게가 안 바뀐 전환은 숫자를 붙이지 않는다 (화면에 없는 수를 말하지 않는다)
+  assert.equal(msgs[0], '피라미드로 바꿨어요');
+  assert.equal(msgs[4], '탑세트로 바꿨어요 — 탑 95kg', '실제로 바뀐 무게만 말한다');
+  endSession();
+});
+
+test('[저장] override 는 별칭 키까지 지워져 기본값으로 되돌아간다 (2차 #16)', () => {
+  resetOverrides();
+  // 옛 저장분이 canonical 이 아닌 이름으로 남아 있는 경우
+  app.storage.set(app.KEYS.SET_SCHEMES, { '랫풀다운': 'pyramid' });
+  assert.equal(app.getSetScheme('랫풀다운'), 'pyramid', '전제: 별칭 키가 읽힌다');
+
+  assert.equal(app.setSetSchemeOverride('랫풀다운', 'straight'), true);
+  assert.equal(app.getSetScheme('랫풀다운'), 'straight', '기본값으로 되돌아간다');
+  assert.equal(Object.keys(app.storage.get(app.KEYS.SET_SCHEMES, {})).length, 0, '별칭 키가 남지 않는다');
+  resetOverrides();
+});
+
+test('[시트] 탑세트 무게 시트 HTML — 입력·스텝퍼·확인/취소가 있다', () => {
+  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  const ex = startSession('핵 스쿼트');
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  const html = app.buildTopSetWeightSheetHtml(app.state.activeSession, ex);
+
+  assert.ok(html.indexOf('topset-weight-value') !== -1, '무게 표시');
+  assert.ok(html.indexOf('topset-weight-input') !== -1, '직접 입력칸');
+  assert.ok(html.indexOf('adjustTopSetWeight(5)') !== -1, '장비 단위 스텝퍼(5kg)');
+  assert.ok(html.indexOf('confirmTopSetWeight()') !== -1 && html.indexOf('취소') !== -1);
+  assert.ok(html.indexOf('탑 무게 수정') !== -1, '이미 탑세트면 수정 모드로 뜬다');
+  // 디자인 규칙: 이모지 금지 · 잔글씨 11px 하한 · 하드코딩 색 금지
+  assert.equal(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(html), false, '이모지 금지');
+  assert.equal(/#[0-9a-fA-F]{6}/.test(html), false, 'hex 색 직접 지정 금지');
+  assert.equal(/text-\[(\d+)px\]/.test(html) && RegExp.$1 < 11, false, '잔글씨 하한 11px');
+  endSession();
+});
+
+test('[시트] 확인 버튼은 값이 없으면 잠긴다', () => {
+  seedRecalc([]);
+  const ex = startSession('사장님표 특수 운동');
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  const html = app.buildTopSetWeightSheetHtml(app.state.activeSession, ex);
+  assert.ok(html.indexOf('disabled') !== -1, '확인 버튼이 잠겨 있다');
+  assert.ok(html.indexOf('기록이 없어요') !== -1, '왜 잠겼는지 알려 준다');
+  endSession();
+});
+
+// ── D. 3차 리뷰 회귀 (§6 테스트 맹점 12개) ────────────────
+// 440건이 전부 녹색인데 18건이 살아 있던 이유는 픽스처가 한쪽에 몰려 있었기 때문이다:
+// 시트 테스트는 전부 "이미 탑세트인 종목", 교체 테스트는 전부 "기록 있는 종목",
+// 디로드 왕복은 top_backoff 로 되돌아온 뒤만 봤다. 아래는 그 빈칸을 메운다.
+
+test('[교체] 기록 없는 종목으로 바꾸면 옛 종목 무게가 따라오지 않는다 (3차 H4-a)', () => {
+  seedRecalc([session('레그 프레스', 120, 10, 3)]);
+  const ex = startSession('레그 프레스');
+  app.state.setSchemeOpen = false;
+  assert.deepEqual([...weightsOf(ex)], [120, 120, 120], '전제: 레그 프레스 120kg');
+
+  app.state.exerciseSwapOpen = true;
+  captureToast(() => app.applyExerciseSwap(ex, '덤벨 사이드 레터럴 레이즈'));
+  assert.equal(ex.name, '덤벨 사이드 레터럴 레이즈');
+  assert.deepEqual([...weightsOf(ex)], [null, null, null],
+    '기록도 1RM도 없는 종목은 무게 미상이다 (옛 코드는 120kg 을 물려줬다)');
+  endSession();
+});
+
+test('[교체] 완료한 탑·자동 디로드가 새 종목에 물려지지 않는다 (3차 H4-b)', () => {
+  const day = (d) => ({
+    date: daysAgo(d), sessionType: 'legs', exercises: [
+      { name: '핵 스쿼트', setsDetail: [set(100, 8), set(90, 8), set(90, 8)] },
+      { name: '바벨 데드리프트', setsDetail: [set(140, 6), set(125, 6), set(125, 6)] }
+    ]
+  });
+  seedRecalc([day(3), day(10)]);
+  const ex = startSession('핵 스쿼트');                   // 2세션 상단 달성 → [105, 95, 95]
+  app.state.setSchemeOpen = false;
+  workingSets(ex)[0].completed = true;
+  workingSets(ex)[0].reps = 3;                            // 탑 실패 → 백오프 한 스텝 더 내림
+  assert.equal(app.applyTopSetAutoDeload(ex), 2);
+  assert.deepEqual([...weightsOf(ex)], [105, 90, 90]);
+
+  app.state.exerciseSwapOpen = true;
+  captureToast(() => app.applyExerciseSwap(ex, '바벨 데드리프트'));
+  const pending = workingSets(ex).filter((s) => !s.completed);
+  const alone = app.getSessionSetPlan('바벨 데드리프트', null, '5-8', { sets: 2, warmup: false }).sets;
+  assert.deepEqual(pending.map((s) => [s.role, s.weight]), alone.map((s) => [s.role, s.weight]),
+    '새 종목 단독 구성과 같아야 한다 (자기 탑을 받고, 옛 실패로 감량되지 않는다)');
+  assert.equal(ex.sets.filter((s) => s.autoDeloaded).length, 0, '옛 종목의 디로드 표식이 안 따라온다');
+  assert.equal(workingSets(ex)[0].weight, 105, '옛 종목의 완료 기록 자체는 그대로 남는다');
+  endSession();
+});
+
+test('[시트] 종목이 바뀌면 확인이 조용히 취소된다 (3차 H2)', () => {
+  seedRecalc([session('핵 스쿼트', 100, 5, 3), session('레그 익스텐션', 45, 15, 3)]);
+  app.state.topSetSheet = null;
+  app.state.activeSession = {
+    sessionType: 'legs', sessionName: '테스트', startTime: Date.now() - 600000, currentExerciseIdx: 0,
+    exercises: ['핵 스쿼트', '레그 익스텐션', '페이스 풀'].map((n) => app.buildSessionExercise(n))
+  };
+  const [squat, legExt, rehab] = app.state.activeSession.exercises;
+  const legExtBefore = [...weightsOf(legExt)];
+
+  // (a) 다른 종목으로 넘어간 뒤 확인 → 아무것도 안 바뀐다
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  assert.equal(app.state.topSetSheet.exName, '핵 스쿼트');
+  app.state.activeSession.currentExerciseIdx = 1;         // 스와이프로 이동한 상태
+  const toastA = captureToast(() => app.confirmTopSetWeight());
+  assert.equal(toastA, '', '조용히 취소한다');
+  assert.equal(app.state.topSetSheet, null, '시트는 닫힌다');
+  assert.deepEqual([...weightsOf(legExt)], legExtBefore, '엉뚱한 종목이 안 바뀐다');
+  assert.equal(Object.keys(app.storage.get(app.KEYS.SET_SCHEMES, {})).length, 0, 'override 도 안 남는다');
+  assert.equal(app.hardestWeight('핵 스쿼트', weightsOf(squat)), 100, '원래 종목도 그대로');
+
+  // (b) 재활 종목으로 넘어간 경우도 같다 — 잠금은 시트 경로에서도 유효하다
+  app.state.activeSession.currentExerciseIdx = 0;
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  app.state.activeSession.currentExerciseIdx = 2;
+  captureToast(() => app.confirmTopSetWeight());
+  assert.equal(app.sessionSchemeOf(rehab), 'straight', '재활은 스트레이트 그대로');
+  assert.equal(Object.keys(app.storage.get(app.KEYS.SET_SCHEMES, {})).length, 0);
+
+  // (c) 안쪽 함수를 직접 불러도 잠금이 다시 걸린다 (setSetSchemeOverride 의 false 를 안 버린다)
+  const toastC = captureToast(() => app.applySchemeToSession(rehab, 'top_backoff', 100));
+  assert.equal(toastC, '재활 종목은 세트법을 바꿀 수 없어요');
+  assert.equal(app.sessionSchemeOf(rehab), 'straight');
+  assert.deepEqual([...weightsOf(rehab)], [null, null, null], '재활 세트는 손대지 않는다');
+  endSession();
+});
+
+test('[시트] 스와이프 가드에 탑세트 시트가 들어 있다 (3차 H2)', () => {
+  // 이벤트 리스너라 함수로 부를 수 없다 — 가드 목록에 이름이 있는지로 지킨다.
+  // 휴식 타이머 가드 2곳에는 이미 들어 있었고 이 한 곳만 빠져 있었다.
+  const src = readAppSource().code;
+  const i = src.indexOf("document.addEventListener('touchend'");
+  assert.ok(i > 0, 'touchend 스와이프 핸들러를 찾았다');
+  assert.ok(src.slice(i, i + 1500).indexOf('state.topSetSheet') !== -1,
+    '탑 무게를 입력하는 중에는 스와이프로 종목이 넘어가면 안 된다');
+});
+
+test('[디로드] 스트레이트로 착지해도 내려간 무게가 되올라가지 않는다 (3차 H5)', () => {
+  seedRecalc([session('핵 스쿼트', 100, 5, 3)]);
+  const ex = startSession('핵 스쿼트');                   // 탑세트 [100, 90, 90]
+  app.state.setSchemeOpen = false;
+  const top = workingSets(ex)[0];
+  top.completed = true;
+  top.reps = 4;                                            // 목표 미달 → 백오프 85 로 자동 디로드
+  assert.equal(app.applyTopSetAutoDeload(ex), 2);
+  assert.deepEqual([...weightsOf(ex)], [100, 85, 85]);
+
+  const toast = tapScheme('straight');
+  assert.deepEqual([...weightsOf(ex)], [100, 85, 85],
+    '방금 실패한 100kg 을 두 세트 더 시키지 않는다 (옛 코드는 100 으로 되올렸다)');
+  assert.equal(toast, '스트레이트로 바꿨어요', '안 바뀐 무게는 말하지 않는다');
+  endSession();
+});
+
+test('[문구] 남은 세트 기준으로 토스트를 만든다 (3차 M2)', () => {
+  // 완료한 탑이 있으면 세션 최중량은 안 변한다 — 그걸 기준으로 삼으면 남은 세트가 뭐가 되든
+  // "안 바뀌었다"가 되고, 반대로 남은 세트가 그대로인데 없는 숫자를 말하기도 했다.
+  seedRecalc([session('핵 스쿼트', 100, 5, 3)]);
+  const ex = startSession('핵 스쿼트');
+  app.state.setSchemeOpen = false;
+  workingSets(ex)[0].completed = true;
+  workingSets(ex)[0].reps = 5;                             // [top 100✔, backoff 90, backoff 90]
+
+  const toast = tapScheme('straight');
+  assert.deepEqual([...weightsOf(ex)], [100, 90, 90], '남은 세트 무게는 그대로 90');
+  assert.equal(toast, '스트레이트로 바꿨어요', '안 바뀐 무게에 숫자를 붙이지 않는다');
+  endSession();
+});
+
+test('[수정] 끝낸 탑보다 무거운 값은 그 탑까지만 반영된다 (3차 M1)', () => {
+  seedRecalc([session('핵 스쿼트', 100, 5, 3)]);
+  const ex = startSession('핵 스쿼트');
+  app.state.setSchemeOpen = false;
+  workingSets(ex)[0].completed = true;
+  workingSets(ex)[0].reps = 5;                             // 탑 100 완료
+
+  const toast = tapTopSet(120);                            // 재탭 후 120 입력
+  assert.deepEqual([...weightsOf(ex)], [100, 90, 90],
+    '백오프가 탑보다 무거워지지 않는다 (옛 코드는 [100, 110, 110])');
+  assert.equal(toast.indexOf('110') === -1 && toast.indexOf('120') === -1, true,
+    '존재하지 않는 탑 무게를 말하지 않는다');
+  assert.equal(cardWeight(app.renderWorkoutSession()), 100, '카드도 안 튄다');
+
+  // 낮추는 방향은 그대로 먹힌다 — 남은 백오프를 실제로 조절할 수 있다
+  tapTopSet(90);
+  assert.deepEqual([...weightsOf(ex)], [100, 80, 80], '90 의 90% = 81 → 5kg 격자로 80');
+  endSession();
+});
+
+test('[수정] 탑을 끝낸 뒤 피라미드·역피라미드가 꼭대기를 잃지 않는다 (3차 M3)', () => {
+  seedRecalc([session('핵 스쿼트', 100, 5, 3)]);
+  const ex = startSession('핵 스쿼트');
+  app.state.setSchemeOpen = false;
+  workingSets(ex)[0].completed = true;
+  workingSets(ex)[0].reps = 5;                             // [top 100✔, backoff 90, backoff 90]
+
+  tapScheme('pyramid');
+  let pending = workingSets(ex).filter((s) => !s.completed);
+  assert.equal(pending[pending.length - 1].role, 'top', '피라미드의 마지막 단은 탑이다');
+  assert.ok(pending[0].weight < pending[pending.length - 1].weight, '오름 사다리가 산다');
+
+  tapScheme('rpt');
+  pending = workingSets(ex).filter((s) => !s.completed);
+  assert.equal(pending[0].role, 'top', '역피라미드의 첫 단은 탑이다');
+  assert.ok(pending[0].weight > pending[pending.length - 1].weight, '내림 사다리가 산다');
+
+  // 탑세트(자동 디로드 스킴)에서는 여전히 탑을 두 번 만들지 않는다
+  tapTopSet(100);
+  assert.equal(ex.sets.filter((s) => s.role === 'top' && !s.isWarmup).length, 1,
+    '탑세트에서는 한 종목에 탑이 하나다');
+  endSession();
+});
+
+test('[가드] 본 세트를 다 끝낸 뒤 탑세트는 시트를 열지 않는다 (3차 M5)', () => {
+  seedRecalc([session('핵 스쿼트', 100, 5, 3)]);
+  const ex = startSession('핵 스쿼트');
+  app.state.setSchemeOpen = false;
+  tapScheme('straight');
+  workingSets(ex).forEach((s) => { s.completed = true; s.reps = 5; });
+  const done = [...weightsOf(ex)];
+
+  app.state.setSchemeOpen = true;
+  const toast = captureToast(() => app.applySetScheme('top_backoff'));
+  assert.equal(app.state.topSetSheet, null, '무게부터 입력시키지 않는다');
+  assert.equal(toast, '남은 세트가 없어요 — 다음 세션부터 탑세트예요');
+  assert.deepEqual([...weightsOf(ex)], done, '세트는 그대로');
+  assert.equal(app.getSetScheme('핵 스쿼트'), 'top_backoff', '선택은 저장된다');
+  endSession();
+});
+
+test('[저장] "이미 쓰고 있는 세트법"도 선택을 확정한다 (3차 M4)', () => {
+  seedRecalc([session('덤벨 컬', 4, 12, 3)]);
+  app.setSetSchemeOverride('덤벨 컬', 'pyramid');
+  const ex = startSession('덤벨 컬');
+  app.state.setSchemeOpen = false;
+  assert.equal(app.sessionSchemeOf(ex), 'straight', '전제: 4kg 이라 스트레이트로 접혔다');
+  assert.equal(app.getSetScheme('덤벨 컬'), 'pyramid', '전제: 저장된 선택은 아직 피라미드');
+
+  const toast = tapScheme('straight');
+  assert.equal(toast, '이미 쓰고 있는 세트법이에요');
+  assert.equal(app.getSetScheme('덤벨 컬'), 'straight',
+    '무게가 생겨도 조용히 피라미드로 돌아가지 않는다 (옛 코드는 저장을 건너뛰었다)');
+  endSession();
+});
+
+test('[시트] 잠긴 확인 버튼은 눈에 보이게 잠기고, 입력하면 곧바로 풀린다 (3차 M6)', () => {
+  const css = fs.readFileSync(new URL('../css/styles.css', import.meta.url), 'utf8');
+  assert.ok(/\.adj-btn:disabled\s*\{[^}]*opacity/.test(css),
+    '.adj-btn 에도 disabled 표기가 있다 (.rest-done-btn:disabled 와 같은 규칙)');
+
+  seedRecalc([]);
+  const ex = startSession('사장님표 특수 운동');
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  const html = app.buildTopSetWeightSheetHtml(app.state.activeSession, ex);
+  assert.ok(html.indexOf('oninput="syncTopSetInput()"') !== -1,
+    'blur 를 기다리지 않고 입력 즉시 확인 버튼을 동기화한다');
+  assert.equal(typeof app.syncTopSetInput, 'function');
+  endSession();
+});
+
+test('[프리필] 격자 밖 실측을 위로 올리지 않는다 (3차 L2)', () => {
+  // 22.5kg 으로 기록한 종목에 25kg 을 미리 채우면, "가장 무겁게 든 무게"라면서
+  // 든 적 없는 무게를 말하게 된다. getSessionSetPlan 의 격자 밖 보존과 같은 원칙이다.
+  seedRecalc([{ date: daysAgo(3), sessionType: 'legs',
+    exercises: [{ name: '덤벨 벤치 프레스', setsDetail: [set(22.5, 8), set(22.5, 8)] }] }]);
+  assert.equal(app.recentTopWeight('덤벨 벤치 프레스'), 22.5);
+
+  startSession('덤벨 벤치 프레스');
+  app.state.setSchemeOpen = true;
+  app.applySetScheme('top_backoff');
+  assert.equal(app.state.topSetSheet.weight, 22.5, '시트에도 실측 그대로 뜬다');
+  endSession();
+});
+
+test('[프리필] 날짜가 없는 기록에서도 최신 세션을 고른다 (3차 L6)', () => {
+  // 인라인 비교자는 undefined 끼리 전부 0 을 돌려줘 정렬이 저장 순서(최신 우선)로 남았고,
+  // slice(-4) 가 **가장 오래된 4개**를 집었다. 저장소 공용 sortByDateDesc 로 통일한다.
+  const undated = (w) => ({ sessionType: 'legs', exercises: [{ name: '핵 스쿼트', setsDetail: [set(w, 5)] }] });
+  seedRecalc([undated(110), undated(60), undated(60), undated(60), undated(200)]);
+  assert.equal(app.recentTopWeight('핵 스쿼트'), 110,
+    '최신 4세션(110·60·60·60)에서 고른다 — 창 밖의 옛 200kg 이 아니다');
+  endSession();
 });

@@ -870,6 +870,15 @@ button {
   background: var(--bg-4);
   transform: scale(0.96);
 }
+/* 잠긴 조정 버튼 — 저장소 공통 표기(.rest-done-btn:disabled)와 같게. 누르는 반응도 끈다:
+   활성 버튼과 똑같이 보이면 "왜 눌러도 안 되지"가 된다. */
+.adj-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.adj-btn:disabled:active {
+  transform: none;
+}
 .adj-btn.accent-btn {
   background: rgba(var(--accent-rgb), 0.15);
   color: var(--accent);

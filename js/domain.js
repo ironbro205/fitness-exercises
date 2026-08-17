@@ -590,11 +590,72 @@ function calculateRollingMax1RM(exerciseName, windowSessions) {
   return { value: Math.round(max * 10) / 10, sessions: recent.length };
 }
 
+// ═══════════════════════════════════════════════
+// 탑세트 기준 무게 — 앱이 정하지 않고 **사용자가 확정한다** (#72 3차)
+// ═══════════════════════════════════════════════
+// 세트법 버튼이 추정 1RM에서 무게를 다시 매기던 채널은 폐기했다. 그 채널은 증량 엔진
+// (더블 프로그레션)과 구조적으로 충돌한다 — 같은 무게를 두 규칙이 서로 모르게 고쳐 쓰면
+// 지시대로 운동한 사용자가 감량되고(2차 #2), 게이트를 우회한 증량이 세션마다 쌓였다(2차 #3).
+// 이제 세트법 전환은 **무게를 건드리지 않고 사다리(배율)만 바꾼다.**
+//
+// 예외는 탑세트 하나뿐이고, 그것도 계산이 아니라 **질문**이다: 앱은 최근 실측에서 뽑은 값을
+// 미리 채워 주고, 확정 버튼은 사용자가 누른다. 그래서 무게가 바뀌는 순간을 사용자가 항상 안다.
+//
+// 미리 채울 값 = 최근 N세션의 워킹세트 중 **실제로 든 가장 무거운 무게**
+//   (역방향 어시스트는 보조가 가장 적은 값 = 가장 어려운 세트).
+// 추정 1RM을 안 쓰는 이유: e1RM은 컨디션 좋은 날 한 세트에서 나온 추정치라 오늘 몸 상태를 모른다.
+// 실측 무게는 "그 무게로 세트를 실제로 마쳤다"는 사실 그대로다.
+// 워밍업·드롭·마이오렙(연장 세트)은 제외한다 — 본 세트 강도가 아니다(update1RM과 같은 규칙).
+function recentTopWeight(exerciseName, windowSessions) {
+  var n = windowSessions || ROLLING_1RM_WINDOW;
+  var log = (state.data && state.data.workoutLog) || [];
+  var canonical = EXERCISE_ALIASES_1RM[exerciseName] || exerciseName;
+
+  var byDate = []; // { date, weight } — 세션(날짜)별 가장 어려운 워킹세트 무게
+  for (var i = 0; i < log.length; i++) {
+    var w = log[i];
+    var exList = w.exercises || w.exercisesData;
+    if (!exList || !Array.isArray(exList)) continue;
+    var picked = [];
+    for (var j = 0; j < exList.length; j++) {
+      var ex = exList[j];
+      if (!ex.name) continue;
+      var exCanon = EXERCISE_ALIASES_1RM[ex.name] || ex.name;
+      if (exCanon !== canonical && ex.name !== exerciseName) continue;
+      if (!ex.setsDetail || !Array.isArray(ex.setsDetail)) continue;
+      for (var k = 0; k < ex.setsDetail.length; k++) {
+        var s = ex.setsDetail[k];
+        if (!s || s.isWarmup || isOffProgressSet(s)) continue;
+        if (typeof s.weight !== 'number' || !(s.reps > 0)) continue;
+        picked.push(s.weight);
+      }
+    }
+    if (picked.length) byDate.push({ date: w.date, weight: hardestWeight(exerciseName, picked) });
+  }
+  if (!byDate.length) return null;
+
+  // 최신 n세션. 정렬은 저장소 공용 sortByDateDesc 를 쓴다 — 인라인 비교자는 date 가 없는 항목끼리
+  // 전부 0을 돌려줘 정렬이 로그 순서(최신 우선)로 남고, slice(-n) 이 **가장 오래된 4개**를 골랐다.
+  var recent = sortByDateDesc(byDate).slice(0, n);
+  var best = hardestWeight(exerciseName, recent.map(function(r) { return r.weight; }));
+  if (typeof best !== 'number') return null;
+  // 정방향 종목의 0kg 기록은 "맨몸으로 했다"는 뜻이라 탑세트 무게로 미리 채울 값이 없다.
+  // 역방향(어시스트)은 보조 0kg = 맨몸이 곧 가장 어려운 값이라 유효하다.
+  if (!isReverseProgression(exerciseName) && !(best > 0)) return null;
+  // 격자로 스냅하지 않는다. 이 값은 "실제로 든 무게"라고 화면에 적히는데, 반올림은 22.5kg 기록을
+  // 25kg 으로 **올려** 든 적 없는 무게를 사실처럼 말하게 된다. getSessionSetPlan 이 유지일에
+  // 격자 밖 무게를 그대로 보존하는 것과 같은 원칙이다.
+  return best;
+}
+
 // 세션 세트 구성용 시작 무게·횟수 — 추천 카드(getProgressiveRecommendation)와 반드시 일치.
 // · 수행 기록 있음: 추천 무게 그대로 (유지=지난 실제 무게, 증량=스냅된 새 무게 — 5kg처럼 격자 밖 무게도 보존)
 // · 기록 없음: AI/템플릿 제안 무게를 장비 단위로 스냅
 // · 횟수: 유지/재활이면 지난 세션 최고 반복(범위로 클램프) = "지난 기록에 도전", 증량이면 범위 하단부터 다시
 // · sets: 세트법(스킴)에 따라 만들어진 세트 배열 — opts = { sets: 워킹세트 수, warmup: bool }
+// · opts.baseWeight: 사다리의 기준 무게를 **이 값으로 못박는다**. 앱이 계산한 값이 아니라
+//   화면에서 사용자가 보고 확정한 숫자다(탑세트 무게 입력) 또는 이미 그 세션이 쓰고 있던 무게다
+//   (세트법 전환 — 무게는 그대로 두고 사다리만 바꾼다). 안 넘기면 기존 추천 경로 그대로다.
 function getSessionSetPlan(exerciseName, fallbackWeight, targetReps, opts) {
   var range = clampRepsToClass(exerciseName, targetReps);
   var prog = getProgressiveRecommendation(exerciseName, targetReps);
@@ -618,6 +679,13 @@ function getSessionSetPlan(exerciseName, fallbackWeight, targetReps, opts) {
   if (prog && prog.source !== 'progress' && prog.previousReps && prog.previousReps.length) {
     var lastMax = Math.max.apply(null, prog.previousReps);
     reps = Math.min(Math.max(lastMax, range.low), range.high);
+  }
+
+  // 호출부가 기준 무게를 못박았으면 그 값이 이긴다 — 추천 엔진을 덮어쓰는 유일한 지점이다.
+  // 값의 출처는 둘뿐이고 **둘 다 앱의 계산이 아니다**: 사용자가 입력창에서 확정한 탑세트 무게,
+  // 또는 그 세션이 이미 쓰고 있던 무게(세트법 전환 — 손수 고친 값·자동 디로드를 그대로 이어받는다).
+  if (opts && opts.baseWeight !== undefined && opts.baseWeight !== null) {
+    weight = opts.baseWeight;
   }
 
   var scheme = effectiveSetScheme(exerciseName, weight);
@@ -699,6 +767,10 @@ function setSetSchemeOverride(exerciseName, scheme) {
   if (rules.lockScheme || !SET_SCHEMES[scheme]) return false;
   var overrides = storage.get(KEYS.SET_SCHEMES, {}) || {};
   var key = canonicalExerciseName(exerciseName);
+  // 읽기(getSetScheme)는 canonical 키와 **원래 이름 키**를 둘 다 본다 — 옛 저장분이 별칭 키로 남아서다.
+  // 그래서 쓸 때도 별칭 키를 같이 지운다. 안 지우면 기본값으로 되돌리기가 true를 돌려주면서도
+  // 아무것도 안 지워져, 그 종목의 세트법을 영영 못 되돌린다(2차 #16).
+  if (exerciseName !== key) delete overrides[exerciseName];
   if (scheme === rules.scheme) delete overrides[key];
   else overrides[key] = scheme;
   storage.set(KEYS.SET_SCHEMES, overrides);
@@ -855,6 +927,62 @@ function isSetExtension(s) {
   return !!(s && s.role && SET_ROLES_EXTENSION.indexOf(s.role) !== -1);
 }
 
+// 아직 **남은** 워킹세트 (워밍업·연장 세트 제외). 건너뛰기로 떼어 둔 세트도 센다 —
+// 세트법을 바꾸면 restoreSkippedSets 가 도로 붙이므로 "남은 세트"에 해당한다.
+function pendingWorkingSets(exercise) {
+  var all = ((exercise && exercise.sets) || []).concat((exercise && exercise.skippedSets) || []);
+  return all.filter(function(s) {
+    return s && !s.completed && !s.isWarmup && !isSetExtension(s);
+  });
+}
+
+// **이 종목의 기준 세트** = 워킹세트 중 가장 어려운 세트 (정방향=최대 무게 / 역방향=최소 보조).
+// 추천 카드의 큰 숫자와 세트법 전환의 기준 무게가 이 하나를 본다.
+//
+// ★ 완료 여부를 보지 않는다. 남은 세트만 보면 램프 스킴에서 탑세트를 끝내는 순간 기준이 백오프로
+//   내려앉아, 아무것도 안 건드렸는데 카드가 "무게 낮추기"로 뒤집힌다(#72 2차 #1 — 세트법을
+//   한 번도 안 쓰는 사용자에게도 매 세션 발생했다). 기준 세트는 세션 내내 같은 한 세트여야 한다.
+// 건너뛴 종목의 떼어 둔 세트(skippedSets)는 보지 않는다 — 하지 않기로 한 세트다(2차 #13).
+// 무게를 모르는 세트(null)는 후보에서 빠진다 — 없으면 null.
+function sessionReferenceSet(exercise) {
+  var rows = ((exercise && exercise.sets) || []).filter(function(s) {
+    return s && !s.isWarmup && !isSetExtension(s) && typeof s.weight === 'number';
+  });
+  if (!rows.length) return null;
+  var target = hardestWeight(exercise && exercise.name, rows.map(function(s) { return s.weight; }));
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].weight === target) return rows[i];
+  }
+  return rows[0];
+}
+
+// **앞으로 들 세트**의 기준 세트 = 남은 워킹세트 중 가장 어려운 세트 (없으면 null).
+// 세트법 전환이 물려줄 무게와 전환 토스트의 before/after 가 이걸 본다.
+// sessionReferenceSet 과 나뉘는 이유: 완료한 탑까지 세면 "다음에 들 무게"가 아니라 세션 최중량이
+// 기준이 되어, 자동 디로드로 내려간 백오프가 **방금 실패한 탑 무게**로 되올라가고(3차 H5)
+// 남은 세트가 아무리 바뀌어도 before == after 라 토스트가 숫자를 감춘다(3차 M2).
+// 화면 카드의 큰 숫자는 그대로 sessionReferenceSet 이다 — 두 용도는 서로 다른 질문에 답한다.
+function pendingReferenceSet(exercise) {
+  var rows = pendingWorkingSets(exercise).filter(function(s) { return typeof s.weight === 'number'; });
+  if (!rows.length) return null;
+  var target = hardestWeight(exercise && exercise.name, rows.map(function(s) { return s.weight; }));
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].weight === target) return rows[i];
+  }
+  return rows[0];
+}
+
+// 이 종목에서 **이미 끝낸 탑세트** (없으면 null). 마지막 것을 돌려준다 — applyTopSetAutoDeload 와
+// 같은 세트를 가리켜야 한다. 두 곳이 이 판정을 공유한다:
+//  · 세트 재구성: 남은 자리에 탑을 또 만들지 않는다 (한 종목에 탑은 하나다)
+//  · 탑 무게 수정: 확정 무게가 끝낸 탑을 넘지 못하게 막는다 (백오프가 탑보다 무거워진다 — 3차 M1)
+function completedTopSet(exercise) {
+  var rows = ((exercise && exercise.sets) || []).filter(function(s) {
+    return s && s.completed && !s.isWarmup && s.role === 'top';
+  });
+  return rows.length ? rows[rows.length - 1] : null;
+}
+
 // 볼륨 카운트용 워킹세트 수.
 // 드롭·마이오렙 세트는 **마지막 워킹세트의 연장**이지 독립 세트가 아니다. 그대로 세면
 // 3세트 종목이 5세트로 잡혀 주간 볼륨 폐루프(AI 프롬프트·부족 부위 판정)가 부풀려진다.
@@ -931,7 +1059,23 @@ function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
   //    무거우면 안 되기 때문이다(피라미드는 첫 워킹세트가 이미 85%라 피더가 들어갈 자리가 없다).
   var workRows = [];
   if (workingCount > 0 && build.pattern === 'ramp') {
-    var plan = expandRampSteps(build, workingCount);
+    // opts.topDone = 탑세트를 **이미 끝냈다**(완료 기록에 role:'top' 이 있다). 그러면 남은 자리에
+    // 탑을 또 만들면 안 된다 — 한 종목에 탑이 둘이 되어 뱃지·자동 디로드의 last-top 스캔·
+    // 다음 세션 reachedTopAt 필터가 전부 엉킨다. 남은 자리는 나머지 단(백오프)이 채운다.
+    //
+    // **탑세트(autoDeload 스킴)에서만** 걸러낸다. top 은 top_backoff 전용 역할이 아니다 —
+    // 피라미드의 마지막 단(100%)·역피라미드의 첫 단도 role:'top' 이라, 무조건 지우면 그 스킴의
+    // 사다리 꼭대기가 통째로 사라진다(피라미드가 92.5% 에서 끝난다 — 3차 M3).
+    var rampBuild = build;
+    if (opts && opts.topDone && build.autoDeload) {
+      var rest = (build.steps || []).filter(function(st) { return st.role !== 'top'; });
+      if (rest.length) {
+        rampBuild = {};
+        for (var bk in build) { if (Object.prototype.hasOwnProperty.call(build, bk)) rampBuild[bk] = build[bk]; }
+        rampBuild.steps = rest;
+      }
+    }
+    var plan = expandRampSteps(rampBuild, workingCount);
     // 사다리 무게는 **한 번에** 계산한다 — 단마다 따로 반올림하면 두 단이 같은 값으로 뭉개진다.
     var pcts = [];
     plan.forEach(function(st) { if (pcts.indexOf(st.pct) === -1) pcts.push(st.pct); });

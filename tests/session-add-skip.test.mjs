@@ -351,14 +351,20 @@ test('건너뛴 종목을 교체하면 되살아나서 새 종목의 세트가 �
   assert.ok(ex.sets.filter((x) => !x.isWarmup).length > 0, '교체한 종목에 할 세트가 생긴다');
 });
 
-test('건너뛴 종목의 세트법을 바꾸면 건너뛰기가 풀린다 (세트를 다시 짜므로)', () => {
+test('건너뛴 종목의 세트법을 바꿔도 조용히 되살아나지 않는다 (확인을 거친다)', () => {
   resetLog();
   const s = makeSession(['핵 스쿼트', '바벨 컬']);
   app.applySkipExercise(0);
   s.currentExerciseIdx = 0;
 
+  // 세트를 다시 짜면 건너뛰기가 풀린다 — 건너뛰기 자체가 확인 팝업을 거치는 결정이라
+  // 그 반대편도 사용자가 알아야 한다. 확인을 누르기 전에는 아무것도 안 바뀐다.
   app.applySetScheme('straight');
+  assert.equal(s.exercises[0].skipped, true, '확인 전에는 건너뛴 상태 그대로다');
+  assert.equal(s.exercises[0].sets.filter((x) => !x.completed).length, 0, '떼어 둔 세트도 그대로다');
 
+  // 확인을 누르면(=되살리기) 세트가 돌아온다
+  app.unskipExercise(0);
   assert.equal(s.exercises[0].skipped, undefined);
   assert.ok(s.exercises[0].sets.filter((x) => !x.completed).length > 0);
   app.storage.set(app.KEYS.SET_SCHEMES, {}); // override 정리

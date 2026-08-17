@@ -1462,6 +1462,7 @@ window.endSession = function(fromBack) {
     state.restTimer = null;
     state.editingSet = null;
     state.setSchemeOpen = false;        // 세션 위 시트는 세션과 함께 닫는다 (남으면 다른 화면의 뒤로가기·스와이프를 먹는다)
+    state.topSetSheet = null;
     state.exerciseSwapOpen = false;
     state.exerciseMenuOpen = false;
     state.exercisePickerMode = 'swap';
@@ -1673,6 +1674,7 @@ function finalizeSession() {
   state.restTimer = null;
   state.editingSet = null;
   state.setSchemeOpen = false;          // 세션 위 시트는 세션과 함께 닫는다
+  state.topSetSheet = null;
   state.exerciseSwapOpen = false;
   state.exerciseMenuOpen = false;
   state.exercisePickerMode = 'swap';
@@ -2101,7 +2103,7 @@ function startRestTimerTick() {
       restTickerInterval = null;
       // 시트(편집/종목변경/채팅)가 열려 있으면 전체 렌더 대신 타이머 UI만 제거
       // (채팅 입력·스트리밍 중 전체 렌더는 키보드/포커스/말풍선을 끊는다)
-      if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.sessionChatOpen || state.muscleMapZoom) {
+      if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.topSetSheet || state.sessionChatOpen || state.muscleMapZoom) {
         var wrapEl = document.querySelector('.rest-timer-wrap');
         if (wrapEl && wrapEl.parentNode) wrapEl.parentNode.removeChild(wrapEl);
       } else {
@@ -2111,7 +2113,7 @@ function startRestTimerTick() {
     }
     // 시트(편집/종목변경/세트사이채팅)가 열려 있으면 시트가 깜빡이지 않도록 타이머만 부분 갱신
     // (채팅은 입력·스트리밍 중이라 전체 렌더가 매초 돌면 입력이 초기화된다)
-    if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.sessionChatOpen || state.muscleMapZoom) {
+    if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.topSetSheet || state.sessionChatOpen || state.muscleMapZoom) {
       var remaining = state.restTimer.duration - elapsed;
       var el = document.getElementById('rest-time-text');
       if (el) {
@@ -2216,22 +2218,52 @@ function restoreSkippedSets(ex) {
   return true;
 }
 
-// 진행 중인 종목의 **미완료 세트만** 현재 세트법 기준으로 다시 만든다 (완료한 기록은 그대로 보존).
-function rebuildPendingSets(ex) {
+// 진행 중인 종목의 **미완료 세트만** 다시 만든다 (완료한 기록은 그대로 보존).
+// 세트법 변경 · 종목 교체 · 건너뛰기 되돌리기가 이 한 규칙을 공유한다 — 세 곳이 따로 놀면
+// 같은 상황에서 서로 다른 세트가 나온다(#72 2차 #10).
+//
+// 규칙
+//  · 남은 워킹세트 **개수 그대로** 다시 만든다. 자리가 모자라면 expandRampSteps 가 핵심 세트부터
+//    남긴다(탑 우선). 앞에서 잘라내면 내림 램프(탑세트·역피라미드)의 탑이 통째로 사라지고,
+//    머리글만 "탑세트"라고 말한다 — 자동 디로드도 그 종목에서 영영 발동하지 못한다(2차 #7).
+//  · opts.baseWeight = 기준 무게 고정(사용자가 확정한 탑 무게 · 그 세션이 이미 쓰던 무게).
+//    안 넘기면 추천 엔진이 정한다 — 종목이 바뀐 교체 경로가 그 경우다.
+//  · 미완료 워밍업은 그대로 데려간다. 워밍업 하나를 끝냈다고 나머지가 사라지면 안 된다(2차 #17).
+//  · 재구성 뒤 자동 디로드를 다시 적용한다. 세트 객체가 갈리면서 표식(autoDeloaded)이 사라지면
+//    반복 수를 정정해도 디로드가 영영 안 풀린다(2차 #11).
+//  · opts.freshExercise = **종목이 통째로 바뀌었다**(교체). 그러면 이 함수의 입력 중 ex.name 만
+//    새 종목 것이고 나머지(lastWeight · 완료 세트의 role · 자동 디로드 판정)는 전부 옛 종목 것이다.
+//    그대로 쓰면 옛 종목의 무게가 새어 들고, 새 종목이 자기 탑세트를 못 받고, 옛 종목의 실패
+//    판정으로 감량된 채 시작한다(3차 H4). keepWarmups:false 와 같은 이유·같은 자리다.
+function rebuildPendingSets(ex, opts) {
+  opts = opts || {};
   restoreSkippedSets(ex);   // 건너뛴 종목의 세트를 다시 짜면 건너뛰기는 자동으로 풀린다
-  var doneSets = (ex.sets || []).filter(function(s) { return s.completed; });
-  var pendingWorking = (ex.sets || []).filter(function(s) {
-    return !s.completed && !s.isWarmup && !isSetExtension(s);
-  }).length;
-  // pendingWorking이 0이면 본 세트를 이미 다 끝냈다는 뜻이다. 여기서 3으로 되돌리면
-  // "드롭만 남은 상태에서 스트레이트로 바꾸기"가 완료 3세트 뒤에 새 3세트를 덧붙인다.
-  var plan = getSessionSetPlan(ex.name, ex.lastWeight, ex.targetReps, {
-    sets: pendingWorking,
-    warmup: doneSets.length === 0   // 이미 시작한 종목에 워밍업을 새로 끼워 넣지 않는다
+  var fresh = !!opts.freshExercise;
+  var all = ex.sets || [];
+  var doneSets = all.filter(function(s) { return s.completed; });
+  // 아직 아무것도 안 한 종목만 워밍업을 새로 만든다. 이미 시작했으면 남은 워밍업을 그대로 옮긴다.
+  // 예외는 종목 교체다(keepWarmups: false) — 옛 종목의 무게로 만든 워밍업이라 새 종목엔 안 맞는다.
+  var regenWarmup = doneSets.length === 0;
+  var keepWarmups = opts.keepWarmups !== false;
+  var keptWarmups = (regenWarmup || !keepWarmups) ? []
+    : all.filter(function(s) { return !s.completed && s.isWarmup; });
+  var pendingWorking = (opts.sets !== undefined && opts.sets !== null) ? opts.sets
+    : all.filter(function(s) { return !s.completed && !s.isWarmup && !isSetExtension(s); }).length;
+
+  var plan = getSessionSetPlan(ex.name, fresh ? null : ex.lastWeight, ex.targetReps, {
+    sets: pendingWorking,          // 0 = 본 세트를 다 끝냈다 → 연장 스킴(드롭)만 붙는다
+    warmup: regenWarmup,
+    baseWeight: opts.baseWeight,
+    // 탑세트를 이미 했으면 남은 자리에 탑을 또 만들지 않는다 (한 종목에 탑은 하나다).
+    // 교체는 예외 — 완료된 탑은 **옛 종목**의 것이라 새 종목은 자기 탑을 받아야 한다.
+    topDone: !fresh && !!completedTopSet(ex)
   });
   ex.targetReps = repRangeToStr(plan.repRange);
   ex.scheme = plan.scheme;
-  ex.sets = doneSets.concat(plan.sets);
+  ex.sets = doneSets.concat(keptWarmups, plan.sets);
+  // 자동 디로드는 완료된 탑세트의 반복 수를 보고 남은 백오프를 깎는다 — 교체 뒤에 돌리면
+  // 옛 종목의 실패 판정으로 새 종목의 첫 세트가 감량된다.
+  if (!fresh) applyTopSetAutoDeload(ex);
   return plan;
 }
 
@@ -2259,26 +2291,297 @@ window.closeSetSchemeSheet = function() {
   render();
 };
 
+// 세트법 전환 토스트 문구. **실제로 바뀐 무게만** 말한다 —
+// 전환 전후로 들 무게가 같은데 숫자를 붙이면, 화면 어디에도 없는 수를 말하게 된다.
+// before/after = 전환 전후로 **앞으로 들** 기준 세트 무게(schemeBaseSet) — 카드의 큰 숫자
+// (sessionReferenceSet)와는 다른 질문이다. 완료한 탑까지 세면 남은 세트가 아무리 바뀌어도
+// before == after 라 정작 바뀐 숫자를 감추고, 없는 탑 무게를 말하게 된다(3차 M2).
+function schemeChangeToastText(exerciseName, requestedScheme, appliedScheme, before, after) {
+  // 감량 기반 스킴은 내려갈 자리가 없으면 스트레이트로 접힌다 — 그때 "피라미드로 바꿨어요"라고
+  // 알리면 화면(스트레이트)과 말이 어긋난다. **실제로 적용된 스킴**과 **접힌 이유**를 그대로 알린다.
+  var applied = appliedScheme || requestedScheme;
+  var kr = (SET_SCHEMES[applied] && SET_SCHEMES[applied].kr) || '';
+  if (applied !== requestedScheme) {
+    // 이유는 둘이다: 무게를 아예 모르거나(맨몸·미측정), 알지만 한 칸 아래가 없을 만큼 가볍거나.
+    // 화면에 4kg이 보이는 채로 "무게를 모른다"고 하면 앱이 거짓말을 한다(2차 #15).
+    return (typeof after === 'number' && after > 0)
+      ? kr + '로 했어요 — 무게가 낮아 감량할 자리가 없어요'
+      : kr + '로 했어요 — 무게를 모르는 종목이라 감량을 못 해요';
+  }
+  if (typeof after !== 'number' || after === before) return kr + '로 바꿨어요';
+  // 램프 스킴은 이 무게가 **탑세트** 무게다(나머지 단은 여기서 감량된다) → 어느 세트 값인지 밝힌다.
+  var hasTop = (SET_SCHEMES[applied].build.steps || []).some(function(st) { return st.role === 'top'; });
+  var label = isReverseProgression(exerciseName) ? '보조 ' : (hasTop ? '탑 ' : '');
+  return kr + '로 바꿨어요 — ' + label + (Math.round(after * 10) / 10) + 'kg';
+}
+
+// 전환이 물려줄 기준 무게 = **앞으로 들 세트** 중 가장 어려운 세트(3차 H5·M2).
+// 남은 워킹세트가 없을 때만 세션 기준 세트로 돌아간다 — 본 세트를 다 끝낸 뒤 드롭을 붙이는
+// 경우가 그것뿐이고, 그때는 마지막으로 든 무게가 유일한 기준이다(2차 #9).
+function schemeBaseSet(ex) {
+  return pendingReferenceSet(ex) || sessionReferenceSet(ex);
+}
+
+// 고른 세트법을 지금 세션에 적용한다.
+// **무게는 앱이 다시 매기지 않는다** — 그 세션이 이미 쓰던 기준 세트 무게를 그대로 물려주고
+// 사다리(배율)만 새로 만든다. 그래서 손수 고친 무게·자동 디로드가 전환으로 사라지지 않는다.
+// baseWeight를 넘기는 곳은 탑세트 무게 입력 하나뿐이고, 그 값은 사용자가 확정한 숫자다.
+function applySchemeToSession(ex, schemeId, baseWeight) {
+  // 저장 자체가 거부되면(재활 잠금·없는 스킴 id) 세트도 건드리지 않는다. 반환값을 버리면
+  // 시트를 거쳐 들어온 경로가 재활 종목의 세트법을 바꿔 버린다(3차 H2).
+  if (!setSetSchemeOverride(ex.name, schemeId)) {
+    state.setSchemeOpen = false;
+    state.topSetSheet = null;
+    render();
+    showToast('재활 종목은 세트법을 바꿀 수 없어요');
+    return null;
+  }
+  var refSet = schemeBaseSet(ex);
+  var before = refSet ? refSet.weight : null;
+  var base = (baseWeight !== undefined && baseWeight !== null) ? baseWeight
+    : (refSet ? refSet.weight : undefined);
+  var plan = rebuildPendingSets(ex, { baseWeight: base });
+  state.setSchemeOpen = false;
+  state.topSetSheet = null;
+  saveActiveSession();
+  render();
+  var afterSet = schemeBaseSet(ex);
+  showToast(schemeChangeToastText(ex.name, schemeId, plan.scheme, before, afterSet ? afterSet.weight : null));
+  return plan;
+}
+
 // 사용자가 세트법을 고름 — 종목별 override로 저장되어 다음 세션에도 유지된다.
 window.applySetScheme = function(schemeId) {
   var session = state.activeSession;
   if (!session) return;
   var ex = session.exercises[session.currentExerciseIdx];
   if (!ex) return;
-  if (!setSetSchemeOverride(ex.name, schemeId)) {
+  // setSetSchemeOverride 와 같은 판정 (재활 잠금 · 없는 스킴 id). 아래 가드보다 먼저 걸러야
+  // 재활 종목이 "이미 쓰고 있어요"가 아니라 이유를 그대로 듣는다.
+  var rules = EXERCISE_CLASS_RULES[getExerciseClass(ex.name)];
+  if (rules.lockScheme || !SET_SCHEMES[schemeId]) {
     showToast('재활 종목은 세트법을 바꿀 수 없어요');
     return;
   }
-  var plan = rebuildPendingSets(ex);
+  // 건너뛴 종목은 세트를 다시 짜는 순간 되살아난다. 건너뛰기 자체가 확인 팝업을 거치는 결정이라
+  // 그 반대편도 조용히 넘어가면 안 된다(2차 #13).
+  if (ex.skipped) {
+    var idx = session.currentExerciseIdx;
+    state.setSchemeOpen = false;
+    render();
+    showConfirm('건너뛴 종목이에요. 되살릴까요?', function() {
+      unskipExercise(idx);
+      openSetSchemeSheet();
+    }, { confirmLabel: '되살리기' });
+    return;
+  }
+  // 지금 **실제로 적용 중인** 세트법과 같으면 바꿀 게 없다. 저장된 선택(getSetScheme)이 아니라
+  // ex.scheme 을 보는 이유: 무게가 없어 스트레이트로 접힌 종목은 저장 선택이 피라미드로 남아 있어,
+  // 그걸 비교하면 무게가 생긴 뒤에도 "이미 쓰고 있어요"만 뜨고 복구가 영영 막힌다(2차 #8).
+  // 탑세트만 예외다 — 세트법이 같아도 **탑 무게를 고치는 일**이 남아 있다(아래 시트가 수정용).
+  if (schemeId !== 'top_backoff' && schemeId === sessionSchemeOf(ex)) {
+    // 세트는 안 바뀌어도 **선택은 확정한다.** 저장을 건너뛰면 접힌 종목(저장은 피라미드, 화면은
+    // 스트레이트)에서 사용자가 고른 스트레이트가 저장되지 않아, 무게가 생기는 순간 마지막 선택과
+    // 다른 세트법으로 조용히 돌아간다(3차 M4).
+    setSetSchemeOverride(ex.name, schemeId);
+    state.setSchemeOpen = false;
+    render();
+    showToast('이미 쓰고 있는 세트법이에요');
+    return;
+  }
+  // 본 세트를 다 끝낸 뒤에도 **드롭은 붙일 수 있다** — 드롭은 마지막 세트의 연장이기 때문이다.
+  // 그 외 세트법은 새로 만들 세트가 없으니 선택만 저장하고 다음 세션으로 넘긴다(2차 #9).
+  // 탑세트도 이 가드를 지나야 한다. 무게를 입력받은 뒤에 세트가 하나도 안 바뀌면 사용자는
+  // 이번 세션이 바뀐 줄 안다 — "바꿨어요" 토스트까지 뜬다(3차 M5).
+  var build = SET_SCHEMES[schemeId].build || {};
+  if (!pendingWorkingSets(ex).length && build.pattern !== 'extend') {
+    setSetSchemeOverride(ex.name, schemeId);
+    state.setSchemeOpen = false;
+    saveActiveSession();
+    render();
+    showToast('남은 세트가 없어요 — 다음 세션부터 ' + SET_SCHEMES[schemeId].kr + '예요');
+    return;
+  }
+  // 탑세트는 무게가 곧 처방이라 앱이 정하지 않고 **물어본다**. 이미 탑세트면 같은 시트가 수정용이다.
+  if (schemeId === 'top_backoff') {
+    openTopSetWeightSheet();
+    return;
+  }
+  applySchemeToSession(ex, schemeId);
+};
+
+// ═══════════════════════════════════════════════
+// 탑세트 무게 입력 시트 — 앱이 정하지 않고 사용자가 확정한다
+// ═══════════════════════════════════════════════
+// 탑세트는 "오늘 가장 무겁게 드는 1세트"라 무게가 곧 처방이다. 추정 1RM에서 역산해 앱이 정하던
+// 방식은 증량 엔진(더블 프로그레션)과 충돌해 폐기했다 — 대신 최근 실측을 미리 채워 주고 확정은
+// 사용자가 누른다. 확인을 누르기 전에는 세트가 하나도 바뀌지 않는다.
+
+window.openTopSetWeightSheet = function() {
+  var session = state.activeSession;
+  if (!session) return;
+  var idx = session.currentExerciseIdx;
+  var ex = session.exercises[idx];
+  if (!ex) return;
+  var sheet = topSetPrefill(ex);
+  // 대상 종목을 **못박는다.** 시트에 뜬 숫자는 이 종목의 무게라, 스와이프로 종목이 넘어간 뒤
+  // 그대로 확인하면 엉뚱한 종목에 엉뚱한 무게가 처방된다(3차 H2).
+  sheet.exIdx = idx;
+  sheet.exName = ex.name;
+  state.topSetSheet = sheet;
   state.setSchemeOpen = false;
-  saveActiveSession();
   render();
-  // 무게를 모르는 종목에서는 감량 기반 스킴이 스트레이트로 접힌다 — 그때 "피라미드로 바꿨어요"라고
-  // 알리면 화면(스트레이트)과 말이 어긋난다. **실제로 적용된 스킴**을 알린다.
-  var applied = (plan && plan.scheme) || schemeId;
-  showToast(applied === schemeId
-    ? SET_SCHEMES[applied].kr + '로 바꿨어요'
-    : SET_SCHEMES[applied].kr + '로 했어요 — 무게를 모르는 종목이라 감량을 못 해요');
+};
+
+window.closeTopSetWeightSheet = function() {
+  state.topSetSheet = null;
+  render();
+};
+
+// 시트를 **열 때 잡아 둔 그 종목**. 그 사이에 종목이 바뀌었으면 null 이다.
+// 스텝퍼·직접 입력의 장비 격자, 확인 가능 판정이 전부 이 하나를 본다.
+function topSetSheetExercise() {
+  var sheet = state.topSetSheet;
+  var session = state.activeSession;
+  if (!sheet || !session) return null;
+  var ex = session.exercises[sheet.exIdx];
+  if (!ex || ex.name !== sheet.exName) return null;
+  return ex;
+}
+
+// 미리 채울 무게와 그 출처. 순서대로 찾는다:
+//  ① 이미 탑세트면 지금 탑 무게 (= 수정 모드)
+//  ② **오늘 이 세션이 쓰고 있는 무게**(기준 세트) — 손수 고친 값·증량일의 새 무게가 여기 있다
+//  ③ 최근 4세션에서 실제로 든 가장 무거운 무게
+//  ④ 기존 추천 경로(getSessionSetPlan) — 첫 시도 종목이 여기로 온다
+// 넷 다 없으면 weight: null. 빈 칸으로 두고 확인을 막는다 — **없던 무게를 앱이 만들지 않는다.**
+//
+// ②가 ③보다 앞이어야 하는 이유: 다른 세트법 전환은 전부 그 세션의 기준 세트 무게를 물려받는데
+// 탑세트만 지난 세션 실측으로 되돌아갔다. 그래서 손수 올린 무게가 사라지고(3차 H3-a),
+// 증량일에 무게만 지난 세션 값으로 되돌아가 더블 프로그레션 게이트가 얼어붙었다(3차 H3-b).
+function topSetPrefill(ex) {
+  if (sessionSchemeOf(ex) === 'top_backoff') {
+    var tops = (ex.sets || []).filter(function(s) {
+      return s && s.role === 'top' && typeof s.weight === 'number';
+    });
+    if (tops.length) return { weight: tops[0].weight, source: 'current' };
+  }
+  var refSet = sessionReferenceSet(ex);
+  if (refSet && typeof refSet.weight === 'number') return { weight: refSet.weight, source: 'session' };
+
+  var recent = recentTopWeight(ex.name);
+  if (typeof recent === 'number') {
+    // 지난 세션 실측은 안전 게이트를 모른다. 통증으로 증량이 잠긴 종목이면 그 처방(prog.weight)을
+    // 넘지 못하게 맞춘다 — 아니면 "증량 보류"를 말하면서 증량을 그리게 된다(3차 H1).
+    var prog = getProgressiveRecommendation(ex.name, ex.targetReps);
+    if (prog && prog.painGated && typeof prog.weight === 'number') {
+      recent = isReverseProgression(ex.name)
+        ? Math.max(recent, prog.weight)     // 역방향은 보조가 적을수록 어렵다
+        : Math.min(recent, prog.weight);
+    }
+    return { weight: recent, source: 'recent' };
+  }
+  var plan = getSessionSetPlan(ex.name, ex.lastWeight, ex.targetReps, { sets: 1, warmup: false });
+  if (typeof plan.weight === 'number') return { weight: plan.weight, source: 'plan' };
+  return { weight: null, source: 'none' };
+}
+
+// 확인을 눌러도 되는 값인가. 역방향(어시스트)은 보조 0kg = 맨몸이 유효한 목표다.
+function topSetWeightValid() {
+  if (!state.topSetSheet) return false;
+  var w = state.topSetSheet.weight;
+  if (typeof w !== 'number') return false;
+  var ex = topSetSheetExercise();
+  return isReverseProgression(ex ? ex.name : '') ? w >= 0 : w > 0;
+}
+
+function currentSessionExercise() {
+  var session = state.activeSession;
+  if (!session) return null;
+  return session.exercises[session.currentExerciseIdx] || null;
+}
+
+// 시트 안 숫자만 부분 갱신 (전체 render는 시트를 깜빡이게 하고 입력 포커스를 끊는다)
+function updateTopSetSheetDisplay() {
+  if (!state.topSetSheet) return;
+  var w = state.topSetSheet.weight;
+  var p = document.getElementById('topset-weight-value');
+  if (p) p.textContent = (typeof w === 'number') ? w : '—';
+  var input = document.getElementById('topset-weight-input');
+  if (input && input.style.display === 'none') input.value = (typeof w === 'number') ? w : '';
+  var btn = document.getElementById('topset-confirm');
+  if (btn) btn.disabled = !topSetWeightValid();
+}
+
+window.adjustTopSetWeight = function(delta) {
+  if (!state.topSetSheet) return;
+  var ex = topSetSheetExercise();
+  if (!ex) return;
+  var base = (typeof state.topSetSheet.weight === 'number') ? state.topSetSheet.weight : 0;
+  state.topSetSheet.weight = snapWeightToEquipment(Math.max(0, base + delta), ex.name);
+  updateTopSetSheetDisplay();
+};
+
+window.enterTopSetEditMode = function() {
+  if (!state.topSetSheet) return;
+  var p = document.getElementById('topset-weight-value');
+  var input = document.getElementById('topset-weight-input');
+  if (!p || !input) return;
+  if (input.style.display !== 'none') return;   // 이미 입력 모드
+  input.value = (typeof state.topSetSheet.weight === 'number') ? state.topSetSheet.weight : '';
+  p.style.display = 'none';
+  input.style.display = 'block';
+  setTimeout(function() {
+    input.focus();
+    try { input.select(); } catch (e) {}
+  }, 0);
+};
+
+// 입력 중에도 확인 버튼의 잠금을 **즉시** 푼다. blur 를 기다리면 숫자를 다 친 뒤에도 버튼이
+// 잠겨 있어, 확인을 누른 첫 탭이 blur 에 먹히고 한 번 더 눌러야 한다(3차 M6).
+window.syncTopSetInput = function() {
+  var input = document.getElementById('topset-weight-input');
+  var btn = document.getElementById('topset-confirm');
+  if (!state.topSetSheet || !input || !btn) return;
+  var n = parseFloat(input.value);
+  var ex = topSetSheetExercise();
+  btn.disabled = isNaN(n) || (isReverseProgression(ex ? ex.name : '') ? n < 0 : n <= 0);
+};
+
+window.commitTopSetEdit = function() {
+  if (!state.topSetSheet) return;
+  var ex = topSetSheetExercise();
+  var input = document.getElementById('topset-weight-input');
+  var p = document.getElementById('topset-weight-value');
+  if (!input || !p || !ex) return;
+  var n = parseFloat(input.value);
+  // 입력을 그 종목 장비 단위로 스냅한다 (덤벨 2kg·그 외 5kg — 실행 불가 무게·오타 방지)
+  if (!isNaN(n) && n >= 0) state.topSetSheet.weight = snapWeightToEquipment(n, ex.name);
+  input.style.display = 'none';
+  p.style.display = '';
+  updateTopSetSheetDisplay();
+};
+
+window.confirmTopSetWeight = function() {
+  if (!topSetWeightValid()) return;
+  var ex = topSetSheetExercise();
+  // 시트를 연 뒤 종목이 바뀌었으면(스와이프·되돌아가기) 조용히 취소한다. 시트의 숫자는
+  // 연 시점의 종목 것이라, 지금 화면의 종목에 적용하면 엉뚱한 처방이 된다(3차 H2).
+  if (!ex || ex !== currentSessionExercise()) {
+    state.topSetSheet = null;
+    render();
+    return;
+  }
+  var weight = state.topSetSheet.weight;
+  // 이미 끝낸 탑세트는 되돌릴 수 없다. 그보다 무거운 값을 받으면 남은 백오프(그 값의 90%)가
+  // 끝낸 탑보다 무거워지고, 토스트는 존재하지 않는 탑 무게를 말한다(3차 M1).
+  var doneTop = completedTopSet(ex);
+  if (doneTop && typeof doneTop.weight === 'number') {
+    weight = isReverseProgression(ex.name)
+      ? Math.max(weight, doneTop.weight)    // 역방향은 보조가 적을수록 어렵다
+      : Math.min(weight, doneTop.weight);
+  }
+  applySchemeToSession(ex, 'top_backoff', weight);
 };
 
 // 슈퍼세트 제안 해제 (기구가 붐비거나 힘들 때 — 사용자 판단 존중)
@@ -2462,17 +2765,11 @@ function applyExerciseSwap(ex, newName) {
 
   // 새 종목의 세트법이 다를 수 있으므로(예: 고립 → 고중량 복합 = 탑세트+백오프)
   // **완료된 세트는 그대로 두고 미완료 세트만** 새 종목 기준으로 다시 만든다.
-  var doneSets = (ex.sets || []).filter(function(s) { return s.completed; });
-  var pendingWorking = (ex.sets || []).filter(function(s) {
-    return !s.completed && !s.isWarmup && !isSetExtension(s);
-  }).length;
-  var plan = getSessionSetPlan(newName, null, ex.targetReps, {
-    sets: pendingWorking,           // 0이면 새 워킹세트를 만들지 않는다 (완료 기록만 새 종목으로 이월)
-    warmup: doneSets.length === 0   // 이미 시작한 종목에 워밍업을 새로 끼워 넣지 않는다
-  });
-  ex.targetReps = repRangeToStr(plan.repRange);
-  ex.scheme = plan.scheme;
-  ex.sets = doneSets.concat(plan.sets);
+  // 재구성 규칙은 세트법 변경과 **같은 함수**를 쓴다 — 따로 두면 한쪽만 고쳐져 어긋난다(2차 #10).
+  // baseWeight 는 넘기지 않는다: 종목이 통째로 바뀌었으니 옛 종목의 무게를 물려줄 이유가 없다.
+  // 남은 워밍업도 버린다 — 옛 종목 무게로 만든 램프라 새 종목에서는 준비가 되지 않는다.
+  // freshExercise 는 같은 이유를 나머지 입력까지 넓힌다 — 폴백 무게·완료된 탑·자동 디로드(3차 H4).
+  var plan = rebuildPendingSets(ex, { keepWarmups: false, freshExercise: true });
   ex.lastWeight = (plan.weight && plan.prog && plan.prog.previousWeight !== undefined) ? plan.prog.previousWeight : null;
 
   // 슈퍼세트 페어는 길항 관계 전제라 종목이 바뀌면 성립하지 않는다 → 양쪽 연결 해제
@@ -2636,16 +2933,14 @@ window.unskipExercise = function(idx) {
 
   restoreSkippedSets(ex);
 
-  // 보관본이 없는 예외(옛 세션 등) — 남은 세트를 현재 세트법 기준으로 새로 만든다(완료분 제외한 만큼)
+  // 보관본이 없는 예외(옛 세션 등) — 남은 세트를 현재 세트법 기준으로 새로 만든다(완료분 제외한 만큼).
+  // 세트법 변경·종목 교체와 **같은 재구성 규칙**을 쓴다(2차 #10).
   if (!(ex.sets || []).some(function(s) { return !s.completed; })) {
-    var done = countWorkingSets(ex.sets);
-    var plan = getSessionSetPlan(ex.name, ex.lastWeight, ex.targetReps, {
-      sets: Math.max(1, 3 - done),
-      warmup: done === 0
+    var refSet = sessionReferenceSet(ex);
+    rebuildPendingSets(ex, {
+      sets: Math.max(1, 3 - countWorkingSets(ex.sets)),
+      baseWeight: refSet ? refSet.weight : undefined   // 이미 든 무게가 있으면 그대로 이어 간다
     });
-    ex.targetReps = repRangeToStr(plan.repRange);
-    ex.scheme = plan.scheme;
-    ex.sets = (ex.sets || []).filter(function(s) { return s.completed; }).concat(plan.sets);
   }
 
   session.currentExerciseIdx = idx;
@@ -3091,32 +3386,45 @@ function renderWorkoutSession() {
         var refs = [];
         var hasHead = false;
 
+        // ⚠️ 큰 숫자는 **이 종목의 기준 세트 무게**다 (sessionReferenceSet — 완료 여부와 무관).
+        // ① prog.weight 를 그대로 찍으면 "동일 무게 90kg" 카드 밑에 탑세트 95kg 세트가 깔리고,
+        // ② 남은 세트만 보면 탑세트를 끝내는 순간 기준이 백오프로 내려가 카드가 "무게 낮추기"로
+        //    뒤집힌다 — 아무것도 안 건드렸는데(2차 #1). 세션 내내 같은 한 세트를 가리켜야 한다.
+        // 무게를 아는 세트가 하나도 없을 때만 추천값으로 돌아간다.
+        var refSet = sessionReferenceSet(exercise);
+
         if (prog && prog.source !== 'rm_estimate' && prog.previousWeight !== undefined) {
           // 실제 수행 기록이 있는 경우
+          var shown = refSet ? refSet.weight : prog.weight;
+
+          // 라벨·색은 추천 갈래가 아니라 **지난 기록과의 비교**로 정한다 — 그래야 세트법 전환처럼
+          // 추천 갈래(maintain)와 실제 무게가 갈라지는 날에도 카드가 사실만 말한다.
+          var heavier = isReverse ? (shown < prog.previousWeight) : (shown > prog.previousWeight);
+          var lighter = isReverse ? (shown > prog.previousWeight) : (shown < prog.previousWeight);
           // 색은 세 갈래다: 나아가는 날(초록) · 멈춰 세우는 날(앰버, 통증·재활) · 그대로 가는 날(주황).
-          var color = (prog.source === 'progress' || prog.graduated) ? 'var(--success)'
+          // **라벨과 같은 순서로 판정한다** — 어긋나면 "통증 — 증량 보류"가 초록으로 칠해진다
+          // (저장소 디자인 규칙: 경고는 var(--warn)).
+          var color = prog.graduated ? 'var(--success)'
             : (prog.source === 'rehab' || prog.painGated) ? 'var(--warn)'
+            : heavier ? 'var(--success)'
             : 'var(--accent)';
-          var label = prog.source === 'progress' ? (isReverse ? '보조 낮추기 — 증량' : '도전 권장')
-            : prog.graduated ? '맨몸 졸업'
+          var label = prog.graduated ? '맨몸 졸업'
             : prog.source === 'rehab' ? '재활 — 무게 유지'
             : prog.painGated ? (isReverse ? '통증 — 보조 유지' : '통증 — 증량 보류')
+            : heavier ? (isReverse ? '보조 낮추기 — 증량' : '도전 권장')
+            : lighter ? (isReverse ? '보조 올리기' : '무게 낮추기')
             : (isReverse ? '동일 보조' : '동일 무게');
           var prevReps = (prog.previousReps || []).filter(function(r) { return r; });
           html += '<p class="rm-label" style="color: ' + color + ';">' + label + '</p>' +
-            weightLine(prog.weight, prog.previousWeight, color);
+            weightLine(shown, prog.previousWeight, color);
           hasHead = true;
           refs.push('지난 기록 ' + unitPrefix + escapeHtml(prog.previousWeight) + 'kg' +
             (prevReps.length ? ' × ' + escapeHtml(prevReps.join('·')) + '회' : ''));
         } else if (prog && prog.source === 'rm_estimate') {
-          // 첫 시도 - 1RM 기반
-          // ⚠️ 카드와 세트가 어긋나지 않게 **실제로 배정된 첫 워킹세트 무게**를 보여준다.
-          // getSessionSetPlan은 rm_estimate일 때 템플릿/AI가 준 무게(fallbackWeight)를 우선하는데,
-          // 여기서 prog.weight(1RM 추정값)를 그대로 찍으면 "75kg 추천" 옆 세트가 60kg으로 뜬다.
-          var firstWorking = (exercise.sets || []).filter(function(s) {
-            return !s.isWarmup && !isSetExtension(s);
-          })[0];
-          var shownWeight = (firstWorking && firstWorking.weight) ? firstWorking.weight : prog.weight;
+          // 첫 시도 - 1RM 기반. 위와 **같은 기준 세트**를 쓴다 —
+          // 갈래마다 다른 세트를 찍으면 오름 사다리(피라미드)에서 카드는 첫 세트, 토스트는 탑세트를 말한다.
+          // 어시스트 맨몸(보조 0kg)은 falsy 지만 유효한 값이라 != null 로 본다.
+          var shownWeight = (refSet && refSet.weight != null) ? refSet.weight : prog.weight;
           html += '<p class="rm-label accent">첫 시도 추천</p>' +
             weightLine(shownWeight, null, 'var(--accent)');
           hasHead = true;
@@ -3176,6 +3484,7 @@ function renderWorkoutSession() {
     exerciseMenuHtml +
     swapSheetHtml +
     buildSetSchemeSheetHtml(session, exercise) +
+    buildTopSetWeightSheetHtml(session, exercise) +
     buildSessionChatSheetHtml(session, exercise) +
     buildMuscleMapZoomHtml();
 }
@@ -3225,6 +3534,73 @@ function buildSetSchemeSheetHtml(session, exercise) {
         noteBlock('아직 안 한 세트에만 적용돼요.',
           '볼륨이 같으면 세트법 간 근비대 차이는 없어요(Angleri 2017). 종목에 맞게 자동으로 골라 두지만 바꿔도 돼요.') +
         '<div style="max-height: 48vh; overflow-y: auto; padding-right: 4px;">' + list + supersetRow + '</div>' +
+      '</div>' +
+    '</div>';
+}
+
+// 탑세트 무게 입력 시트. 세트법 시트에서 '탑세트'를 고르면 이 시트가 대신 뜬다.
+// 미리 채운 숫자는 **최근에 실제로 든 무게**이고, 확인을 눌러야 세트가 바뀐다.
+function buildTopSetWeightSheetHtml(session, exercise) {
+  if (!state.topSetSheet) return '';
+  var reverse = isReverseProgression(exercise.name);
+  var inc = getWeightIncrement(exercise.name);
+  var w = state.topSetSheet.weight;
+  var editing = sessionSchemeOf(exercise) === 'top_backoff';
+  var valid = topSetWeightValid();
+  // 미리 채운 숫자가 어디서 왔는지 한 줄로 밝힌다 — 근거를 모르면 고칠 기준도 없다.
+  var sourceKr = {
+    current: '지금 탑세트 무게예요',
+    session: '오늘 이 종목에서 쓰는 무게예요',
+    recent: '최근 4세션에서 가장 무겁게 든 무게예요',
+    plan: '오늘 추천 무게예요',
+    none: '기록이 없어요 — 무게를 입력해요'
+  }[state.topSetSheet.source] || '';
+
+  return '<div class="sheet-overlay" onclick="closeTopSetWeightSheet()">' +
+      '<div class="sheet" onclick="event.stopPropagation()">' +
+        '<div class="sheet-handle"></div>' +
+        '<div class="flex items-center justify-between mb-3">' +
+          '<div>' +
+            '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">' +
+              (editing ? '탑 무게 수정' : '탑세트') + '</p>' +
+            '<p class="font-bebas text-2xl mt-1">' + escapeHtml(exercise.name) + '</p>' +
+          '</div>' +
+          '<button class="session-header-btn" onclick="closeTopSetWeightSheet()">' + icon('close', 18) + '</button>' +
+        '</div>' +
+
+        '<div class="input-group">' +
+          '<div class="input-label">' +
+            // 어시스트 종목은 스택에 거는 값이 '보조 무게'다 (낮출수록 어려워진다).
+            '<p>' + (reverse ? '탑 보조 무게' : '탑세트 무게') + '</p>' +
+            '<p>' + (reverse ? '낮출수록 ↑난이도' : 'kg') + '</p>' +
+          '</div>' +
+          '<div class="number-display" onclick="enterTopSetEditMode()">' +
+            '<p id="topset-weight-value">' + ((typeof w === 'number') ? w : '—') + '</p>' +
+            '<input id="topset-weight-input" class="number-input" type="number" inputmode="decimal" step="' + inc +
+              '" min="0" style="display:none;" onclick="event.stopPropagation()" onblur="commitTopSetEdit()"' +
+              ' oninput="syncTopSetInput()"' +
+              ' onkeydown="if(event.key===\'Enter\')this.blur()" />' +
+          '</div>' +
+          // 조절 버튼 = 그 종목 장비 단위. 이 시트에서 강조색은 '확인' 하나뿐이다 —
+          // 지금 눌러야 할 버튼이 그것이고, 강조가 둘이면 어느 쪽이 다음 행동인지 흐려진다.
+          '<div class="adj-grid">' +
+            '<button class="adj-btn" onclick="adjustTopSetWeight(' + (-2 * inc) + ')">−' + (2 * inc) + '</button>' +
+            '<button class="adj-btn" onclick="adjustTopSetWeight(' + (-inc) + ')">−' + inc + '</button>' +
+            '<button class="adj-btn" onclick="adjustTopSetWeight(' + inc + ')">+' + inc + '</button>' +
+            '<button class="adj-btn" onclick="adjustTopSetWeight(' + (2 * inc) + ')">+' + (2 * inc) + '</button>' +
+          '</div>' +
+        '</div>' +
+
+        '<p class="text-[11px] font-mono text-stone-500 mt-2">' + sourceKr + '</p>' +
+        noteBlock('탑 1세트 뒤 나머지는 90% 무게로 채워요.',
+          '가장 무거운 1세트로 자극을 주고, 뒤 세트는 감량해 반복을 지켜요. 뒤 세트 반복이 무너지면서 잃는 볼륨 로드를 감량이 되살려요.') +
+
+        // .grid-cols-2 는 이 저장소 CSS에 없다 — 새로 정의하면 이 시트 밖 화면까지 바뀐다.
+        '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px;">' +
+          '<button class="adj-btn" onclick="closeTopSetWeightSheet()">취소</button>' +
+          '<button id="topset-confirm" class="adj-btn accent-btn" onclick="confirmTopSetWeight()"' +
+            (valid ? '' : ' disabled') + '>확인</button>' +
+        '</div>' +
       '</div>' +
     '</div>';
 }
@@ -7209,6 +7585,7 @@ function getTopLayer() {
   if (state.editingSet) return 'setEditor';           // 세트 편집 (세션 위)
   if (state.exerciseSwapOpen) return 'exerciseSwap';  // 종목 고르기 — 교체·추가 공용 (종목 메뉴 위)
   if (state.exerciseMenuOpen) return 'exerciseMenu';  // 종목 메뉴 (세션 위)
+  if (state.topSetSheet) return 'topSetWeight';       // 탑세트 무게 입력 (세트법 시트에서 이어짐)
   if (state.setSchemeOpen) return 'setScheme';        // 세트법 변경 (세션 위)
   if (state.sessionChatOpen) return 'sessionChat';    // 세트 사이 채팅 (세션 위)
   if (state.apiKeyModalOpen) return 'apiKey';         // (더보기 위)
@@ -7252,6 +7629,7 @@ function navBack() {
     case 'setEditor': closeSetEditor(); break;
     case 'exerciseSwap': closeExerciseSwap(); break;
     case 'exerciseMenu': closeExerciseMenu(); break;
+    case 'topSetWeight': closeTopSetWeightSheet(); break;
     case 'setScheme': closeSetSchemeSheet(); break;
     case 'sessionChat': closeSessionChat(); break;
     case 'apiKey': closeApiKeyModal(); break;
@@ -7396,6 +7774,7 @@ function ensureBackTrap() {
     if (state.exerciseSwapOpen) return;
     if (state.exerciseMenuOpen) return;
     if (state.setSchemeOpen) return;
+    if (state.topSetSheet) return;     // 탑 무게를 입력하는 중엔 종목이 넘어가면 안 된다 (3차 H2)
     if (state.completedSession) return;
     if (state.itemDetailSheet) return;
     if (state.resetConfirming) return;
