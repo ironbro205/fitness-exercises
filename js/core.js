@@ -618,6 +618,7 @@ var state = {
   exerciseSwapOpen: false,      // 종목 고르기 시트 (교체·추가 공용)
   exercisePickerMode: 'swap',   // 그 시트가 지금 무슨 일을 하는지 — 'swap'=교체 / 'add'=다음에 추가
   setSchemeOpen: false,
+  lastRecordOpen: false,  // 지난 기록 시트 (운동 중 종목 카드의 [지난 기록] 버튼)
   topSetSheet: null,      // 탑세트 무게 입력 시트 { weight, source } — 확인 전에는 세트를 안 바꾼다
   restTimer: null,
   completedSession: null,

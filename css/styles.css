@@ -1101,6 +1101,38 @@ button {
   margin-bottom: 12px;
 }
 
+/* 운동 중 종목 카드 아래 — [자극 부위] · [지난 기록] */
+.session-fact-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.session-fact-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 9px 10px;
+  border: 1px solid var(--bg-3);
+  border-radius: 12px;
+  background: var(--bg-1);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.session-fact-btn:active { background: var(--bg-2); }
+.session-fact-btn svg { flex-shrink: 0; }
+.session-fact-btn span { white-space: nowrap; }
+
+/* 지난 기록 시트 — 세션 한 회가 한 줄 */
+.last-record-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--bg-3);
+}
+.last-record-row:last-of-type { border-bottom: 0; }
+
 /* 1RM 카드 */
 .rm-card {
   background: linear-gradient(135deg, rgba(var(--warn-rgb), 0.06) 0%, rgba(var(--warn-rgb), 0.01) 100%);

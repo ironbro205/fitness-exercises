@@ -2606,7 +2606,11 @@ function buildSessionChatContext() {
   var prog = getProgressiveRecommendation(ex.name, ex.targetReps);
   if (prog && prog.previousWeight !== undefined && prog.previousWeight !== null) {
     var wPrefix = isReverseProgression(ex.name) ? '보조 ' : '';
-    ctx += '- 지난 세션 수행: ' + wPrefix + prog.previousWeight + 'kg × ' + (prog.previousReps || []).join(',') + '회\n';
+    // 화면과 같은 표기를 쓴다 — 여기만 대표 무게로 접으면 코치가 "40kg 를 10회나 들었네" 로 읽는다(#4).
+    var lastLog = getLastPerformedSets(ex.name);
+    var prevSummary = lastLog ? formatSetsSummary(lastLog.sets, { unitPrefix: wPrefix }) : '';
+    ctx += '- 지난 세션 수행: ' + (prevSummary ||
+      (wPrefix + prog.previousWeight + 'kg × ' + (prog.previousReps || []).join(',') + '회')) + '\n';
   }
   // 세트 사이 코치가 "지난번보다 무겁게"라고 말하면 어시스트 종목에선 정반대 지시가 된다.
   if (isReverseProgression(ex.name)) {

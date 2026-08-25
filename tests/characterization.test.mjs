@@ -2039,6 +2039,150 @@ test('종목 교체 검색 — 옛 별칭 이름으로 검색해도 표준명이
   assert.deepEqual(pressHits.filter((n) => a.isAliasExerciseName(n)), [], '별칭 표기가 그대로 노출되면 안 된다');
 });
 
+// ── 자극 부위·지난 기록을 버튼+팝업으로 (#3) ──
+// 예전엔 자극 근육을 접이식으로, 지난 기록을 카드 안 한 줄로 화면에 늘 깔아 뒀다.
+// 둘 다 세트를 하는 동안 계속 보고 있을 정보가 아니라 궁금할 때 여는 정보다.
+test('운동 중 화면 — 자극 부위·지난 기록은 버튼이고, 인체도가 펼쳐져 있지 않다', () => {
+  const a = loadApp();
+  a.state.data.workoutLog = [{ id: 'x', startTime: Date.now() - 86400000, date: isoDaysAgo(1), sessionType: 'pull',
+    sessionName: 'PULL', sessionKr: 'PULL', duration: 45, sets: 2, completed: true,
+    exercises: [{ name: '랫 풀 다운', setsCount: 2, setsDetail: [
+      { weight: 40, reps: 4, completed: true, isWarmup: false }, { weight: 30, reps: 10, completed: true, isWarmup: false }] }] }];
+  a.storage.set(a.KEYS.WORKOUT_LOG, a.state.data.workoutLog);
+  a.startSession('pull');
+  a.state.activeSession.exercises[0].name = '랫 풀 다운';
+  a.state.activeSession.currentExerciseIdx = 0;
+  if (a.state.activeSession.warmup) a.state.activeSession.warmup.done = true;   // 웜업 가이드를 지나온 상태
+
+  const html = a.renderWorkoutSession();
+  assert.ok(html.includes('openMuscleMapZoom('), '[자극 부위] 버튼이 없다');
+  assert.ok(html.includes('openLastRecord()'), '[지난 기록] 버튼이 없다');
+  assert.ok(!html.includes('mm-fold'), '접이식 인체도가 그대로 남아 있다');
+  assert.ok(!html.includes('mm-views'), '인체도 그림이 화면에 펼쳐져 있다 — 팝업 안에만 있어야 한다');
+
+  // 시트를 열면 그날 한 세트가 전부 나온다 (카드 한 줄은 3묶음까지만 적는다)
+  assert.equal(a.buildLastRecordSheetHtml(a.state.activeSession.exercises[0]), '', '닫혀 있을 땐 아무것도 안 그린다');
+  a.state.lastRecordOpen = true;
+  const sheet = a.buildLastRecordSheetHtml(a.state.activeSession.exercises[0]);
+  assert.ok(sheet.includes('sheet-overlay') && sheet.includes('40kg × 4회, 30kg × 10회'), '지난 기록 시트: ' + sheet.slice(0, 120));
+
+  // 뒤로가기가 시트만 닫아야 한다 — 등록을 빼먹으면 운동이 통째로 끝난다
+  assert.equal(a.getTopLayer(), 'lastRecord');
+  a.state.lastRecordOpen = false;
+  assert.equal(a.getTopLayer(), 'session');
+  a.state.muscleMapZoom = '랫 풀 다운';
+  assert.equal(a.getTopLayer(), 'muscleMapZoom');
+});
+
+test('운동 중 화면 — 기록이 없는 종목엔 [지난 기록] 버튼을 만들지 않는다', () => {
+  const a = loadApp();
+  a.state.data.workoutLog = [];
+  a.storage.set(a.KEYS.WORKOUT_LOG, []);
+  a.startSession('push');
+  const html = a.renderWorkoutSession();
+  assert.ok(!html.includes('openLastRecord()'), '눌러서 "없어요" 를 보게 하지 않는다');
+});
+
+// ── 휴식 표기가 실제로 돌 타이머와 같은 값 ──
+// 헤더가 클래스 기본값(getExerciseRestSec)만 읽어서, AI 가 준 rest 나 세트법이 넣은 set.rest 와
+// 화면 표기가 어긋나 있었다.
+test('휴식 표기 — 화면의 "휴식 N초" 가 실제로 걸릴 값과 같다', () => {
+  const a = loadApp();
+  const cls = a.getExerciseRestSec('머신 체스트 프레스');
+
+  const plain = { name: '머신 체스트 프레스', sets: [{ weight: 60, reps: 8, isWarmup: false }] };
+  assert.equal(a.exerciseRestLabelSec(plain), cls, '지정이 없으면 클래스 기본값');
+
+  const aiRest = { name: '머신 체스트 프레스', rest: '90-120', sets: [{ weight: 60, reps: 8, isWarmup: false }] };
+  assert.equal(a.exerciseRestLabelSec(aiRest), 90, 'AI·사용자가 준 종목 휴식이 먼저다');
+
+  const perSet = { name: '머신 체스트 프레스', rest: '90-120', sets: [{ weight: 60, reps: 8, isWarmup: false, rest: 45 }] };
+  assert.equal(a.exerciseRestLabelSec(perSet), 45, '세트별 휴식이 가장 먼저다');
+
+  // 웜업을 건너뛰고 "다음에 할 본세트" 를 본다
+  const withWarmup = { name: '머신 체스트 프레스', rest: '90', sets: [
+    { weight: 30, reps: 10, isWarmup: true, rest: 45 }, { weight: 60, reps: 8, isWarmup: false }] };
+  assert.equal(a.exerciseRestLabelSec(withWarmup), 90);
+
+  // 화면 문구와 resolveRestSec 이 같은 뿌리(baseRestSec)를 본다
+  assert.equal(a.baseRestSec(aiRest, aiRest.sets[0]), a.exerciseRestLabelSec(aiRest));
+
+  a.state.data.workoutLog = []; a.storage.set(a.KEYS.WORKOUT_LOG, []);
+  a.startSession('push');
+  const ex = a.state.activeSession.exercises[0];
+  // 세트법이 이미 set.rest 를 찍어 두며 그게 종목 rest 보다 우선이다(resolveRestSec 규칙 그대로).
+  // 종목 단위 휴식을 쓰려면 남은 세트의 지정을 지워야 한다 — 휴식 편집도 같은 방식으로 저장한다.
+  ex.sets.forEach((st) => { delete st.rest; });
+  ex.rest = '75';
+  assert.ok(a.renderWorkoutSession().includes('휴식 75초'), '헤더가 종목 휴식을 반영하지 않는다');
+
+  // 세트법이 찍어 둔 값이 있으면 그게 화면에도 뜬다 — 표기와 타이머가 같은 뿌리를 봐야 한다
+  a.state.activeSession.exercises[0].sets.forEach((st) => { if (!st.isWarmup) st.rest = 200; });
+  assert.ok(a.renderWorkoutSession().includes('휴식 200초'), '세트별 휴식이 화면에 안 뜬다');
+});
+
+// ── 지난 기록 표기 (#4) ──
+// 예전에는 대표 무게 하나(그날 가장 무거운 세트)에 전 세트의 횟수를 붙여 적었다.
+// 40kg 4회 + 30kg 10회를 한 날이 "40kg × 4·10회" 로 나와, 30kg 를 든 사실이 사라지고
+// 40kg 를 10회 든 것처럼 읽혔다. 무게가 바뀌면 무게째로 끊어 적는다.
+test('formatSetsSummary — 무게가 바뀌면 무게째로 끊어 적는다', () => {
+  const f = app.formatSetsSummary;
+  assert.equal(f([{ weight: 60, reps: 8 }, { weight: 60, reps: 8 }, { weight: 60, reps: 8 }]), '60kg × 8·8·8회');
+  assert.equal(f([{ weight: 40, reps: 4 }, { weight: 30, reps: 10 }]), '40kg × 4회, 30kg × 10회');
+  assert.equal(f([{ weight: 40, reps: 4 }, { weight: 40, reps: 3 }, { weight: 30, reps: 10 }]), '40kg × 4·3회, 30kg × 10회');
+  assert.equal(f([{ weight: 30, reps: 10 }, { weight: 40, reps: 8 }]), '30kg × 10회, 40kg × 8회', '순서를 지켜야 피라미드가 피라미드로 읽힌다');
+  assert.equal(f([{ weight: null, reps: 8 }, { weight: null, reps: 7 }]), '8·7회', '맨몸은 kg 을 적지 않는다');
+  assert.equal(f([{ weight: 40, reps: 4 }, { weight: 30, reps: 10 }], { unitPrefix: '보조 ' }), '보조 40kg × 4회, 30kg × 10회',
+    '어시스트 접두는 맨 앞에 한 번만');
+  assert.equal(f([{ weight: 50, reps: 8 }, { weight: 45, reps: 8 }, { weight: 40, reps: 8 }], { maxGroups: 2 }), '50kg × 8회, 45kg × 8회 …');
+  assert.equal(f([]), '');
+  assert.equal(f(null), '');
+  assert.equal(f([{ weight: 60, reps: 0 }]), '', '횟수가 없는 세트는 적을 게 없다');
+});
+
+test('loggedExerciseSets — 신형 setsDetail·구형 weights/reps 둘 다 되살린다', () => {
+  const g = app.loggedExerciseSets;
+  const detail = [{ weight: 40, reps: 4, isWarmup: false }, { weight: 20, reps: 10, isWarmup: true }, { weight: 30, reps: 10, isWarmup: false }];
+  assert.equal(app.formatSetsSummary(g({ setsDetail: detail })), '40kg × 4회, 30kg × 10회', '워밍업은 빼고 센다');
+  assert.equal(app.formatSetsSummary(g({ weights: [40, 30], reps: [4, 10] })), '40kg × 4회, 30kg × 10회', '구형 기록도 짝지어 되살린다');
+  assert.equal(app.formatSetsSummary(g({ maxWeight: 60, reps: [8, 8] })), '60kg × 8·8회', '마지막 폴백');
+  assert.equal(app.formatSetsSummary(g(null)), '');
+});
+
+test('지난 기록 — 운동 중 화면·완료 화면·코치 컨텍스트가 같은 문장을 쓴다', () => {
+  const a = loadApp();
+  const sets = [
+    { weight: 40, reps: 4, completed: true, isWarmup: false, role: 'top' },
+    { weight: 30, reps: 10, completed: true, isWarmup: false, role: 'backdown' }
+  ];
+  const logged = { name: '랫 풀 다운', type: '머신', sets: 2, setsCount: 2, setsDetail: sets, weights: [40, 30], reps: [4, 10], maxWeight: 40 };
+  a.state.data.workoutLog = [{ id: 'x', startTime: Date.now() - 86400000, date: isoDaysAgo(1), sessionType: 'pull',
+    sessionName: 'PULL', sessionKr: 'PULL', duration: 45, sets: 2, completed: true, exercises: [logged] }];
+  a.storage.set(a.KEYS.WORKOUT_LOG, a.state.data.workoutLog);
+
+  const WANT = '40kg × 4회, 30kg × 10회';
+
+  a.startSession('pull');
+  a.state.activeSession.exercises[0].name = '랫 풀 다운';
+  a.state.activeSession.currentExerciseIdx = 0;
+  // 기록이 있는 종목은 카드에 요약을 또 적지 않는다 — [지난 기록] 버튼이 전 세트를 보여준다(#3).
+  const session = a.renderWorkoutSession();
+  assert.ok(session.includes('openLastRecord()'), '[지난 기록] 버튼이 없다');
+  assert.ok(!/지난 기록 40kg/.test(session), '카드가 버튼과 같은 사실을 또 적고 있다');
+  a.state.lastRecordOpen = true;
+  assert.ok(a.buildLastRecordSheetHtml(a.state.activeSession.exercises[0]).includes(WANT), '지난 기록 시트');
+  assert.ok(!/40kg × 4·10회/.test(a.buildLastRecordSheetHtml(a.state.activeSession.exercises[0])),
+    '대표 무게 하나로 접힌 옛 표기가 남아 있다');
+  a.state.lastRecordOpen = false;
+
+  a.state.completedSession = { workoutId: 'x', sessionName: 'PULL', sessionType: 'pull', duration: 45,
+    exerciseCount: 1, setCount: 2, newPRs: [], date: new Date(), exercises: [logged] };
+  assert.ok(a.renderWorkoutComplete().includes(WANT), '완료 화면');
+
+  assert.ok(a.buildSessionChatContext(a.state.activeSession).includes('지난 세션 수행: ' + WANT),
+    '코치 컨텍스트 — 여기만 접히면 코치가 "40kg 를 10회나 들었네" 로 읽는다');
+});
+
 // ── 빠져 있던 유명 종목 (#7) ──
 // 삼두 고립이 전부 케이블이라 케이블이 붐비면 대체가 없었고, 가장 유명한 바벨 벤치·오버헤드 프레스도
 // 표에 없어 AI 가 추천하면 이름이 깨졌다. 종목을 넣을 땐 표 네 곳이 함께 움직여야 한다.

@@ -129,6 +129,70 @@ function getRecentPerformances(exerciseName, n) {
   return list.slice(0, n || 2);
 }
 
+// 세트 목록 → 사람이 읽는 한 줄. "지난 기록" 표기의 단일 원천이다.
+//
+// 예전에는 대표 무게 하나(그날 가장 무거웠던 세트)에 전 세트의 횟수를 붙여 적었다.
+// 그래서 40kg 4회 + 30kg 10회를 한 날이 "40kg × 4·10회" 로 나왔다 — 30kg 를 든 사실이
+// 사라지고, 대신 40kg 를 10회 든 것처럼 읽혔다(#4). 무게가 바뀌면 무게째로 끊어 적는다.
+//
+//   60kg×8,8,8            → '60kg × 8·8·8회'
+//   40kg×4, 30kg×10       → '40kg × 4회, 30kg × 10회'
+//   40kg×4,3, 30kg×10     → '40kg × 4·3회, 30kg × 10회'
+//   맨몸 8,8              → '8·8회'
+//
+// opts.unitPrefix: 어시스트 종목의 '보조 ' (숫자가 부하가 아니라 상쇄력이라 접두가 필요하다).
+//                  묶음마다 붙이면 시끄러워서 맨 앞에 한 번만 붙인다.
+// opts.maxGroups:  좁은 줄에 넣을 때 뒤를 '…' 로 자른다 (0 = 자르지 않음).
+function formatSetsSummary(sets, opts) {
+  opts = opts || {};
+  if (!Array.isArray(sets) || !sets.length) return '';
+
+  // 연속으로 같은 무게인 세트끼리 묶는다 — 순서를 지켜야 피라미드가 피라미드로 읽힌다.
+  var groups = [];
+  for (var i = 0; i < sets.length; i++) {
+    var st = sets[i];
+    if (!st) continue;
+    var reps = parseInt(st.reps, 10);
+    if (!(reps > 0)) continue;                       // 횟수 없는 세트는 적을 게 없다
+    var w = (st.weight === null || st.weight === undefined || st.weight === '') ? null : Number(st.weight);
+    if (w !== null && isNaN(w)) w = null;
+    var last = groups[groups.length - 1];
+    if (last && last.weight === w) last.reps.push(reps);
+    else groups.push({ weight: w, reps: [reps] });
+  }
+  if (!groups.length) return '';
+
+  var truncated = false;
+  if (opts.maxGroups > 0 && groups.length > opts.maxGroups) {
+    groups = groups.slice(0, opts.maxGroups);
+    truncated = true;
+  }
+
+  var parts = groups.map(function(g) {
+    var reps = g.reps.join('\u00b7') + '회';
+    return g.weight === null ? reps : (g.weight + 'kg \u00d7 ' + reps);
+  });
+  return (opts.unitPrefix || '') + parts.join(', ') + (truncated ? ' \u2026' : '');
+}
+
+// workoutLog 의 한 종목 기록 → formatSetsSummary 가 먹는 세트 배열.
+// setsDetail(신형)이 있으면 그걸 쓰고, 없으면 weights[]·reps[] 를 짝지어 되살린다(구형 기록).
+// 둘 다 없으면 maxWeight + reps 로 마지막 폴백 — 이때만 옛 "대표 무게" 표기가 남는다.
+function loggedExerciseSets(ex) {
+  if (!ex) return [];
+  if (Array.isArray(ex.setsDetail) && ex.setsDetail.length) {
+    return ex.setsDetail.filter(function(s) { return s && !s.isWarmup; });
+  }
+  if (Array.isArray(ex.weights) && Array.isArray(ex.reps) && ex.weights.length === ex.reps.length) {
+    return ex.weights.map(function(w, i) { return { weight: w, reps: ex.reps[i] }; });
+  }
+  if (Array.isArray(ex.reps)) {
+    var w = (ex.maxWeight !== undefined) ? ex.maxWeight : ex.weight;
+    return ex.reps.map(function(r) { return { weight: w, reps: r }; });
+  }
+  return [];
+}
+
 // 표시용 정렬 — 최신이 위. 원본 배열은 건드리지 않는다(복사본을 정렬).
 // 운동 기록은 저장이 unshift(최신 먼저)라 화면에서 slice(-N).reverse() 를 쓰면
 // 기록이 N개를 넘는 순간 "가장 오래된 것"만 남았다. 자르기 전에 날짜(같은 날이면
@@ -1351,17 +1415,34 @@ function describeSetStructure(sets, exerciseName) {
 // 90초를 넘는 휴식의 직접 이득은 근거가 약하지만(Frontiers 2024), 긴 휴식이 작동하는
 // 메커니즘은 일관되게 "반복 수를 지켜주는 것"이다 → 고정 시간을 늘리기보다 반복이 실제로
 // 떨어졌을 때만 늘리는 쪽이 더 정확하고 시간도 아낀다 (Israetel/JTS 원칙의 코드화).
+// 휴식의 기본값 — 자가조절 가산(+30초) 전. 화면에 "휴식 N초" 로 적는 값이자
+// resolveRestSec 의 출발점이다. 우선순위: 세트별 rest > 종목 rest(AI·사용자 지정) > 클래스 기본값.
+function baseRestSec(exercise, set) {
+  if (set && set.isWarmup) return (typeof set.rest === 'number' && set.rest > 0) ? set.rest : REST_WARMUP_SEC;
+  if (set && typeof set.rest === 'number' && set.rest > 0) return set.rest;
+  var aiRest = exercise && exercise.rest ? parseInt(String(exercise.rest), 10) : NaN; // "120-180" → 120
+  if (!isNaN(aiRest) && aiRest > 0) return aiRest;
+  return getExerciseRestSec(exercise ? exercise.name : '');
+}
+
+// 종목 카드에 적는 "휴식 N초" — 다음에 실제로 걸릴 휴식이다.
+// getExerciseRestSec(클래스 기본값)만 읽으면 AI 가 준 exercise.rest 나 세트법이 넣은 set.rest 를
+// 무시해, 화면에 적힌 초와 실제로 도는 타이머가 어긋난다.
+function exerciseRestLabelSec(exercise) {
+  var sets = (exercise && exercise.sets) || [];
+  for (var i = 0; i < sets.length; i++) {
+    if (sets[i] && !sets[i].completed && !sets[i].isWarmup) return baseRestSec(exercise, sets[i]);
+  }
+  for (var j = sets.length - 1; j >= 0; j--) {          // 본세트를 다 끝냈으면 마지막 본세트 기준
+    if (sets[j] && !sets[j].isWarmup) return baseRestSec(exercise, sets[j]);
+  }
+  return baseRestSec(exercise, null);
+}
+
 function resolveRestSec(exercise, set) {
   if (!set) return getExerciseRestSec(exercise ? exercise.name : '');
-  if (set.isWarmup) return (typeof set.rest === 'number' && set.rest > 0) ? set.rest : REST_WARMUP_SEC;
-
-  var base;
-  if (typeof set.rest === 'number' && set.rest > 0) {
-    base = set.rest;
-  } else {
-    var aiRest = exercise && exercise.rest ? parseInt(String(exercise.rest), 10) : NaN; // "120-180" → 120
-    base = (!isNaN(aiRest) && aiRest > 0) ? aiRest : getExerciseRestSec(exercise ? exercise.name : '');
-  }
+  var base = baseRestSec(exercise, set);
+  if (set.isWarmup) return base;
 
   // 드롭·마이오렙 사이의 짧은 휴식은 그 스킴의 정의 그 자체라 자가조절 대상이 아니다.
   if (isSetExtension(set)) return base;
