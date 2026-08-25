@@ -3147,6 +3147,20 @@ test('처방 줄 — 세트법 이름은 표에서 오고, 스트레이트에는
     '스트레이트 종목에도 세트법 이름이 붙었다');
   assert.ok(!html.includes(app.SET_SCHEMES.straight.short || '스트레이트'),
     '스트레이트는 이름을 적지 않는다');
+
+  // 세트가 실제로 어떻게 나뉘는지(탑세트 1 + 백오프 2 · 90%)는 세트법을 **고르는 자리**로 옮겼다.
+  // 2단계에서 이 줄을 걷으면서 describeSetStructure 가 앱에서 죽을 뻔했다.
+  const b = loadApp();
+  b.state.data.workoutLog = []; b.storage.set(b.KEYS.WORKOUT_LOG, []);
+  b.storage.set(b.KEYS.ONE_RM_DATA, { '스미스 머신 벤치 프레스': 90 });
+  b.startSession('push');
+  const sess = b.state.activeSession, ex = sess.exercises[0];
+  ex.name = '스미스 머신 벤치 프레스';
+  b.setSetSchemeOverride('스미스 머신 벤치 프레스', 'top_backoff');
+  b.rebuildPendingSets(ex, { baseWeight: 60 });
+  b.state.setSchemeOpen = true;
+  const sheet = b.buildSetSchemeSheetHtml(sess, ex);
+  assert.ok(/지금 탑세트 1 \+ 백오프 2/.test(sheet), '세트법 시트가 지금 구성을 안 알려 준다: ' + (sheet.match(/지금 [^<]*/) || [])[0]);
 });
 
 test('세트 구조 문구 — 표기와 실제 세트가 어긋날 수 없다 (엔진에서 센다)', () => {

@@ -3657,6 +3657,11 @@ function buildSetSchemeSheetHtml(session, exercise) {
           '</div>' +
           '<button class="session-header-btn" onclick="closeSetSchemeSheet()">' + icon('close', 18) + '</button>' +
         '</div>' +
+        // 지금 이 종목이 실제로 어떻게 나뉘어 있는지 한 줄. 2단계에서 이 줄을 걷으면서
+        // describeSetStructure 가 앱에서 죽었는데, 세트법을 고르는 자리에서는 이게 곧 근거다.
+        (function(structure) {
+          return structure ? '<p class="text-[11px] font-mono text-stone-500 mb-2">지금 ' + escapeHtml(structure) + '</p>' : '';
+        })(describeSetStructure(exercise.sets, exercise.name)) +
         noteBlock('아직 안 한 세트에만 적용돼요.',
           '볼륨이 같으면 세트법 간 근비대 차이는 없어요. 종목에 맞는 기본값이 잡혀 있고 바꿔도 돼요.') +
         '<div style="max-height: 48vh; overflow-y: auto; padding-right: 4px;">' + list + supersetRow + '</div>' +
