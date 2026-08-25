@@ -141,6 +141,7 @@ var EXERCISE_ALIASES_1RM = {
   '숄더 프레스 머신': '머신 시티드 숄더 프레스',
   '사이드 레터럴 레이즈': '덤벨 사이드 레터럴 레이즈',
   '트라이셉스 푸시다운': '케이블 푸시 다운',
+  '스컬크러셔': '라잉 트라이셉스 익스텐션',
   '랫풀다운': '랫 풀 다운',
   '시티드 로우 머신': '머신 시티드 로우',
   '해머 컬': '덤벨 해머 컬',
@@ -315,6 +316,7 @@ var EXERCISE_BODY_PART_MAP = {
   '해머 인클라인 체스트 프레스': { primary: 'chest_upper', secondary: ['shoulders_front', 'triceps'], compound: true, mainEligible: false, angle: 'incline', equipment: 'hammer_incline_chest_press' },
   '바벨 인클라인 벤치 프레스': { primary: 'chest_upper', secondary: ['shoulders_front', 'triceps'], compound: true, mainEligible: true, angle: 'incline', equipment: 'incline_barbell_press' },
   '스미스 머신 벤치 프레스': { primary: 'chest', secondary: ['shoulders_front', 'triceps'], compound: true, mainEligible: true, angle: 'flat', equipment: 'smith' },
+  '바벨 벤치 프레스': { primary: 'chest', secondary: ['shoulders_front', 'triceps'], compound: true, mainEligible: true, angle: 'flat', equipment: 'barbell' },
   '덤벨 인클라인 플라이': { primary: 'chest_upper', secondary: [], compound: false, mainEligible: false, angle: 'incline', stretched: true, equipment: 'dumbbell' },
   
   // 어깨 (shoulders)
@@ -331,12 +333,19 @@ var EXERCISE_BODY_PART_MAP = {
   '원암 리버스 펙 덱 플라이': { primary: 'shoulders_rear', secondary: [], compound: false, mainEligible: false, equipment: 'rear_pec_deck' },
   '페이스 풀': { primary: 'shoulders_rear', secondary: ['upper_back'], compound: false, mainEligible: false, equipment: 'cable' },
   '스미스 머신 오버헤드 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: true, equipment: 'smith' },
+  '바벨 오버헤드 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: true, equipment: 'barbell' },
   
   // 삼두 (triceps)
   '케이블 푸시 다운': { primary: 'triceps', secondary: [], compound: false, mainEligible: false, equipment: 'cable' },
   '트라이셉스 푸시다운': { primary: 'triceps', secondary: [], compound: false, mainEligible: false, equipment: 'cable' },
   '케이블 오버헤드 트라이셉스 익스텐션': { primary: 'triceps', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'cable' },
   '케이블 트라이셉스 킥백': { primary: 'triceps', secondary: [], compound: false, mainEligible: false, equipment: 'cable' },
+  // 프리웨이트 삼두 고립. 이 둘이 들어오기 전까지 삼두 고립은 전부 케이블이라, 케이블이 붐비면 대체가 없었다.
+  // stretched: 팔을 머리 쪽으로 넘길수록 장두가 늘어난 위치에서 부하를 받는다. 신장 강조의 정도는
+  // 오버헤드 > 라잉 > 푸시다운 순이다 (Maeo 2022: 오버헤드 12주 장두 +28.5% vs 푸시다운 +19.6%).
+  '라잉 트라이셉스 익스텐션': { primary: 'triceps', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'barbell' },
+  '스컬크러셔': { primary: 'triceps', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'barbell' },
+  '덤벨 오버헤드 트라이셉스 익스텐션': { primary: 'triceps', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'dumbbell' },
   '어시스트 딥스': { primary: 'chest_lower', secondary: ['triceps', 'shoulders_front'], compound: true, mainEligible: true, equipment: 'assist_machine' },  // 상체 전방 기울임 = 가슴 강조 (사용자 기본). 직립 + 좁은 그립이면 삼두 강조.
   '딥스': { primary: 'chest_lower', secondary: ['triceps', 'shoulders_front'], compound: true, mainEligible: true, equipment: 'assist_machine' },
   '클로즈 그립 벤치 프레스': { primary: 'triceps', secondary: ['chest', 'shoulders_front'], compound: true, mainEligible: false, equipment: 'barbell' },
@@ -367,9 +376,11 @@ var EXERCISE_BODY_PART_MAP = {
   '원 암 케이블 랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false, stretched: true, equipment: 'cable' },
   '해머 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: false, equipment: 'hammer_row' },
   '스미스 머신 슈러그': { primary: 'traps', secondary: [], compound: false, mainEligible: false, equipment: 'smith' },
+  '바벨 슈러그': { primary: 'traps', secondary: [], compound: false, mainEligible: false, equipment: 'barbell' },
   
   // 이두 (biceps)
   '바벨 컬': { primary: 'biceps', secondary: ['forearms'], compound: false, mainEligible: false, equipment: 'barbell' },
+  '덤벨 컬': { primary: 'biceps', secondary: ['forearms'], compound: false, mainEligible: false, equipment: 'dumbbell' },
   '덤벨 해머 컬': { primary: 'biceps', secondary: ['forearms'], compound: false, mainEligible: false, equipment: 'dumbbell' },
   '해머 컬': { primary: 'biceps', secondary: ['forearms'], compound: false, mainEligible: false, equipment: 'dumbbell' },
   '덤벨 프리처 컬': { primary: 'biceps', secondary: [], compound: false, mainEligible: false, equipment: 'preacher_bench' },
@@ -787,6 +798,19 @@ var EXERCISE_SAFETY = {
     mod: { lower_back: '등받이 있는 벤치에 앉아 허리를 등받이에 붙이고 수행하면 가능하다.', wrist: '회전 동작을 생략하고 중립 그립 프레스로 수행한다.' },
     why: { lower_back: '오버헤드 프레스 계열로 지지 없이 하면 요추 과신전과 축성 부하가 발생한다.', shoulder: '외전 상태에서 내회전-외회전을 오가는 회전 동작이 견봉하 공간을 좁혀 충돌증후군을 직접 유발한다.', wrist: '부하 상태에서 손목·전완의 회전이 더해져 일반 프레스보다 손목 스트레스가 크다.' }
   },
+  '덤벨 오버헤드 트라이셉스 익스텐션': {
+    contra: ['elbow'],
+    caution: ['shoulder'],
+    sub: { elbow: '케이블 푸시 다운', shoulder: '케이블 푸시 다운' },
+    mod: { shoulder: '앉아서 등받이에 기대 어깨 각도를 고정하고 가벼운 무게로 통증 없는 범위까지만 내린다.' },
+    why: { elbow: '팔꿈치가 최대 굴곡·삼두가 최대 신장된 위치에서 저항이 걸려 팔꿈치 힘줄 인장 스트레스가 가장 큰 삼두 변형이다.', shoulder: '팔을 머리 위로 세운 자세 자체가 어깨 최대 굴곡이라 충돌증후군에서 통증을 유발하기 쉽다.' }
+  },
+  '덤벨 컬': {
+    caution: ['elbow', 'wrist'],
+    sub: { elbow: '덤벨 해머 컬', wrist: '덤벨 해머 컬' },
+    mod: { elbow: '하단 완전 신전 직전에서 멈추고 무게를 낮춘다.', wrist: '손목을 중립에 가깝게 두고(해머 그립에 가깝게) 무게를 낮춘다.' },
+    why: { elbow: '팔꿈치 굴곡근 기시부에 반복 부하가 걸려 골프 엘보 부위를 자극할 수 있다. 다만 덤벨은 회전이 자유로워 바벨보다 비틀림이 적다.', wrist: '완전 회외 그립으로 올릴 때 손목 굴곡건에 부하가 실리지만 각도를 스스로 조절할 수 있다.' }
+  },
   '덤벨 인클라인 벤치 프레스': {
     caution: ['shoulder', 'wrist'],
     sub: { shoulder: '머신 체스트 프레스', wrist: '머신 체스트 프레스' },
@@ -830,6 +854,13 @@ var EXERCISE_SAFETY = {
   '라잉 레그 컬': {
     rehab: ['knee'],
     why: { knee: '햄스트링 강화는 경골 전방 전위를 억제해 무릎(특히 전방십자인대) 안정성에 기여하며 관절 압박이 적다.' }
+  },
+  '라잉 트라이셉스 익스텐션': {
+    contra: ['elbow'],
+    caution: ['wrist', 'shoulder'],
+    sub: { elbow: '케이블 푸시 다운', wrist: '케이블 푸시 다운', shoulder: '케이블 푸시 다운' },
+    mod: { wrist: 'EZ 바로 바꿔 손목 각도를 완화하고 무게를 낮춘다.', shoulder: '바를 이마가 아니라 머리 뒤로 내리는 변형 대신, 팔을 세운 채 짧은 범위로만 수행한다.' },
+    why: { elbow: '팔꿈치를 고정한 채 신장된 삼두에 지렛대가 가장 길게 걸려, 통칭이 말해 주듯 팔꿈치 힘줄 부하가 큰 종목이다.', wrist: '곧은 바를 쥐고 무게를 이마 쪽으로 받아 손목이 신전 위치에서 버틴다.', shoulder: '팔을 세워 고정하는 자세라 어깨 부담은 오버헤드 변형보다 작지만, 팔이 머리 뒤로 넘어가면 굴곡 각도가 커진다.' }
   },
   '러시안 트위스트': {
     contra: ['lower_back'],
@@ -923,11 +954,22 @@ var EXERCISE_SAFETY = {
     mod: { lower_back: '가슴 지지 벤치(체스트 서포티드)로 바꾸거나, 상체를 45도 정도만 숙인 각도에서 중립 척추를 유지한 채 반동 없이 통증 없는 중량으로 수행하면 가능하다.', wrist: '스트랩을 사용해 악력 의존을 줄이고 중량을 낮춘다.' },
     why: { lower_back: '상체를 숙인 자세를 세트 내내 유지하며 중량을 당기므로 요추에 지속적인 전단력과 등척성 신전 부하가 걸린다(로우 계열 중 요추 압박이 가장 큰 편 — Fenwick 2009). 다만 가슴 지지·상체 각도·중량으로 이 부하는 크게 줄일 수 있다.', wrist: '고중량 바벨을 악력으로 지지한 채 반복 당기기를 수행해 데드리프트 계열과 동일하게 손목·굴곡건 부하가 크다.' }
   },
+  '바벨 벤치 프레스': {
+    caution: ['shoulder', 'wrist', 'elbow'],
+    sub: { shoulder: '머신 체스트 프레스', wrist: '머신 체스트 프레스', elbow: '머신 체스트 프레스' },
+    mod: { shoulder: '그립을 조금 좁혀 팔꿈치를 몸통에서 45~75도로 두고, 바가 가슴에 닿기 전에 멈추는 부분 가동범위로 한다.', wrist: '바를 손꿈치에 얹어 손목을 전완 위에 수직으로 세우고 손목 보호대를 착용한다.', elbow: '무게를 낮추고 팔꿈치를 완전히 잠그기 직전에 멈춘다.' },
+    why: { shoulder: '바닥 구간에서 어깨가 최대 신전·외전에 놓여 전방 관절낭과 회전근개에 부하가 집중된다. 스미스와 달리 궤적이 자유로워 통증 구간에서 스스로 끊을 수 있다.', wrist: '고정된 바를 쥔 채 큰 무게를 받아 손목이 신전 위치에서 축성 부하를 받는다.', elbow: '락아웃 구간에서 삼두와 팔꿈치 신전 구조물에 부하가 몰린다.' }
+  },
   '바벨 루마니안 데드리프트': {
     caution: ['lower_back', 'wrist', 'elbow'],
     sub: { lower_back: '시티드 레그 컬', wrist: '라잉 레그 컬', elbow: '라잉 레그 컬' },
     mod: { lower_back: '바를 다리에 붙이고 허리가 말리기 직전(무릎~정강이 중간 높이)에서 멈추며, 통증 없는 중량으로 낮춰 힙 힌지를 연습하듯 수행하면 가능하다. 다리로 뻗치는 통증이 있는 날은 하지 않는다.', wrist: '스트랩을 사용하고 중량을 낮춘다.', elbow: '스트랩을 사용해 악력 부하를 줄이고 통증 없는 중량으로 제한한다.' },
     why: { lower_back: '요추를 고정한 채 고관절만 접는 힙 힌지는 디스크 손상 기전인 "부하 상태의 반복 요추 굴곡"을 피하려고 쓰는 기술이라 요통 재활에서도 가르치는 패턴이다(McGill). 다만 같은 무게라면 요추 모멘트가 데드리프트보다 낮다는 근거는 없다 — 안전은 자세·가동범위·무게에서 나온다(같은 20kg도 몸에 붙여 들면 디스크 내압 52% 감소 — Wilke 1999).', wrist: '고중량 바벨을 오래 쥐고 있어 손목·악력에 지속적 부하가 걸린다.', elbow: '고중량 바를 정적으로 쥐는 악력 부하가 상과 힘줄 기시부를 자극한다.' }
+  },
+  '바벨 슈러그': {
+    caution: ['wrist'],
+    mod: { wrist: '스트랩을 사용해 악력 의존을 줄이고 중량을 낮춘다.' },
+    why: { wrist: '무거운 바를 정적으로 오래 쥐고 있어 굴곡건과 수근관에 지속적 압박이 걸린다.' }
   },
   '바벨 스쿼트': {
     contra: ['lower_back'],
@@ -935,6 +977,12 @@ var EXERCISE_SAFETY = {
     sub: { lower_back: '핵 스쿼트', shoulder: '레그 프레스', knee: '레그 프레스', wrist: '레그 프레스' },
     mod: { shoulder: '그립 폭을 넓게 잡아 어깨 외회전 요구를 줄이고 통증이 있으면 머신 스쿼트나 레그 프레스로 바꾼다.', knee: '통증 없는 깊이(하프~파라렐)로 제한하고 중량을 크게 낮춰 수행한다.', wrist: '그립을 넓혀 손목을 중립으로 유지하고 손은 바를 받치기만 한다(필요시 스미스 머신 활용).' },
     why: { lower_back: '등에 얹은 바벨이 요추에 축성 압박을 그대로 싣는다 — 하프 스쿼트 중강도에서도 L3-L4 압박이 체중의 6~10배로 측정됐다(Cappozzo 1985). 대체인 핵 스쿼트는 등판이 몸통 굴곡 모멘트를 없애 기립근 요구를 낮추고(Clark 2019), 머신으로 바꿔도 근비대 손실은 없다(Haugen 2023 메타분석).', shoulder: '바를 받치는 랙 자세가 어깨의 끝범위 외회전·외전을 강제해 회전근개 손상 시 통증을 유발한다.', knee: '깊은 무릎 굴곡에서 슬개대퇴 관절과 반월판 압박이 급증한다.', wrist: '바를 지지하는 손목이 부하 아래에서 신전 위치로 꺾이기 쉽다.' }
+  },
+  '바벨 오버헤드 프레스': {
+    caution: ['lower_back', 'shoulder', 'wrist'],
+    sub: { lower_back: '머신 시티드 숄더 프레스', shoulder: '덤벨 사이드 레터럴 레이즈', wrist: '머신 시티드 숄더 프레스' },
+    mod: { lower_back: '등받이 있는 벤치에 앉아 허리를 붙이고 수행한다. 서서 할 땐 둔근·복근을 조여 갈비뼈가 들리지 않게 한다.', shoulder: '통증 없는 구간까지만 내리고 무게를 낮춘다. 그립을 살짝 넓혀 팔꿈치를 약간 앞으로 둔다.', wrist: '무게를 낮추고 손목을 전완 바로 위에 수직으로 세워 손목 보호대를 착용한다.' },
+    why: { lower_back: '서서 머리 위로 밀면 갈비뼈가 들리며 요추가 과신전되기 쉽다. 궤적이 고정된 스미스와 달리 상체가 흔들려 허리로 버티기 쉽다.', shoulder: '오버헤드 궤적이 견봉하 충돌 각도를 통과한다.', wrist: '바를 쥔 채 머리 위로 미는 구조라 손목이 신전 위치에서 축성 부하를 받는다.' }
   },
   '바벨 인클라인 벤치 프레스': {
     caution: ['shoulder', 'wrist'],
@@ -1270,6 +1318,16 @@ var EXERCISE_SAFETY = {
 
 // 부위 그룹 (대분류) - 부위 균형 분석 및 합산 진단용
 // 형식: 통합부위코드: { kr: '한국어명', subParts: ['세부 부위 코드들...'] }
+//
+// 전완·요추를 여기 두지 않는 이유 (주간 볼륨 추적 대상이 아니다):
+//  - 요추(척추기립근): 직접 종목이 앱에 0개다. 스쿼트·데드에서 거의 등척성으로 버티는 역할이라
+//    근비대 자극이 약하고, RP 등 표준 볼륨 랜드마크 표에도 별도 부위로 들어가지 않는다.
+//    막대가 구조적으로 항상 0 → 영원히 '부족'으로 떠서 진단 전체의 신호를 깎아먹었다.
+//  - 전완: RP는 정식 부위로 다루지만 '중립·회내 당기기가 이미 있으면 주 1회 해머/리버스컬로
+//    MEV~MRV 충족'이라 별도 추적 이득이 작다. 이 앱은 직접 종목이 1개(이지 바 리버스 컬)뿐이라
+//    역시 영구 부족 오탐이었고, 그 오탐이 AI 프롬프트에 '권장 종목: 이지 바 리버스 컬'을 항상
+//    실어 보내 이두 질문에도 리버스컬만 답하게 만들었다(#5).
+// 두 부위 모두 자극 인체도(js/bodymap.js)와 BODY_PART_KR 에는 그대로 남는다 — 표시는 하되 세지 않는다.
 var BODY_PART_GROUPS = {
   chest:           { kr: '가슴',       subParts: ['chest', 'chest_upper', 'chest_lower'], size: 'large' },
   shoulders_front: { kr: '어깨 전면',  subParts: ['shoulders_front'], size: 'small' },
@@ -1279,7 +1337,6 @@ var BODY_PART_GROUPS = {
   lats:            { kr: '광배',       subParts: ['lats'], size: 'large' },
   upper_back:      { kr: '등 중부',    subParts: ['upper_back', 'traps'], size: 'large' },
   biceps:          { kr: '이두',       subParts: ['biceps'], size: 'small' },
-  forearms:        { kr: '전완',       subParts: ['forearms'], size: 'small' },
   quads:           { kr: '대퇴사두',   subParts: ['quads'], size: 'large' },
   hamstrings:      { kr: '햄스트링',   subParts: ['hamstrings'], size: 'large' },
   glutes:          { kr: '둔근',       subParts: ['glutes', 'glutes_med'], size: 'large' },
@@ -1288,29 +1345,27 @@ var BODY_PART_GROUPS = {
   // '작은 근육=간접자극으로 목표 낮춤' 전제가 성립 안 함. 볼륨 목표는 큰 근육 수준으로 둔다(고볼륨 내성).
   // 이 size 값은 해부학적 크기가 아니라 '직접 볼륨 목표' 분류이며, getVolumeDiagnosis·ai.js 볼륨 임계가 함께 참조. 근거: RP/Schoenfeld.
   calves:          { kr: '종아리',     subParts: ['calves'], size: 'large' },
-  abs:             { kr: '복근',       subParts: ['abs', 'obliques'], size: 'small' },
-  lower_back:      { kr: '요추',       subParts: ['lower_back'], size: 'small' }
+  abs:             { kr: '복근',       subParts: ['abs', 'obliques'], size: 'small' }
 };
 
 // 부족 부위 → 권장 종목 매핑 (AI에게 직접 매칭 제공)
-// 각 종목의 primary 부위가 권장 부위와 일치해야 함 (예외: forearms/lower_back은 secondary 자극으로 보충)
+// 각 종목의 primary 부위가 권장 부위와 일치해야 함. 키는 BODY_PART_GROUPS 와 같은 집합을 쓴다
+// (전완·요추는 볼륨 부위가 아니라 여기에도 없다 — 위 BODY_PART_GROUPS 주석 참고).
 var WEAK_PART_EXERCISE_MAP = {
   chest:           ['머신 펙 덱 플라이', '케이블 플라이', '머신 체스트 프레스', '스미스 인클라인 벤치 프레스'],
   shoulders_front: ['머신 시티드 숄더 프레스', '덤벨 숄더 프레스', '덤벨 아놀드 프레스'],
   shoulders_side:  ['케이블 원 암 레터럴 레이즈', '덤벨 사이드 레터럴 레이즈'],
   shoulders_rear:  ['리버스 펙 덱 플라이', '페이스 풀', '원암 리버스 펙 덱 플라이'],
-  triceps:         ['케이블 푸시 다운', '케이블 오버헤드 트라이셉스 익스텐션', '케이블 트라이셉스 킥백'],
+  triceps:         ['케이블 오버헤드 트라이셉스 익스텐션', '라잉 트라이셉스 익스텐션', '케이블 푸시 다운', '케이블 트라이셉스 킥백'],
   lats:            ['풀업', '클로즈 그립 랫 풀 다운', '랫 풀 다운', '케이블 암 풀 다운'],
   upper_back:      ['머신 시티드 로우', 'T 바 로우', '케이블 슈러그'],
   biceps:          ['인클라인 덤벨 컬', '이지 바 프리처 컬', '바벨 컬'],
-  forearms:        ['이지 바 리버스 컬', '덤벨 해머 컬(이두 보조 자극)'],
   quads:           ['레그 프레스', '핵 스쿼트', '머신 레그 익스텐션', '덤벨 불가리안 스플릿 스쿼트'],
   hamstrings:      ['바벨 루마니안 데드리프트', '시티드 레그 컬', '머신 라잉 레그 컬'],
   glutes:          ['머신 힙 쓰러스트', '머신 힙 어브덕션'],
   adductors:       ['힙 어덕션'],
   calves:          ['레그 프레스 카프 레이즈', '스탠딩 카프 레이즈', '덤벨 시티드 카프 레이즈'],
-  abs:             ['머신 시티드 크런치', '케이블 크런치', '케이블 팔로프 프레스'],
-  lower_back:      ['바벨 루마니안 데드리프트(햄스트링 보조 자극)']
+  abs:             ['머신 시티드 크런치', '케이블 크런치', '케이블 팔로프 프레스']
 };
 
 // 부위 한국어

@@ -2238,6 +2238,43 @@ function buildEquipmentPromptBlock() {
   return block;
 }
 
+// 부위별 종목 목록 (코치 채팅용).
+// 코치 프롬프트에는 원래 종목 목록이 하나도 안 들어갔다. 그래서 모델이 팔 얘기만 나오면
+// 프롬프트 안에서 유일하게 본 종목 이름(볼륨 부족 부위의 권장 종목)을 그대로 읊었다 —
+// "이두 뭐 하지?" 에 리버스컬만 답하던 원인이다(#5). 앱이 아는 종목을 통째로 보여주면
+// 코치가 없는 종목을 지어내지도, 한 종목에 갇히지도 않는다.
+// 루틴 생성기의 종목 풀과 달리 1RM·태그를 싣지 않는다 — 그 수치는 "사용자 현재 데이터"에 이미 있고,
+// 여긴 "무슨 이름을 써도 되는가"만 알려주면 된다. 장비로 못 하는 종목은 뺀다.
+function buildExerciseCatalogBlock() {
+  var ORDER = ['chest', 'chest_upper', 'chest_lower', 'shoulders_front', 'shoulders_side', 'shoulders_rear',
+               'triceps', 'lats', 'upper_back', 'traps', 'biceps', 'forearms',
+               'quads', 'hamstrings', 'glutes', 'glutes_med', 'adductors', 'calves', 'abs', 'obliques'];
+  var byPart = {};
+  Object.keys(EXERCISE_BODY_PART_MAP).forEach(function(name) {
+    if (isAliasExerciseName(name)) return;    // 같은 운동의 별칭 표기 — 표준명만 보여준다
+    if (!isExerciseAvailable(name)) return;   // 헬스장에 없는 기구 종목은 이름조차 꺼내지 않는다
+    var info = EXERCISE_BODY_PART_MAP[name];
+    var key = info.primary;
+    if (!byPart[key]) byPart[key] = [];
+    byPart[key].push(name + (info.stretched ? '(신장강조)' : ''));
+  });
+
+  var lines = [];
+  ORDER.forEach(function(key) {
+    if (!byPart[key] || !byPart[key].length) return;
+    lines.push('- ' + (BODY_PART_KR[key] || key) + ': ' + byPart[key].join(', '));
+    delete byPart[key];
+  });
+  Object.keys(byPart).forEach(function(key) {   // ORDER 에 빠진 부위가 생겨도 잃지 않는다
+    lines.push('- ' + (BODY_PART_KR[key] || key) + ': ' + byPart[key].join(', '));
+  });
+
+  return '## 이 앱이 아는 종목 (부위별 — 이 이름들로만 말한다)\n' +
+    lines.join('\n') + '\n' +
+    '- 목록에 없는 종목은 추천하지 말 것. 사용자가 물으면 "이 앱에는 없다"고 밝히고 같은 부위의 위 종목으로 대체한다.\n' +
+    '- 종목을 고를 땐 사용자가 노린 근육을 주동근으로 쓰는 것을 먼저 고른다. 예를 들어 이두는 회외(손바닥이 위를 보는) 컬이 먼저이고, 리버스 컬은 상완요골근·상완근 종목이라 이두 질문의 답이 아니다.\n';
+}
+
 // 장비 코드 가드레일: AI가 프롬프트를 어기고 이 헬스장에 없는 기구 종목을 넣었을 때
 // 같은 부위의 보유 종목으로 교체(마땅한 게 없으면 제거)한다.
 // 안전 가드레일(applySafetyGuardrail) **다음에** 돌린다 — 안전 교체가 우선이고, 그 결과를 장비로 한 번 더 거른다.

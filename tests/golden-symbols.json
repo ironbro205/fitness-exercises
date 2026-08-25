@@ -1,5 +1,5 @@
 {
-  "functionCount": 464,
+  "functionCount": 465,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -50,6 +50,7 @@
     "buildChatSignalChipHtml",
     "buildCoachSystemParts",
     "buildEquipmentPromptBlock",
+    "buildExerciseCatalogBlock",
     "buildFallbackInterval",
     "buildFallbackWalk",
     "buildMobilityGuideHtml",
