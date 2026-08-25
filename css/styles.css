@@ -1101,6 +1101,52 @@ button {
   margin-bottom: 12px;
 }
 
+/* 종목 편집 시트 — 미리보기·운동 중 공용 */
+.ex-edit-row {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--bg-3);
+}
+.ex-edit-row:last-of-type { border-bottom: 0; }
+.ex-edit-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.ex-edit-label { font-size: 13px; color: var(--text-soft); }
+.ex-edit-val { font-size: 20px; font-family: var(--font-mono); font-weight: 600; }
+.ex-edit-unit { font-size: 12px; color: var(--text-muted); margin-left: 3px; }
+.ex-edit-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 6px;
+}
+.ex-edit-step {
+  min-height: 40px;
+  border: 1px solid var(--bg-3);
+  border-radius: 10px;
+  background: var(--bg-1);
+  color: var(--text-soft);
+  font-size: 14px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+.ex-edit-step:active { background: var(--bg-2); }
+
+/* 종목 고르기 검색칸 */
+.swap-search {
+  width: 100%;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  border-radius: 10px;
+  color: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
 /* 운동 중 종목 카드 아래 — [자극 부위] · [지난 기록] */
 .session-fact-row {
   display: grid;

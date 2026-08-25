@@ -348,28 +348,3 @@ window.closeMuscleMapZoom = function() {
   render();
 };
 
-// 루틴 미리보기에서 종목 한 줄을 펼치고/접는다 (한 번에 한 종목만).
-//
-// index 뿐 아니라 **그때 그 자리에 있던 종목명**도 같이 기억한다.
-// 루틴이 새로 생성·수정돼 종목 순서가 바뀌면 index 만으로는 엉뚱한 줄이 저절로 펼쳐진다.
-// (state.generatedRoutine 을 대입하는 곳이 12군데라 거기마다 초기화하는 대신,
-//  읽는 쪽에서 이름까지 맞는지 확인하는 편이 새 경로가 생겨도 안 깨진다)
-window.toggleRoutineExerciseMap = function(idx) {
-  var routine = state.generatedRoutine;
-  var ex = routine && routine.exercises ? routine.exercises[idx] : null;
-  if (!ex) return;
-
-  if (isRoutineExerciseMapOpen(idx, ex.name)) {
-    state.routineExMapIdx = null;
-    state.routineExMapKey = null;
-  } else {
-    state.routineExMapIdx = idx;
-    state.routineExMapKey = ex.name;
-  }
-  render();
-};
-
-// 이 자리(index)의 이 종목(name)이 펼쳐진 상태인가 — 둘 다 맞아야 한다.
-function isRoutineExerciseMapOpen(idx, name) {
-  return state.routineExMapIdx === idx && state.routineExMapKey === name;
-}

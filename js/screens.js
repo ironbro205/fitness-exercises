@@ -607,8 +607,6 @@ window.backToStep2 = function() {
 
 window.toggleRoutinePreview = function() {
   state.routinePreviewExpanded = !state.routinePreviewExpanded;
-  state.routineExMapIdx = null;   // 접었다 펴면 인체도도 초기화
-  state.routineExMapKey = null;
   saveWizard();
   render();
 };
@@ -758,20 +756,16 @@ function renderWorkoutStep3() {
       var p = buildPrescriptionValues(ex, previewPlan);
       var weight = (p.weight !== null && p.weight !== '')
         ? (isReverseProgression(ex.name) ? '보조 ' : '') + escapeHtml(p.weight) + 'kg × ' : '';
-      // 종목 줄을 누르면 그 종목의 자극 근육 인체도를 펼친다 (한 번에 한 종목만).
-      // index + 종목명이 둘 다 맞아야 펼친다 — 루틴이 바뀌면 저절로 닫힌다.
-      var mapOpen = isRoutineExerciseMapOpen(idx, ex.name);
-      var mapHtml = mapOpen ? buildMuscleMapBlock(ex.name, { compact: true }) : '';
+      // 종목 줄을 누르면 종목 편집 시트가 열린다 — 자극 근육 인체도도 그 안에 있다.
       // 자유 구성은 2단계(처방 표)를 건너뛰므로 세트법을 알 자리가 여기뿐이다.
       // 한 줄에 들어가야 해서 짧은 이름(탑+백오프)만 붙이고, 스트레이트면 아무것도 안 붙인다.
       var schemeShort = (previewPlan && previewPlan.scheme !== 'straight' && SET_SCHEMES[previewPlan.scheme])
         ? ' · ' + SET_SCHEMES[previewPlan.scheme].short : '';
       previewExHtml +=
-        '<div class="routine-preview-ex" onclick="toggleRoutineExerciseMap(' + idx + ')">' +
+        '<div class="routine-preview-ex" onclick="openExerciseEdit(\'preview\', ' + idx + ')">' +
           '<span class="flex-1"><strong>' + (idx + 1) + '. ' + escapeHtml(ex.name) + '</strong></span>' +
           '<span class="routine-preview-ex-stat text-stone-400 font-mono text-[11px]">' + weight + escapeHtml(p.reps) + ' · ' + escapeHtml(p.sets) + '세트' + escapeHtml(schemeShort) + '</span>' +
-        '</div>' +
-        (mapHtml ? '<div style="margin: -2px 0 6px;">' + mapHtml + '</div>' : '');
+        '</div>';
     });
   }
   
@@ -949,7 +943,34 @@ function renderWorkoutStep3() {
       '</div>' +
 
     '</div>' +
+    // 미리보기 위에 뜨는 시트들 — 종목 편집과 그 안에서 이어지는 종목 고르기.
+    buildExerciseEditSheetHtml() +
+    buildPreviewSwapSheetHtml() +
     buildMuscleMapZoomHtml();
+}
+
+// 미리보기용 종목 고르기 시트 — 운동 중 화면의 것과 같은 목록·검색을 쓴다(buildSwapListHtml).
+function buildPreviewSwapSheetHtml() {
+  if (!state.exerciseSwapOpen || state.exercisePickerScope !== 'preview') return '';
+  var ctx = exercisePickerContext();
+  if (!ctx) return '';
+  return '<div class="sheet-overlay" onclick="closeExerciseSwap()">' +
+      '<div class="sheet" onclick="event.stopPropagation()">' +
+        '<div class="sheet-handle"></div>' +
+        '<div class="flex items-center justify-between mb-3">' +
+          '<div>' +
+            '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">종목 바꾸기</p>' +
+            '<p class="font-bebas text-2xl mt-1">' + escapeHtml(ctx.exercise.name) + '</p>' +
+          '</div>' +
+          '<button class="session-header-btn" onclick="closeExerciseSwap()" aria-label="닫기">' + icon('close', 18) + '</button>' +
+        '</div>' +
+        '<input type="text" class="swap-search" id="swap-search-input" placeholder="종목 이름으로 찾기" ' +
+          'value="' + escapeHtml(state._swapQuery || '') + '" oninput="updateSwapSearch(this.value)" />' +
+        '<div id="swap-list" style="max-height: 48vh; overflow-y: auto; padding-right: 4px;">' +
+          buildSwapListHtml(state._swapQuery) +
+        '</div>' +
+      '</div>' +
+    '</div>';
 }
 
 // 생성된 루틴으로 운동 세션 시작
@@ -974,10 +995,15 @@ window.startGeneratedRoutine = function() {
     // 가드레일 + 추천 일치: 세트 시작 무게·횟수를 추천 카드와 같은 계산(getSessionSetPlan)으로.
     // (AI 무게를 따로 스냅하면 "5kg 유지" 카드 옆 세트가 6kg로 어긋나는 문제 방지)
     // 세트 배열 자체도 여기서 나온다 — 세트법(스킴)별 무게·횟수·역할이 세트마다 개별로 붙는다.
-    var plan = getSessionSetPlan(ex.name, ex.weight, ex.reps || '8-12', {
-      sets: ex.sets || 3,
+    // routinePlanOpts 로 미리보기와 같은 옵션을 쓴다 — 사용자가 편집 시트에서 정한 무게가
+    // 여기서 추천 엔진에 덮이면, 미리보기에 적힌 숫자와 실제 세션이 어긋난다.
+    var plan = getSessionSetPlan(ex.name, ex.weight, ex.reps || '8-12', routinePlanOpts(ex, {
       warmup: !!ex.isMain   // 워밍업은 메인 종목만 (기존 동작 유지)
-    });
+    }));
+
+    // 루틴이 휴식을 들고 왔으면(사용자가 편집 시트에서 정했거나 AI 가 처방) 세트법이 찍은
+    // 세트별 휴식을 걷어낸다. 안 걷으면 set.rest 가 우선이라 그 값이 조용히 무시된다.
+    if (parseInt(String(ex.rest || ''), 10) > 0) clearSchemeRestOverrides({ sets: plan.sets });
 
     return {
       name: ex.name,
@@ -1462,6 +1488,7 @@ window.endSession = function(fromBack) {
     state.setSchemeOpen = false;        // 세션 위 시트는 세션과 함께 닫는다 (남으면 다른 화면의 뒤로가기·스와이프를 먹는다)
     state.lastRecordOpen = false;
     state.muscleMapZoom = null;
+    state.exerciseEdit = null;
     state.topSetSheet = null;
     state.exerciseSwapOpen = false;
     state.exerciseMenuOpen = false;
@@ -1676,6 +1703,7 @@ function finalizeSession() {
   state.setSchemeOpen = false;          // 세션 위 시트는 세션과 함께 닫는다
   state.lastRecordOpen = false;
   state.muscleMapZoom = null;
+  state.exerciseEdit = null;
   state.topSetSheet = null;
   state.exerciseSwapOpen = false;
   state.exerciseMenuOpen = false;
@@ -2105,7 +2133,7 @@ function startRestTimerTick() {
       restTickerInterval = null;
       // 시트(편집/종목변경/채팅)가 열려 있으면 전체 렌더 대신 타이머 UI만 제거
       // (채팅 입력·스트리밍 중 전체 렌더는 키보드/포커스/말풍선을 끊는다)
-      if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.topSetSheet || state.sessionChatOpen || state.muscleMapZoom || state.lastRecordOpen) {
+      if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.topSetSheet || state.sessionChatOpen || state.muscleMapZoom || state.lastRecordOpen || state.exerciseEdit) {
         var wrapEl = document.querySelector('.rest-timer-wrap');
         if (wrapEl && wrapEl.parentNode) wrapEl.parentNode.removeChild(wrapEl);
       } else {
@@ -2115,7 +2143,7 @@ function startRestTimerTick() {
     }
     // 시트(편집/종목변경/세트사이채팅)가 열려 있으면 시트가 깜빡이지 않도록 타이머만 부분 갱신
     // (채팅은 입력·스트리밍 중이라 전체 렌더가 매초 돌면 입력이 초기화된다)
-    if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.topSetSheet || state.sessionChatOpen || state.muscleMapZoom || state.lastRecordOpen) {
+    if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.topSetSheet || state.sessionChatOpen || state.muscleMapZoom || state.lastRecordOpen || state.exerciseEdit) {
       var remaining = state.restTimer.duration - elapsed;
       var el = document.getElementById('rest-time-text');
       if (el) {
@@ -2172,6 +2200,8 @@ window.closeExerciseMenu = function() {
 
 // 운동 중 현재 종목을 다른 종목으로 교체
 window.openExerciseSwap = function() {
+  state.exercisePickerScope = 'session';
+  state.exercisePickerIdx = null;
   state.exerciseMenuOpen = false;
   state.exercisePickerMode = 'swap';
   state.exerciseSwapOpen = true;
@@ -2181,6 +2211,8 @@ window.openExerciseSwap = function() {
 
 // 현재 종목 **바로 다음 순서**에 새 종목 넣기 (같은 시트를 추가 모드로 연다)
 window.openExerciseAdd = function() {
+  state.exercisePickerScope = 'session';
+  state.exercisePickerIdx = null;
   state.exerciseMenuOpen = false;
   state.exercisePickerMode = 'add';
   state.exerciseSwapOpen = true;
@@ -2191,6 +2223,8 @@ window.openExerciseAdd = function() {
 window.closeExerciseSwap = function() {
   state.exerciseSwapOpen = false;
   state.exercisePickerMode = 'swap';
+  state.exercisePickerScope = 'session';
+  state.exercisePickerIdx = null;
   state._swapQuery = '';
   render();
 };
@@ -2596,11 +2630,30 @@ window.releaseSuperset = function() {
 // 종목 후보 목록 HTML. 검색어 없음 = 같은 부위(기존 동작), 검색어 있음 = 전체 종목 검색.
 // 등록 안 된 이름은 "그대로" 카드로 자유 입력 허용.
 // 교체(swap)와 추가(add)가 이 목록을 공유한다 — 다른 건 버튼 문구와 눌렀을 때 부르는 함수뿐이다.
-function buildSwapListHtml(query) {
+// 종목 고르기 시트가 지금 무엇을 가리키고 있는가.
+// 운동 중이면 현재 종목, AI 루틴 미리보기면 편집 시트에서 넘겨받은 index 다.
+// 두 화면이 같은 목록·검색·정렬을 쓰기 위한 단일 진입점이다.
+function exercisePickerContext() {
+  if (state.exercisePickerScope === 'preview') {
+    var r = state.generatedRoutine;
+    var list = (r && r.exercises) || null;
+    var i = state.exercisePickerIdx;
+    if (!list || !list[i]) return null;
+    return { scope: 'preview', exercises: list, idx: i, exercise: list[i] };
+  }
   var session = state.activeSession;
-  if (!session) return '';
-  var exercise = session.exercises[session.currentExerciseIdx];
-  if (!exercise) return '';
+  if (!session || !session.exercises[session.currentExerciseIdx]) return null;
+  return { scope: 'session', exercises: session.exercises, idx: session.currentExerciseIdx,
+           exercise: session.exercises[session.currentExerciseIdx] };
+}
+
+function buildSwapListHtml(query) {
+  var ctx = exercisePickerContext();
+  if (!ctx) return '';
+  var session = { exercises: ctx.exercises };
+  var exercise = ctx.exercise;
+  // 미리보기 종목은 targetReps 대신 reps 를 들고 있다 — 목록의 "지난 무게 → 추천" 힌트가 이 값을 쓴다.
+  if (!exercise.targetReps && exercise.reps) exercise = Object.assign({}, exercise, { targetReps: exercise.reps });
   var addMode = isExerciseAddMode();
   var actionFn = addMode ? 'addExerciseAfterCurrent' : 'swapCurrentExercise';
   // 줄마다 '교체 →'를 반복하면 그 글자가 목록의 배경이 된다 → 다른 목록과 같은 회색 > 아이콘 하나로.
@@ -2715,9 +2768,11 @@ window.updateSwapSearch = function(q) {
 };
 
 window.swapCurrentExercise = function(newName) {
-  if (!state.activeSession) { state.exerciseSwapOpen = false; render(); return; }
-  var idx = state.activeSession.currentExerciseIdx;
-  var ex = state.activeSession.exercises[idx];
+  var ctx = exercisePickerContext();
+  if (!ctx) { closeExerciseSwap(); return; }
+  if (ctx.scope === 'preview') { swapPreviewExercise(ctx, newName); return; }
+  var idx = ctx.idx;
+  var ex = ctx.exercise;
   if (!ex || ex.name === newName) {
     state.exerciseSwapOpen = false;
     render();
@@ -2736,6 +2791,32 @@ window.swapCurrentExercise = function(newName) {
   }
   applyExerciseSwap(ex, newName);
 };
+
+// 미리보기 종목 교체. 미리보기는 세트 배열이 없고 계획 필드(name/type/sets/reps/weight)만 있으므로,
+// 새 종목에 맞는 값만 갈아 끼우면 된다. 무게는 새 종목의 기록·1RM 에서 다시 뽑는다 —
+// 옛 종목의 무게를 그대로 들고 가면 레그프레스 120kg 이 사이드 레터럴에 붙는다.
+function swapPreviewExercise(ctx, newName) {
+  var name = String(newName || '').trim();
+  var ex = ctx.exercise;
+  if (!name || name === ex.name) { closeExerciseSwap(); return; }
+
+  var info = EXERCISE_BODY_PART_MAP[name] || getExercisePart(name);
+  var rules = EXERCISE_CLASS_RULES[getExerciseClass(name)];
+  var plan = getSessionSetPlan(name, null, rules.repMin + '-' + rules.repMax, { sets: parseInt(ex.sets, 10) || 3 });
+
+  ex.name = name;
+  ex.type = info ? (info.compound ? '복합' : '고립') : '고립';
+  ex.isMain = !!ex.isMain && !!(info && info.mainEligible === true);
+  ex.reps = repRangeToStr(plan.repRange);
+  ex.weight = plan.weight;
+  delete ex.weightLocked;              // 새 종목의 무게는 사용자가 정한 값이 아니다
+  delete ex.rest;                      // 종목이 바뀌면 휴식도 새 종목 기준으로
+  delete ex.note;
+  delete ex.rir;
+
+  closeExerciseSwap();
+  showToast(name + ' 으로 바꿨어요');
+}
 
 // 종목 교체 실제 적용 (확인 팝업 통과 후)
 function applyExerciseSwap(ex, newName) {
@@ -3326,7 +3407,8 @@ function renderWorkoutSession() {
     '<div class="px-5' + (state._exSwipeDir ? ' ex-slide-' + state._exSwipeDir : '') + '" style="padding-bottom: ' + ((state.restTimer || dropCueHtml) ? '180px' : '120px') + ';">' +
 
       // 현재 종목 정보
-      '<div class="exercise-info-card">' +
+      '<div class="exercise-info-card" role="button" tabindex="0" aria-label="종목 편집" ' +
+        'onclick="openExerciseEdit(\'session\', ' + session.currentExerciseIdx + ')">' +
         '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">현재 종목' +
           (exercise.addedInSession ? ' · 운동 중 추가' : '') + (exercise.skipped ? ' · 건너뜀' : '') + '</p>' +
         '<h2 class="font-bebas text-2xl mb-1">' + escapeHtml(exercise.name) + '</h2>' +
@@ -3483,8 +3565,235 @@ function renderWorkoutSession() {
     buildTopSetWeightSheetHtml(session, exercise) +
     buildSessionChatSheetHtml(session, exercise) +
     buildLastRecordSheetHtml(exercise) +
+    buildExerciseEditSheetHtml() +
     buildMuscleMapZoomHtml();
 }
+
+// ═══════════════════════════════════════════════
+// 종목 편집 시트 (#1) — AI 루틴 미리보기와 운동 중 화면이 같은 시트를 쓴다
+// ═══════════════════════════════════════════════
+// 예전에는 미리보기에서 종목을 눌러도 인체도만 펼쳐졌고, 무게·횟수·세트를 바꾸려면
+// AI 와 대화하는 수밖에 없었다. 쉬는시간은 앱 어디에서도 못 바꿨다.
+//
+// 열 때 index 와 종목명을 **함께** 못박고 읽을 때 둘 다 맞는지 확인한다 — 시트가 떠 있는 동안
+// 루틴이 다시 생성되거나 종목을 넘기면 엉뚱한 종목을 고치게 된다(탑세트 무게 시트와 같은 방식).
+function exerciseEditTarget() {
+  var e = state.exerciseEdit;
+  if (!e) return null;
+  var list = (e.scope === 'preview')
+    ? (state.generatedRoutine && state.generatedRoutine.exercises)
+    : (state.activeSession && state.activeSession.exercises);
+  var ex = (list && list[e.idx]) || null;
+  return (ex && ex.name === e.name) ? ex : null;
+}
+
+function isExerciseEditPreview() {
+  return !!state.exerciseEdit && state.exerciseEdit.scope === 'preview';
+}
+
+// 지금 화면에 적을 값들. 미리보기는 루틴 필드를, 세션은 실제 세트에서 읽는다.
+function exerciseEditValues(ex) {
+  if (isExerciseEditPreview()) {
+    var rest = parseInt(String(ex.rest || ''), 10);
+    return {
+      weight: (ex.weight === undefined || ex.weight === null) ? null : Number(ex.weight),
+      reps: String(ex.reps || '8-12'),
+      sets: parseInt(ex.sets, 10) > 0 ? parseInt(ex.sets, 10) : 3,
+      rest: (rest > 0) ? rest : getExerciseRestSec(ex.name)
+    };
+  }
+  var refSet = schemeBaseSet(ex);                    // 세트법의 기준 세트(= 가장 무거운 워킹세트)
+  var working = (ex.sets || []).filter(function(st) { return st && !st.isWarmup && !isSetExtension(st); });
+  return {
+    weight: (refSet && typeof refSet.weight === 'number') ? refSet.weight : null,
+    reps: String(ex.targetReps || '8-12'),
+    sets: working.length,
+    rest: exerciseRestLabelSec(ex)
+  };
+}
+
+// 목표 반복은 '8-10' 같은 범위다. 폭을 지킨 채 통째로 밀어 준다 ('8-10' +1 → '9-11').
+function shiftRepRange(text, delta) {
+  var m = String(text || '').match(/^\s*(\d+)\s*-\s*(\d+)\s*$/);
+  if (m) {
+    var lo = Math.max(1, parseInt(m[1], 10) + delta);
+    var hi = Math.max(lo, parseInt(m[2], 10) + delta);
+    return lo + '-' + hi;
+  }
+  var n = parseInt(text, 10);
+  return String(Math.max(1, (isNaN(n) ? 8 : n) + delta));
+}
+
+var EXERCISE_EDIT_REST_STEP = 15;   // 헬스장에서 세는 단위. 30초 격자는 너무 거칠고 5초는 눌러도 안 바뀐 느낌이다
+
+// 종목 단위 휴식(exercise.rest)이 실제로 먹히게 한다.
+// 세트법이 찍어 둔 set.rest 가 종목 휴식보다 우선이라(resolveRestSec), 안 지우면 바꾼 값이
+// 화면에도 타이머에도 안 나타난다 — 사용자가 미리보기에서 90초로 줄여도 세션은 150초로 돈다.
+// 다만 워밍업(45초)과 드롭·마이오렙(10초)의 짧은 휴식은 **그 세트법의 정의 자체**라 그대로 둔다.
+function clearSchemeRestOverrides(ex) {
+  ((ex && ex.sets) || []).forEach(function(st) {
+    if (!st || st.completed || st.isWarmup || isSetExtension(st)) return;
+    delete st.rest;
+  });
+}
+
+// 종목 값 하나를 실제로 바꾼다.
+// **편집 시트의 스텝 버튼과 코치의 [적용] 버튼이 같은 문을 쓴다** — 두 경로가 갈라지면
+// "코치는 바꿨다는데 화면은 그대로" 가 다시 생긴다(#2).
+// value 는 절대값이다(증감이 아니라). 반환값 = 실제로 바뀌었는가.
+function applyExerciseChange(ex, isPreview, field, value) {
+  if (!ex) return false;
+  var v = exerciseEditValues(ex);
+
+  if (field === 'weight') {
+    var w = snapWeightToEquipment(Math.max(0, Number(value)), ex.name);
+    if (!(w >= 0)) return false;
+    if (isPreview) { ex.weight = w; ex.weightLocked = true; }
+    else rebuildPendingSets(ex, { baseWeight: w });
+  } else if (field === 'reps') {
+    var reps = String(value || '').trim();
+    if (!/^\d+(\s*-\s*\d+)?$/.test(reps)) return false;
+    if (isPreview) ex.reps = reps;
+    else { ex.targetReps = reps; rebuildPendingSets(ex, { baseWeight: v.weight }); }
+  } else if (field === 'sets') {
+    var n = Math.max(1, Math.min(10, parseInt(value, 10)));
+    if (!(n >= 1)) return false;
+    if (isPreview) ex.sets = n;
+    else rebuildPendingSets(ex, { sets: n, baseWeight: v.weight });
+  } else if (field === 'rest') {
+    var sec = Math.max(30, Math.min(REST_MAX_SEC, parseInt(value, 10)));
+    if (!(sec >= 30)) return false;
+    ex.rest = sec;
+    if (!isPreview) clearSchemeRestOverrides(ex);
+  } else {
+    return false;
+  }
+
+  if (isPreview) state.routinePreviewExpanded = true;
+  else saveActiveSession();
+  return true;
+}
+
+window.adjustExerciseEdit = function(field, delta) {
+  var ex = exerciseEditTarget();
+  if (!ex) { closeExerciseEditNow(); return; }
+  var v = exerciseEditValues(ex);
+  var preview = isExerciseEditPreview();
+
+  var next;
+  if (field === 'weight') next = (v.weight === null ? 0 : v.weight) + delta;
+  else if (field === 'reps') next = shiftRepRange(v.reps, delta);
+  else if (field === 'sets') next = v.sets + delta;
+  else if (field === 'rest') next = v.rest + delta;
+  else return;
+
+  applyExerciseChange(ex, preview, field, next);
+  render();
+};
+
+// 미리보기에서 종목 빼기 / 운동 중에는 건너뛰기(기존 흐름 재사용)
+window.exerciseEditRemove = function() {
+  var ex = exerciseEditTarget();
+  if (!ex) { closeExerciseEditNow(); return; }
+  if (!isExerciseEditPreview()) { closeExerciseEditNow(); skipCurrentExercise(); return; }
+
+  var idx = state.exerciseEdit.idx;
+  var name = ex.name;
+  showConfirm('‘' + name + '’ 을 루틴에서 뺄까요?', function() {
+    var r = state.generatedRoutine;
+    if (r && r.exercises && r.exercises[idx] && r.exercises[idx].name === name) {
+      r.exercises.splice(idx, 1);
+      r.totalSets = r.exercises.reduce(function(sum, e) { return sum + (parseInt(e.sets, 10) || 0); }, 0);
+    }
+    closeExerciseEditNow();
+  }, { confirmLabel: '빼기', danger: true });
+};
+
+window.exerciseEditSwap = function() {
+  var ex = exerciseEditTarget();
+  if (!ex) { closeExerciseEditNow(); return; }
+  var scope = state.exerciseEdit.scope;
+  var idx = state.exerciseEdit.idx;
+  state.exerciseEdit = null;
+  state.exercisePickerScope = scope;
+  state.exercisePickerIdx = idx;
+  state.exercisePickerMode = 'swap';
+  state.exerciseSwapOpen = true;
+  state._swapQuery = '';
+  render();
+};
+
+function exerciseEditRow(label, unit, value, field, steps) {
+  var btns = steps.map(function(d) {
+    return '<button class="ex-edit-step" onclick="adjustExerciseEdit(\'' + field + '\', ' + d + ')">' +
+      (d > 0 ? '+' + d : '−' + Math.abs(d)) + '</button>';
+  }).join('');
+  return '<div class="ex-edit-row">' +
+      '<div class="ex-edit-head">' +
+        '<p class="ex-edit-label">' + label + '</p>' +
+        '<p class="ex-edit-val">' + escapeHtml(value) + '<span class="ex-edit-unit">' + unit + '</span></p>' +
+      '</div>' +
+      '<div class="ex-edit-steps">' + btns + '</div>' +
+    '</div>';
+}
+
+function buildExerciseEditSheetHtml() {
+  var ex = exerciseEditTarget();
+  if (!ex) return '';
+  var v = exerciseEditValues(ex);
+  var preview = isExerciseEditPreview();
+  var inc = getWeightIncrement(ex.name);
+  var reverse = isReverseProgression(ex.name);
+
+  var rows =
+    exerciseEditRow(reverse ? '보조 무게' : '무게', 'kg', (v.weight === null ? '—' : v.weight), 'weight', [-2 * inc, -inc, inc, 2 * inc]) +
+    exerciseEditRow('목표 반복', '회', v.reps, 'reps', [-1, 1]) +
+    exerciseEditRow('세트', '개', v.sets, 'sets', [-1, 1]) +
+    exerciseEditRow('쉬는시간', '초', v.rest, 'rest', [-EXERCISE_EDIT_REST_STEP, EXERCISE_EDIT_REST_STEP]);
+
+  return '<div class="sheet-overlay" onclick="closeExerciseEdit()">' +
+      '<div class="sheet" onclick="event.stopPropagation()">' +
+        '<div class="sheet-handle"></div>' +
+        '<div class="flex items-center justify-between mb-3">' +
+          '<div>' +
+            '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">종목 편집</p>' +
+            '<p class="font-bebas text-2xl mt-1">' + escapeHtml(ex.name) + '</p>' +
+          '</div>' +
+          '<button class="session-header-btn" onclick="closeExerciseEdit()" aria-label="닫기">' + icon('close', 18) + '</button>' +
+        '</div>' +
+        (preview ? '' : noteBlock('아직 안 한 세트에만 적용돼요.',
+          '이미 끝낸 세트의 기록은 그대로 둬요. 무게·세트를 바꾸면 남은 세트를 세트법에 맞춰 다시 짜요.')) +
+        rows +
+        // 인체도는 컨트롤 **아래**에 둔다 — 위에 두면 좁은 화면에서 정작 고칠 숫자가 화면 밖으로 밀린다.
+        buildMuscleMapBlock(ex.name, { compact: true }) +
+        '<div class="flex gap-2 mt-4">' +
+          '<button class="adj-btn" style="flex:1;" onclick="exerciseEditSwap()">종목 바꾸기</button>' +
+          '<button class="adj-btn" style="flex:1; color: var(--danger);" onclick="exerciseEditRemove()">' +
+            (preview ? '종목 빼기' : '종목 건너뛰기') + '</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+}
+
+window.openExerciseEdit = function(scope, idx) {
+  var list = (scope === 'preview')
+    ? (state.generatedRoutine && state.generatedRoutine.exercises)
+    : (state.activeSession && state.activeSession.exercises);
+  var ex = (list && list[idx]) || null;
+  if (!ex) return;
+  state.exerciseEdit = { scope: scope, idx: idx, name: ex.name };
+  render();
+};
+
+function closeExerciseEditNow() {
+  state.exerciseEdit = null;
+  render();
+}
+
+window.closeExerciseEdit = function() {
+  if (!state.exerciseEdit) return;
+  animateSheetCloseThen(closeExerciseEditNow);
+};
 
 // 종목 카드 아래 버튼 두 개 — [자극 부위] · [지난 기록].
 // 예전엔 자극 근육을 접이식으로, 지난 기록을 카드 안 한 줄로 화면에 늘 깔아 뒀다.
@@ -3680,8 +3989,9 @@ function buildTopSetWeightSheetHtml(session, exercise) {
 function buildSessionChatSheetHtml(session, exercise) {
   if (!state.sessionChatOpen) return '';
 
-  var msgs = (session.chat || []).map(function(m) {
-    return '<div class="chat-line ' + (m.role === 'user' ? 'user' : 'coach') + '">' + renderMarkdown(m.content) + '</div>';
+  var msgs = (session.chat || []).map(function(m, mi) {
+    return '<div class="chat-line ' + (m.role === 'user' ? 'user' : 'coach') + '">' +
+      renderMarkdown(m.content) + buildCoachApplyCardHtml(m, mi) + '</div>';
   }).join('');
 
   var streamingHtml = state._sessionChatStreaming
@@ -3817,7 +4127,9 @@ function sendSessionChatMessage() {
   callSessionCoachAPI(apiMessages, function(fullText) {
     if (gen !== _sessionChatGen) return; // 옛 스트림이 새 화면을 덮어쓰지 않게
     var el = document.getElementById('session-chat-stream');
-    if (el) { el.textContent = fullText; scrollSessionChatToBottom(); }
+    // 응답 끝에 붙는 ```apply 블록은 사용자에게 보일 것이 아니다. 스트리밍 중에는 아직
+    // 닫히지 않아 parseCoachApplyBlock 이 못 잡으므로, 여는 표시부터 잘라서 보여준다.
+    if (el) { el.textContent = stripCoachApplyBlock(fullText); scrollSessionChatToBottom(); }
   }).then(function(result) {
     if (state.activeSession !== session) return; // 세션 종료 후 도착 → 통째로 폐기
     if (gen !== _sessionChatGen) return;         // 다른 전송으로 대체됨 → 폐기
@@ -3825,7 +4137,13 @@ function sendSessionChatMessage() {
     if (result.error) {
       session.chat.push({ role: 'assistant', content: result.error, isError: true });
     } else {
-      session.chat.push({ role: 'assistant', content: result.text });
+      var parsedApply = parseCoachApplyBlock(result.text);
+      var chatMsg = { role: 'assistant', content: parsedApply.clean };
+      if (parsedApply.actions.length) {
+        chatMsg.apply = parsedApply.actions;
+        chatMsg.applyStatus = 'pending';
+      }
+      session.chat.push(chatMsg);
     }
     saveActiveSession();
     if (state.sessionChatOpen) { render(); scrollSessionChatToBottom(true); }
@@ -5299,11 +5617,16 @@ window.sendCoachMessage = async function() {
       content: result.error 
     });
   } else {
-    // 코치 원문 그대로 표시 (자동 기억 저장 폐지 — 기억은 수동 입력만: openCoachMemory)
-    state.coachMessages.push({
-      role: 'assistant',
-      content: result.text
-    });
+    // 코치 원문 그대로 표시 (자동 기억 저장 폐지 — 기억은 수동 입력만: openCoachMemory).
+    // 다만 응답 끝의 ```apply 블록은 본문에서 떼어 [적용] 카드로 만든다 —
+    // 코치가 "바꿨어요" 라고만 하고 앱은 그대로였던 문제(#2)를 이 승인 흐름이 막는다.
+    var parsedApply = parseCoachApplyBlock(result.text);
+    var coachMsg = { role: 'assistant', content: parsedApply.clean };
+    if (parsedApply.actions.length) {
+      coachMsg.apply = parsedApply.actions;
+      coachMsg.applyStatus = 'pending';
+    }
+    state.coachMessages.push(coachMsg);
   }
 
   // 저장
@@ -5457,6 +5780,115 @@ function renderMarkdown(text) {
 }
 
 // ═══════════════════════════════════════════════
+// 코치 제안 적용 (#2) — 코치는 제안만 하고, 반영은 [적용] 을 누를 때 일어난다
+// ═══════════════════════════════════════════════
+// 코치 채팅은 글자만 돌려줄 뿐 앱을 전혀 못 건드렸다. 그래서 "쉬는시간 줄여줘" 에
+// "줄였어요" 라고 답해 놓고 실제 운동은 그대로였다. 자동 적용은 하지 않는다 —
+// 오인식으로 무게·휴식이 멋대로 바뀌면 더 나쁘다(루틴 수정 화면이 쓰던 승인 흐름과 같다).
+
+// 이 제안이 가리키는 종목을 찾는다. 이름이 없으면 "지금 하고 있는 종목".
+// 운동 중이면 세션에서, 아니면 AI 루틴 미리보기에서 찾는다.
+function coachActionTarget(act) {
+  var name = act && act.exercise ? canonicalExerciseName(act.exercise) : '';
+  var session = state.activeSession;
+  if (session && session.exercises && session.exercises.length) {
+    if (!name) {
+      var cur = session.exercises[session.currentExerciseIdx];
+      return cur ? { ex: cur, isPreview: false } : null;
+    }
+    for (var i = 0; i < session.exercises.length; i++) {
+      if (canonicalExerciseName(session.exercises[i].name) === name) {
+        return { ex: session.exercises[i], isPreview: false };
+      }
+    }
+  }
+  var routine = state.generatedRoutine;
+  if (routine && routine.exercises && routine.exercises.length) {
+    if (!name) return { ex: routine.exercises[0], isPreview: true };
+    for (var j = 0; j < routine.exercises.length; j++) {
+      if (canonicalExerciseName(routine.exercises[j].name) === name) {
+        return { ex: routine.exercises[j], isPreview: true };
+      }
+    }
+  }
+  return null;
+}
+
+function buildCoachApplyCardHtml(msg, msgIdx) {
+  if (!msg || !msg.apply || !msg.apply.length) return '';
+
+  var lines = msg.apply.map(function(act) {
+    var t = coachActionTarget(act);
+    var cur = t ? exerciseEditValues(t.ex)[act.action] : null;
+    var name = act.exercise || (t && t.ex ? t.ex.name : '');
+    return '<div class="change-line">' +
+        '<div class="change-icon modify">~</div>' +
+        '<span class="text-stone-200">' + escapeHtml(describeCoachAction(
+          { action: act.action, exercise: name, value: act.value }, cur)) + '</span>' +
+      '</div>';
+  }).join('');
+
+  var actionHtml;
+  if (msg.applyStatus === 'applied') {
+    actionHtml = '<div class="change-approval-actions" style="grid-template-columns: 1fr;">' +
+      '<button class="change-approval-btn applied">' + icon('check', 14) + ' 적용 완료</button></div>';
+  } else if (msg.applyStatus === 'cancelled') {
+    actionHtml = '<div class="change-approval-actions" style="grid-template-columns: 1fr;">' +
+      '<button class="change-approval-btn cancel" style="pointer-events: none; opacity: 0.6;">취소됨</button></div>';
+  } else if (!coachActionTarget(msg.apply[0])) {
+    // 적용할 곳이 없으면 버튼을 살려 두지 않는다 — 눌러서 실패를 보게 하지 않는다.
+    actionHtml = '<div class="change-approval-actions" style="grid-template-columns: 1fr;">' +
+      '<button class="change-approval-btn cancel" style="pointer-events: none; opacity: 0.6;">진행 중인 운동이 없어요</button></div>';
+  } else {
+    actionHtml = '<div class="change-approval-actions">' +
+      '<button class="change-approval-btn cancel" onclick="cancelCoachApply(' + msgIdx + ')">취소</button>' +
+      '<button class="change-approval-btn apply" onclick="approveCoachApply(' + msgIdx + ')">' +
+        icon('check', 14) + ' 적용하기</button></div>';
+  }
+
+  return '<div class="routine-change-card">' +
+      '<p class="text-[11px] font-mono accent uppercase tracking-widest mb-1\\.5">제안된 변경사항</p>' +
+      lines + actionHtml +
+    '</div>';
+}
+
+function coachApplyMessage(msgIdx) {
+  var list = (state.sessionChatOpen && state.activeSession && state.activeSession.chat)
+    ? state.activeSession.chat : state.coachMessages;
+  return { list: list, msg: list && list[msgIdx] };
+}
+
+window.approveCoachApply = function(msgIdx) {
+  var found = coachApplyMessage(msgIdx);
+  var msg = found.msg;
+  if (!msg || !msg.apply || msg.applyStatus === 'applied') return;
+
+  var done = [];
+  msg.apply.forEach(function(act) {
+    var t = coachActionTarget(act);
+    if (!t) return;
+    if (applyExerciseChange(t.ex, t.isPreview, act.action, act.value)) {
+      done.push(describeCoachAction({ action: act.action, exercise: '', value: act.value }));
+    }
+  });
+
+  if (!done.length) { showToast('지금은 적용할 수 없어요'); return; }
+  msg.applyStatus = 'applied';
+  if (state.activeSession) saveActiveSession();
+  storage.set(KEYS.COACH_HISTORY, state.coachMessages);
+  render();
+  showToast(done.join(' · ') + ' 적용했어요');
+};
+
+window.cancelCoachApply = function(msgIdx) {
+  var found = coachApplyMessage(msgIdx);
+  if (!found.msg || !found.msg.apply) return;
+  found.msg.applyStatus = 'cancelled';
+  storage.set(KEYS.COACH_HISTORY, state.coachMessages);
+  render();
+};
+
+// ═══════════════════════════════════════════════
 // 코치 채팅 - 렌더
 // ═══════════════════════════════════════════════
 function renderCoachChat() {
@@ -5464,11 +5896,12 @@ function renderCoachChat() {
   
   // 메시지 렌더
   var messagesHtml = '';
-  state.coachMessages.forEach(function(msg) {
+  state.coachMessages.forEach(function(msg, mi) {
     if (msg.role === 'assistant') {
       messagesHtml += 
         '<div class="coach-msg-bot">' +
           '<p class="msg-content">' + renderMarkdown(msg.content) + '</p>' +
+          buildCoachApplyCardHtml(msg, mi) +
         '</div>';
     } else if (msg.role === 'user') {
       messagesHtml += 
@@ -7652,6 +8085,7 @@ function getTopLayer() {
   // 모달/시트 (다른 화면 위에 겹쳐 뜨는 가장 위 레이어)
   if (state.muscleMapZoom) return 'muscleMapZoom';    // 자극 근육 확대 (세션/미리보기 위)
   if (state.itemDetailSheet) return 'itemDetail';     // 기록 상세 (탭 위)
+  if (state.exerciseEdit) return 'exerciseEdit';      // 종목 편집 (미리보기·세션 위)
   if (state.editingSet) return 'setEditor';           // 세트 편집 (세션 위)
   if (state.exerciseSwapOpen) return 'exerciseSwap';  // 종목 고르기 — 교체·추가 공용 (종목 메뉴 위)
   if (state.exerciseMenuOpen) return 'exerciseMenu';  // 종목 메뉴 (세션 위)
@@ -7697,6 +8131,7 @@ function navBack() {
     // 모달/시트 — 기존 닫기 함수 그대로 재사용(애니가 있는 4종은 그 안에서 처리)
     case 'muscleMapZoom': closeMuscleMapZoom(); break;
     case 'itemDetail': closeItemDetail(); break;
+    case 'exerciseEdit': closeExerciseEdit(); break;
     case 'setEditor': closeSetEditor(); break;
     case 'exerciseSwap': closeExerciseSwap(); break;
     case 'exerciseMenu': closeExerciseMenu(); break;
