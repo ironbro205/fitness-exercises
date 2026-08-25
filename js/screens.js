@@ -961,8 +961,15 @@ function renderWorkoutStep2() {
   // 종목 수·세트·시간은 헤더 오른쪽 한 줄로 옮겼다.
   // 앱이 부상·장비 때문에 종목을 바꿨다면 그 사실은 알린다. 걷어낸 건 AI 가 쓴 '주의사항'
   // 산문이지, **앱이 사용자 루틴에 한 일**이 아니다(사용자 지시: 주의사항 삭제).
-  var swapNote = (routine.swaps && routine.swaps.length)
-    ? '<p class="routine-swap-note">' + icon('info', 13) + escapeHtml(routine.swaps.join(' · ')) + '</p>'
+  //
+  // API 키가 없어 템플릿으로 짠 루틴이면 그것도 같은 자리에서 알린다. 옛 '기본 루틴' 배지는
+  // 'AI 분석 완료' 배지와 한 몸이라 같이 걷혔는데, 이건 정반대 뜻이라 없으면 사용자가
+  // 템플릿 루틴을 AI 맞춤으로 오해한다. 문구는 '지금 뭘 하면 되는지' 한 줄이다.
+  var notes = [];
+  if (routine.isFallback) notes.push('기본 루틴 — 더보기에서 API 키를 넣으면 내 1RM에 맞춰 짜여요');
+  if (routine.swaps && routine.swaps.length) notes.push(routine.swaps.join(' · '));
+  var swapNote = notes.length
+    ? '<p class="routine-swap-note">' + icon('info', 13) + escapeHtml(notes.join(' · ')) + '</p>'
     : '';
 
   return headerHtml +

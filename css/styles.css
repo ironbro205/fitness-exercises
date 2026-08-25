@@ -1189,33 +1189,7 @@ button {
 }
 
 /* 도전 권장 카드 — 라벨 한 줄 + 큰 숫자 + 참고 한 줄. 문장은 없다. */
-.rm-label {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-.rm-weight {
-  margin-top: 2px;
-  font-family: var(--font-bebas);
-  font-size: 40px;
-  line-height: 1.1;
-  letter-spacing: 0.02em;
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px;
-}
 /* 이전 무게는 "어디서 왔는지"만 알면 되므로 작고 흐리게 — 큰 숫자는 오늘 들 무게 하나다. */
-.rm-weight-prev { font-size: 22px; color: var(--text-muted); }
-.rm-weight-arrow { font-size: 20px; color: var(--text-muted); }
-.rm-weight-pre { font-size: 15px; color: var(--text-muted); }
-.rm-unit { font-size: 13px; color: var(--text-muted); }
-.rm-divider {
-  height: 1px;
-  background: var(--bg-3);
-  margin: 12px 0 8px;
-}
 .rm-ref {
   font-size: 11px;
   font-family: var(--font-mono);
@@ -2145,24 +2119,6 @@ button {
 /* ═══════════════════════════════════════════════
    COMPONENT: AI 추천 카드
    ═══════════════════════════════════════════════ */
-.ai-rec-card {
-  background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
-  border: 1px solid rgba(var(--accent-rgb), 0.4);
-  border-radius: 28px;
-  padding: 24px;
-  position: relative;
-  overflow: hidden;
-}
-.ai-rec-card::before {
-  content: '';
-  position: absolute;
-  top: -20%;
-  right: -10%;
-  width: 50%;
-  height: 140%;
-  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.15) 0%, transparent 70%);
-  pointer-events: none;
-}
 .ai-badge {
   display: inline-flex;
   align-items: center;
@@ -2176,26 +2132,6 @@ button {
   border-radius: 9999px;
   background: rgba(var(--accent-rgb), 0.15);
   border: 1px solid rgba(var(--accent-rgb), 0.4);
-}
-.ai-rec-reason {
-  background: rgba(var(--white-rgb), 0.03);
-  border-radius: 12px;
-  padding: 12px 14px;
-  margin-top: 16px;
-}
-.ai-rec-caution {
-  background: rgba(var(--warn-rgb), 0.08);
-  border: 1px solid rgba(var(--warn-rgb), 0.2);
-  border-radius: 12px;
-  padding: 10px 14px;
-  margin-top: 10px;
-}
-.ai-rec-suggestion {
-  background: rgba(var(--accent-rgb), 0.06);
-  border: 1px solid rgba(var(--accent-rgb), 0.2);
-  border-radius: 12px;
-  padding: 10px 14px;
-  margin-top: 10px;
 }
 
 /* ═══════════════════════════════════════════════
@@ -2373,51 +2309,6 @@ button {
    ═══════════════════════════════════════════════ */
 
 /* AI 분석 헤더 카드 */
-.routine-analysis-card {
-  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.12) 0%, rgba(var(--accent-rgb), 0.02) 100%);
-  border: 1px solid rgba(var(--accent-rgb), 0.4);
-  border-radius: 24px;
-  padding: 22px;
-  margin-bottom: 16px;
-  position: relative;
-  overflow: hidden;
-}
-.routine-analysis-card::before {
-  content: '';
-  position: absolute;
-  top: -30%;
-  right: -10%;
-  width: 50%;
-  height: 160%;
-  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.15) 0%, transparent 70%);
-  pointer-events: none;
-}
-.routine-meta-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(var(--accent-rgb), 0.2);
-  position: relative;
-}
-.routine-meta-item {
-  text-align: center;
-}
-.routine-meta-num {
-  font-family: var(--font-bebas);
-  font-size: 24px;
-  color: white;
-  letter-spacing: 0.02em;
-}
-.routine-meta-label {
-  font-size: 10px;
-  font-family: var(--font-mono);
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin-top: 2px;
-}
 
 /* 루틴 종목 카드 */
 .routine-exercise {
@@ -2549,24 +2440,6 @@ button {
 .routine-btn-start:active { transform: scale(0.98); }
 
 /* AI 한 줄 카드 (이유, 주의 등) */
-.routine-insight {
-  background: rgba(var(--white-rgb), 0.03);
-  border-radius: 12px;
-  padding: 12px 14px;
-  margin-top: 10px;
-  position: relative;
-}
-.routine-insight.warning {
-  background: rgba(var(--warn-rgb), 0.06);
-  border: 1px solid rgba(var(--warn-rgb), 0.2);
-}
-.routine-insight-label {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-bottom: 4px;
-}
 
 /* 로딩 화면 (분석 중) */
 .routine-loading-card {

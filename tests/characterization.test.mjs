@@ -1969,6 +1969,14 @@ test('2단계 — 안전·장비 교체는 알리고, AI 주의사항 산문은 
   // 바꾼 게 없으면 줄도 안 뜬다
   a.state.generatedRoutine.swaps = [];
   assert.ok(!a.renderWorkoutStep2().includes('routine-swap-note'));
+
+  // API 키 없이 만든 템플릿 루틴은 그 사실을 알린다 — 옛 '기본 루틴' 배지가 'AI 분석 완료'
+  // 배지와 한 몸이라 같이 걷혔는데, 없으면 템플릿을 AI 맞춤으로 오해한다.
+  a.state.generatedRoutine.isFallback = true;
+  const fb = a.renderWorkoutStep2();
+  assert.ok(fb.includes('기본 루틴'), '폴백 루틴이 AI 루틴과 구분되지 않는다');
+  assert.ok(fb.includes('API 키'), '무엇을 하면 되는지 알려 준다');
+  assert.ok(!fb.includes('AI 분석 완료'), 'AI 배지는 되살리지 않는다');
 });
 
 // ── AI 종목 풀: 같은 운동이 두 이름으로 노출되면 AI가 둘 다 처방해 기록이 갈린다 ──
