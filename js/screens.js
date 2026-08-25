@@ -21,12 +21,10 @@ function renderHome() {
     loadPlateauCheckIfNeeded();
   }
 
-  // 오늘의 추천 자동 로드 (백그라운드) — 캐시가 KST 날짜 기준이라 하루 1회만 API를 쓴다.
-  // await 하지 않으므로 첫 페인트를 막지 않는다 (주간 리뷰·정체기와 같은 패턴).
-  if (state.apiKey && !state.aiRecLoading && state.aiRecFailedDate !== tdStr &&
-      (!state.aiRecommendation || state.aiRecommendation.date !== tdStr)) {
-    loadAIRecommendationIfNeeded();
-  }
+  // 오늘의 추천은 화면에서 뺐다(홈 카드·부위 배지 모두). 그래서 배경 로드도 멈춘다 —
+  // 아무 데도 안 쓰는 값을 하루 한 번 API 로 받아 오면 요금만 나간다.
+  // 엔진(fetchAIRecommendation·loadAIRecommendationIfNeeded)은 그대로 두었다: 다시 켤 때
+  // 이 두 줄을 되살리면 된다.
 
   var monday = new Date(today);
   monday.setDate(today.getDate() - (dayOfWeek - 1));
@@ -154,9 +152,6 @@ function renderHome() {
           '</div>' : '') +
       '</div>' +
       
-      // 오늘의 추천 카드 (AI 일일 추천 — 하루 1회)
-      renderAIRecommendationCard() +
-
       // 주간 리뷰 카드 (일요일 또는 새 주차)
       (state.weeklyReview ? 
         '<div class="weekly-review-card mb-4" onclick="openWeeklyReview()">' +
@@ -206,11 +201,6 @@ function renderHome() {
     '</div>';
 }
 
-// ═══════════════════════════════════════════════
-// 오늘의 추천 카드 (홈) — AI 일일 추천
-// 상태 4가지: API 키 없음 / 로딩 / 오늘 실패 / 결과
-// CSS는 이미 있는 .ai-rec-card 계열을 그대로 쓴다 (css/styles.css:1978~2029)
-// ═══════════════════════════════════════════════
 // 주간 리뷰 등급 → 색상. AI가 준 grade 를 **객체 키로 그냥 조회하면** 프로토타입까지 훑는다
 // (grade='__proto__' 면 [object Object], 'constructor' 면 함수 소스가 색상 자리에 들어가 CSS가 깨진다).
 // 소유 속성일 때만 인정하고 아니면 기본색 — S/A/B/C/D 외에는 전부 기본색이라는 뜻이다.
@@ -219,72 +209,9 @@ function gradeColor(grade) {
   return Object.prototype.hasOwnProperty.call(GRADE_COLORS, grade) ? GRADE_COLORS[grade] : 'var(--purple)';
 }
 
-function renderAIRecommendationCard() {
-  // API 키 없음 — 키 모달은 더보기 화면에서만 렌더되므로 탭 이동으로 유도
-  if (!state.apiKey) {
-    return '<div class="coach-api-required" onclick="setTab(\'more\')">' +
-      '<div style="color: var(--warn); flex-shrink: 0;">' + icon('info', 18) + '</div>' +
-      '<div class="flex-1">' +
-        '<p class="text-xs font-display font-bold" style="color: var(--warn);">오늘의 추천 — API 키 필요</p>' +
-        '<p class="text-[11px] font-mono text-stone-400 mt-0\\.5">더보기 → Anthropic API 키 설정</p>' +
-      '</div>' +
-    '</div>';
-  }
-
-  // 로딩 (백그라운드 로드 중 — 첫 페인트는 이미 끝난 상태)
-  if (state.aiRecLoading) {
-    return '<div class="ai-rec-card mb-4">' +
-      '<div class="flex items-center gap-3">' +
-        '<div class="loading-spinner"></div>' +
-        '<div>' +
-          '<p class="text-sm font-display font-bold">오늘의 추천 분석 중</p>' +
-          '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">컨디션 · 부족 부위 · 사이클 확인 중...</p>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-  }
-
-  var rec = state.aiRecommendation;
-
-  // 오늘 실패 — 자동 재시도는 막고(무한 호출 방지) 수동 재시도 버튼만 준다
-  if (!rec) {
-    if (state.aiRecFailedDate !== getTodayStr()) return '';
-    return '<div class="ai-rec-card mb-4">' +
-      '<div class="flex items-center justify-between gap-3">' +
-        '<div>' +
-          '<p class="text-sm font-display font-bold">오늘의 추천을 못 받았어요</p>' +
-          '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">네트워크·API 키를 확인한 뒤 다시 시도</p>' +
-        '</div>' +
-        '<button class="session-header-btn" onclick="refreshAIRecommendation()" title="다시 추천">' + icon('refresh', 16) + '</button>' +
-      '</div>' +
-    '</div>';
-  }
-
-  // 결과 — session은 fetchAIRecommendation이 5종(push/pull/legs/upper/free)으로 검증한 값.
-  // 옛 캐시가 이상한 값을 갖고 있어도 free로 폴백해 렌더가 깨지지 않게 한다.
-  var session = SESSIONS[rec.session] || SESSIONS.free;
-  var intensityKr = { light: '가볍게', moderate: '보통', challenging: '도전적' }[rec.intensity] || '보통';
-
-  return '<div class="ai-rec-card mb-4">' +
-    '<div class="relative">' +
-      '<div class="flex items-center justify-between mb-3">' +
-        '<span class="ai-badge">' + icon('star', 12) + '오늘의 추천</span>' +
-        '<button class="session-header-btn" onclick="refreshAIRecommendation()" title="다시 추천">' + icon('refresh', 16) + '</button>' +
-      '</div>' +
-      '<div class="flex items-baseline gap-3 mb-1">' +
-        '<p class="font-bebas text-4xl accent">' + session.name + '</p>' +
-        '<p class="text-[11px] font-mono text-stone-500">' + session.description + ' · 강도 ' + intensityKr + '</p>' +
-      '</div>' +
-      (rec.title ? '<p class="text-sm font-display font-bold">' + escapeHtml(rec.title) + '</p>' : '') +
-      (rec.reason ? '<div class="ai-rec-reason"><p class="text-xs text-stone-200 leading-relaxed">' + escapeHtml(rec.reason) + '</p></div>' : '') +
-      (rec.suggestion ? '<div class="ai-rec-suggestion"><p class="text-xs text-stone-200 leading-relaxed">' + escapeHtml(rec.suggestion) + '</p></div>' : '') +
-      (rec.caution ? '<div class="ai-rec-caution"><p class="text-xs leading-relaxed" style="color: var(--warn);">' + escapeHtml(rec.caution) + '</p></div>' : '') +
-      '<p class="text-[11px] font-mono text-stone-500 mt-3">운동 탭에 추천으로 표시돼 있어요</p>' +
-    '</div>' +
-  '</div>';
-}
-
-
+// ═══════════════════════════════════════════════
+// 운동 탭 (STEP 1 — 부위 선택)
+// ═══════════════════════════════════════════════
 function renderWorkout() {
   // STEP 2/3는 다른 함수에서 처리, 여기는 STEP 1 (부위 선택)
   if (state.workoutWizardStep === 2) {
@@ -293,137 +220,29 @@ function renderWorkout() {
   if (state.workoutWizardStep === 3) {
     return renderWorkoutStep3();
   }
-  
-  // STEP 1: 부위 선택
-  var today = new Date();
-  var dayOfWeek = today.getDay() || 7;
-  var monday = new Date(today);
-  monday.setDate(today.getDate() - (dayOfWeek - 1));
-  monday.setHours(0,0,0,0);
-  var sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23,59,59,999);
-  
-  var thisWeek = state.data.workoutLog.filter(function(w) {
-    var wd = new Date(w.date);
-    return wd >= monday && wd <= sunday;
-  });
-  
-  // 부위별 카운트
-  var pushCount = thisWeek.filter(function(w) { return w.sessionKr === 'PUSH'; }).length;
-  var pullCount = thisWeek.filter(function(w) { return w.sessionKr === 'PULL'; }).length;
-  var legsCount = thisWeek.filter(function(w) { return w.sessionKr === 'LEGS'; }).length;
-  var freeCount = thisWeek.filter(function(w) { return w.sessionKr === 'FREE'; }).length;
-  var upperCount = thisWeek.filter(function(w) { return w.sessionKr === 'UPPER'; }).length;
 
-  // 추천 부위 (가장 적게 한 부위, 룰: legs < pull < push)
-  var counts = { push: pushCount, pull: pullCount, legs: legsCount };
-  var minCount = Math.min(pushCount, pullCount, legsCount);
-  var recommended = pushCount === minCount ? 'push' 
-                  : pullCount === minCount ? 'pull' 
-                  : 'legs';
-  // 우선순위: legs > pull > push
-  if (legsCount === minCount) recommended = 'legs';
-  else if (pullCount === minCount) recommended = 'pull';
-  else recommended = 'push';
-
-  // 오늘의 AI 추천이 있으면 그 부위를 우선 (홈 카드와 '추천' 배지가 어긋나지 않도록).
-  // AI는 컨디션(RPE)·디로드 단계·부족 부위·최근 추천 다양성까지 보고 고르므로
-  // 룰(이번 주 최소 횟수)보다 근거가 많다.
-  var aiRec = state.aiRecommendation;
-  if (aiRec && aiRec.date === getTodayStr() && SESSIONS[aiRec.session]) {
-    recommended = aiRec.session;
-  }
-  
-  // 7일 막대 그래프 데이터
-  var dayBarsHtml = '';
-  var dayLabels = ['월','화','수','목','금','토','일'];
-  for (var d = 0; d < 7; d++) {
-    var dayDate = new Date(monday);
-    dayDate.setDate(monday.getDate() + d);
-    var dayStr = getDateStr(dayDate);
-    var todayStr = getTodayStr();
-    var isToday = dayStr === todayStr;
-    var isFuture = dayDate > today;
-    
-    // 해당 날짜의 운동
-    var dayWorkouts = thisWeek.filter(function(w) { return w.date === dayStr; });
-    
-    var barHtml;
-    if (dayWorkouts.length > 0) {
-      var w = dayWorkouts[0];
-      var part = w.sessionKr ? escapeHtml(String(w.sessionKr).toLowerCase()) : 'free';
-      var heightPct = Math.min(90, 50 + (Number(w.duration) || 60) / 2);
-      barHtml = '<div class="day-bar-shape ' + part + (isToday ? ' today' : '') + '" style="height: ' + heightPct + '%;"></div>';
-    } else {
-      var height = isFuture ? 6 : 8;
-      barHtml = '<div class="day-bar-shape' + (isToday ? ' today' : '') + '" style="height: ' + height + 'px;"></div>';
-    }
-    
-    dayBarsHtml += 
-      '<div class="day-bar-col">' +
-        barHtml +
-        '<p class="day-bar-label' + (isToday ? ' today' : '') + '">' + dayLabels[d] + '</p>' +
-      '</div>';
-  }
-  
-  // 부위 카드 생성 헬퍼
-  function partCard(key, name, koreanName, desc, count) {
-    var isRecommended = key === recommended;
-    var cardClass = 'body-part-card' + (isRecommended ? ' recommended' : '') + (count >= 2 ? ' completed' : '');
-    var countClass = count >= 2 ? 'done' : '';
-    // 0회는 뱃지를 아예 달지 않는다 — 카드 5장에 "0 / 이번 주"가 네 번 반복되면
-    // 뱃지가 정보가 아니라 배경이 된다. "한 부위"만 표시하면 그 자체가 신호다.
-    var countBadge = count > 0
-      ? '<div class="body-part-count">' +
-          '<p class="body-part-count-num ' + countClass + '">' + count + '</p>' +
-          '<p class="body-part-count-label">이번 주</p>' +
-        '</div>'
-      : '';
-
-    return '<div class="' + cardClass + '" onclick="selectBodyPart(\'' + key + '\')">' +
-      (isRecommended ? '<span class="recommend-badge">추천</span>' : '') +
-      '<div class="body-part-header">' +
-        '<p class="body-part-name' + (isRecommended ? ' recommended' : '') + '">' + name + '</p>' +
-        countBadge +
-      '</div>' +
-      '<p class="body-part-desc">' + koreanName + ' · ' + desc + '</p>' +
+  // STEP 1: 부위 선택 — 이 화면이 하는 일은 부위를 고르는 것 하나다.
+  // 부위 카드 — 이름과 부위 설명만. 다섯 장이 한 화면에 들어와야 고르기가 한 번에 끝난다.
+  // '이번 주 N' 배지와 '추천' 배지는 뺐다(사용자 결정) — 이번 주 횟수는 홈·기록 탭에 있다.
+  function partCard(key, name, koreanName, wide) {
+    return '<div class="body-part-card' + (wide ? ' wide' : '') + '" onclick="selectBodyPart(\'' + key + '\')">' +
+      '<p class="body-part-name">' + name + '</p>' +
+      '<p class="body-part-desc">' + koreanName + '</p>' +
     '</div>';
   }
-  
+
+  // 단계 표시와 '이번 주 기록'(7일 막대)은 걷었다 — 이 화면이 할 일은 부위를 고르는 것 하나고,
+  // 다섯 장이 스크롤 없이 한 화면에 들어와야 그게 한 번에 끝난다.
   return '' +
     '<div class="px-5 pt-12 pb-32">' +
-
-      // 스텝 인디케이터
-      '<div class="step-indicator">' +
-        '<div class="step-dot active"></div>' +
-        '<div class="step-line"></div>' +
-        '<div class="step-dot"></div>' +
-        '<div class="step-line"></div>' +
-        '<div class="step-dot"></div>' +
-        '<p class="text-[11px] font-mono accent ml-2">1단계 · 부위 선택</p>' +
-      '</div>' +
-
-      // 주간 기록 (7일 막대) — "3/4회"와 "달성 75%"는 같은 사실이라 횟수만 남긴다.
-      '<div class="weekly-bars-card">' +
-        '<div class="weekly-bars-header">' +
-          '<div>' +
-            '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest mb-1">이번 주 기록</p>' +
-            '<p class="font-bebas text-2xl">' + thisWeek.length + '<span class="text-sm text-stone-500"> / ' + state.profile.workoutFreq + '회</span></p>' +
-          '</div>' +
-        '</div>' +
-        '<div class="weekly-bars-grid">' + dayBarsHtml + '</div>' +
-      '</div>' +
-
-      // 부위 선택
       '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest mb-3 px-1">부위 선택</p>' +
-      
-      partCard('push', 'PUSH', '가슴 · 어깨 · 삼두', '밀기 동작', pushCount) +
-      partCard('pull', 'PULL', '등 · 이두', '당기기 동작', pullCount) +
-      partCard('legs', 'LEGS', '하체 · 코어', '레그 데이', legsCount) +
-      partCard('upper', 'UPPER', '상체 전체', '가슴·등·어깨·팔', upperCount) +
-      partCard('free', 'FREE', '자유 구성', '직접 종목 선택', freeCount) +
-      
+      '<div class="body-part-grid">' +
+        partCard('push', 'PUSH', '가슴 · 어깨 · 삼두') +
+        partCard('pull', 'PULL', '등 · 이두') +
+        partCard('legs', 'LEGS', '하체 · 코어') +
+        partCard('upper', 'UPPER', '상체 전체') +
+      '</div>' +
+      partCard('free', 'FREE', '직접 종목 선택', true) +
     '</div>';
 }
 
@@ -617,12 +436,6 @@ window.updateRoutineChatInput = function(text) {
   if (sendBtn) sendBtn.disabled = !text.trim() || state.routineChatThinking;
 };
 
-window.applyRoutineQuickChip = function(text) {
-  var input = document.getElementById('rc-input');
-  if (input) input.value = text;
-  state.routineChatInput = text;
-  sendRoutineModification();
-};
 
 window.clearRoutineChat = function() {
   if (!confirm('대화를 초기화하시겠어요?')) return;
@@ -847,38 +660,9 @@ function renderWorkoutStep3() {
       '</div>';
   }
   
-  // 빠른 칩 (대화 적을 때)
-  var quickChips = [];
-  if (state.routineChatHistory.length <= 1) {
-    if (state.selectedBodyPart === 'free') {
-      // FREE 모드: 부위/시간 시작 옵션
-      quickChips = [
-        '어깨 위주 30분',
-        '가슴 + 이두 같이',
-        '오늘은 풀바디 가볍게',
-        '이번 주 부족한 부위 추천',
-        '60분 짜리 등 운동'
-      ];
-    } else {
-      // 정형: 수정 옵션
-      quickChips = [
-        '전체 무게 살짝 가볍게',
-        '시간 줄여줘 (30분)',
-        '메인 종목 하나만 추가',
-        '고립 운동 빼줘',
-        '신장 강조 종목 추가'
-      ];
-    }
-  }
-  
-  var quickHtml = quickChips.length > 0
-    ? '<div class="routine-quick-chips">' +
-        quickChips.map(function(c) {
-          return '<button class="rc-quick-chip" onclick="applyRoutineQuickChip(\'' + c.replace(/'/g, "\\'") + '\')">' + c + '</button>';
-        }).join('') +
-      '</div>'
-    : '';
-  
+  // 빠른 칩은 걷었다 — 무엇을 물어야 하는지는 입력칸 placeholder 가 예시로 보여 준다
+  // (디자인 규칙: 예시는 본문이 아니라 placeholder·퀵칩 자리에서만, 그리고 여긴 자리가 아깝다).
+
   var sendDisabled = !state.routineChatInput.trim() || state.routineChatThinking;
   
   var isFree = state.selectedBodyPart === 'free';
@@ -926,7 +710,6 @@ function renderWorkoutStep3() {
       
       // 하단 입력 + 시작
       '<div class="routine-chat-bottom">' +
-        quickHtml +
         '<div class="routine-chat-input-row">' +
           '<div class="routine-chat-input-bar">' +
             '<input type="text" id="rc-input" placeholder="' + (state.apiKey ? (isFree ? '예: 어깨 위주 30분' : '예: 전체 무게 살짝 가볍게') : 'API 키 필요') + '" value="' + escapeHtml(state.routineChatInput) + '" oninput="updateRoutineChatInput(this.value)" onkeydown="if(event.key===\'Enter\') sendRoutineModification()" ' + (state.routineChatThinking ? 'disabled' : '') + ' />' +
@@ -1059,24 +842,20 @@ function renderWorkoutStep2() {
   var part = state.selectedBodyPart;
   var routine = state.generatedRoutine;
   
-  // 헤더 (공통)
-  var headerHtml = 
-    '<div class="px-5 pt-12 pb-3">' +
-      '<div class="flex items-center justify-between mb-2">' +
+  // 헤더 — '뒤로' 와 요약 한 줄만. 단계 표시(2단계 · 루틴 분석)와 진행 점은 걷었다:
+  // 마법사가 3단계인 걸 화면이 설명할 이유가 없고, 그 자리만큼 종목 목록이 위로 올라온다.
+  var summaryLine = (state.routineLoading || !routine || routine.error) ? ''
+    : escapeHtml((routine.exercises || []).length) + '종목 · ' +
+      escapeHtml(routine.totalSets) + '세트 · ' + escapeHtml(routine.duration) + '분';
+
+  var headerHtml =
+    '<div class="px-5 pt-12 pb-2">' +
+      '<div class="flex items-center justify-between">' +
         '<button onclick="backToStep1()" class="text-xs font-mono accent">← 뒤로</button>' +
-        '<p class="text-[11px] font-mono text-stone-500" style="letter-spacing: 0.2em;">2단계 · 루틴 분석</p>' +
-        '<div style="width: 40px;"></div>' +
+        (summaryLine ? '<p class="text-[11px] font-mono text-stone-500">' + summaryLine + '</p>' : '') +
       '</div>' +
     '</div>' +
-    
-    '<div class="px-5 pb-32">' +
-      '<div class="step-indicator">' +
-        '<div class="step-dot completed"></div>' +
-        '<div class="step-line active"></div>' +
-        '<div class="step-dot active"></div>' +
-        '<div class="step-line"></div>' +
-        '<div class="step-dot"></div>' +
-      '</div>';
+    '<div class="px-5 pb-32">';
   
   // 로딩 화면
   if (state.routineLoading) {
@@ -1124,76 +903,38 @@ function renderWorkoutStep2() {
     return line;
   };
 
-  // 종목 카드 렌더
+  // 종목 한 줄 — 이름줄 + 처방줄, 그게 전부다.
+  //  · 종목 성격(복합/고립)은 종목명이 이미 말한다.
+  //  · AI 가 왜 그 종목을 골랐는지(ex.note)는 화면에 적지 않는다 — 사용자가 지금 할 일이 아니다.
+  //  · 줄 전체를 누르면 종목 편집 시트가 열린다. 사용자가 AI 추천 목록을 실제로 보는 화면이
+  //    여기라, 편집 입구도 여기 있어야 한다(3단계 대화 화면 안쪽에 숨겨 두면 못 찾는다).
   var exercisesHtml = '';
   exList.forEach(function(ex, idx) {
     var cardCls = ex.isMain ? 'routine-exercise main' : 'routine-exercise';
     var numCls = ex.isMain ? 'routine-ex-num main' : 'routine-ex-num';
     var typeTag = ex.isMain ? '<span class="routine-ex-tag">메인</span>' : '';
-    // 세트 구성(탑세트+백오프 등)도 같은 세트 배열에서 센다 — 여기서 다시 정하지 않는다.
-    var p = pres[idx];
-    var structure = plans[idx] ? describeSetStructure(plans[idx].sets, ex.name) : '';
+    // 세트법(탑+백오프 등)은 처방 줄 끝에 **짧은 이름만** 붙인다 — 별도 줄로 빼면
+    // 한 종목이 세 줄이 된다. 스트레이트면 아무것도 안 붙는다(세트 수가 이미 말한 사실).
+    var plan = plans[idx];
+    var schemeShort = (plan && plan.scheme !== 'straight' && SET_SCHEMES[plan.scheme])
+      ? ' · ' + SET_SCHEMES[plan.scheme].short : '';
+    var line = prescriptionLine(pres[idx], ex) + escapeHtml(schemeShort);
 
-    exercisesHtml += 
-      '<div class="' + cardCls + '">' +
-        '<div class="routine-ex-header">' +
-          '<div class="flex items-start gap-3 flex-1">' +
-            '<div class="' + numCls + '">' + (idx + 1) + '</div>' +
-            '<div class="flex-1">' +
-              '<p class="routine-ex-name">' + escapeHtml(ex.name) + typeTag + '</p>' +
-              '<p class="routine-ex-type">' + escapeHtml(ex.type) + (ex.note ? ' · ' + escapeHtml(ex.note) : '') + '</p>' +
-            '</div>' +
-          '</div>' +
+    exercisesHtml +=
+      '<div class="' + cardCls + '" role="button" tabindex="0" aria-label="종목 편집" ' +
+        'onclick="openExerciseEdit(\'preview\', ' + idx + ')">' +
+        '<div class="routine-ex-row">' +
+          '<div class="' + numCls + '">' + (idx + 1) + '</div>' +
+          '<p class="routine-ex-name flex-1">' + escapeHtml(ex.name) + typeTag + '</p>' +
         '</div>' +
-        (function(line) {
-          return line ? '<p class="routine-ex-prescription">' + line + '</p>' : '';
-        })(prescriptionLine(p, ex)) +
-        // 세트 열의 숫자가 어떻게 나뉘는지 (스트레이트면 적지 않는다 — 세트 열이 이미 말한 사실)
-        (structure ? '<p class="routine-ex-scheme">' + escapeHtml(structure) + '</p>' : '') +
+        (line ? '<p class="routine-ex-prescription">' + line + '</p>' : '') +
       '</div>';
   });
   
+  // 분석 헤더 카드(AI 분석 완료 배지 · 다시 분석 아이콘 · 큰 부위명 · 헤드라인)와 주의사항 박스는
+  // 걷었다. 화면이 시작되자마자 **오늘 뭘 할지**가 보여야 하는데, 그 위를 설명이 덮고 있었다.
+  // 종목 수·세트·시간은 헤더 오른쪽 한 줄로 옮겼다.
   return headerHtml +
-    
-    // 분석 헤더 카드
-    '<div class="routine-analysis-card">' +
-      '<div class="flex items-center justify-between mb-2 relative">' +
-        '<div class="flex items-center gap-2">' +
-          // 폴백(기본 루틴)에까지 "AI 분석 완료"를 붙이면 배지와 본문이 서로 반대말을 한다.
-          (routine.isFallback
-            ? '<span class="ai-badge" style="color: var(--text-muted); background: rgba(var(--muted-rgb), 0.12); border-color: rgba(var(--muted-rgb), 0.3);">기본 루틴</span>'
-            : '<span class="ai-badge">' + icon('star', 12) + 'AI 분석 완료</span>') +
-        '</div>' +
-        '<button onclick="regenerateRoutine()" style="color: var(--accent); opacity: 0.6;" title="다시 분석">' + icon('refresh', 14) + '</button>' +
-      '</div>' +
-      '<p class="font-bebas text-4xl mb-1 relative" style="color: var(--accent);">' + partNames[part] + '</p>' +
-      '<p class="text-sm text-stone-300 leading-relaxed relative">' + escapeHtml(routine.headline) + '</p>' +
-      
-      '<div class="routine-meta-grid">' +
-        '<div class="routine-meta-item">' +
-          '<p class="routine-meta-num">' + routine.exercises.length + '</p>' +
-          '<p class="routine-meta-label">종목</p>' +
-        '</div>' +
-        '<div class="routine-meta-item">' +
-          '<p class="routine-meta-num">' + escapeHtml(routine.totalSets) + '</p>' +
-          '<p class="routine-meta-label">세트</p>' +
-        '</div>' +
-        '<div class="routine-meta-item">' +
-          '<p class="routine-meta-num">' + escapeHtml(routine.duration) + '<span class="text-xs text-stone-500">분</span></p>' +
-          '<p class="routine-meta-label">예상</p>' +
-        '</div>' +
-      '</div>' +
-    '</div>' +
-    
-    // 주의사항 (안전에 관한 것만 남긴다 — 구성 이유는 종목 목록이 이미 보여 준다)
-    (routine.caution ?
-      '<div class="routine-insight warning">' +
-        '<p class="routine-insight-label" style="color: var(--warn);">주의사항</p>' +
-        '<p class="text-sm text-stone-200 leading-relaxed">' + escapeHtml(routine.caution) + '</p>' +
-      '</div>' : '') +
-
-    // 종목 리스트 (처방은 카드마다 한 줄 — 머리글 없음)
-    '<div style="margin-top: 18px;"></div>' +
     exercisesHtml +
 
     // 액션 버튼 (수정/시작)
@@ -2199,6 +1940,18 @@ window.closeExerciseMenu = function() {
 };
 
 // 운동 중 현재 종목을 다른 종목으로 교체
+// 종목 메뉴에서 이어지는 두 갈래. 메뉴를 닫고 시트를 연다 —
+// 안 닫으면 시트 뒤에 메뉴가 남아 뒤로가기를 두 번 눌러야 세션으로 돌아온다.
+window.openSessionChatFromMenu = function() {
+  state.exerciseMenuOpen = false;
+  openSessionChat();
+};
+
+window.openSetSchemeFromMenu = function() {
+  state.exerciseMenuOpen = false;
+  openSetSchemeSheet();
+};
+
 window.openExerciseSwap = function() {
   state.exercisePickerScope = 'session';
   state.exercisePickerIdx = null;
@@ -3129,11 +2882,6 @@ function renderWorkoutSession() {
       '</div>';
   });
   
-  // 이전 기록
-  // lastWeight·lastReps는 AI 루틴에서 그대로 넘어올 수 있다(대화 수정 경로는 무게 스냅을 거치지 않는다) → 이스케이프
-  var prevText = exercise.lastWeight !== null
-    ? (isReverseProgression(exercise.name) ? '보조 ' : '') + escapeHtml(exercise.lastWeight) + 'kg × ' + (parseInt(String(exercise.targetReps || '8').split('-')[0]) || 8) + ' · ' + (exercise.sets.filter(function(s) { return !s.isWarmup; }).length) + '세트'
-    : (exercise.lastReps ? escapeHtml(exercise.lastReps) + '회 × ' + (exercise.sets.filter(function(s) { return !s.isWarmup; }).length) + '세트' : '첫 시도');
   
   // 휴식 타이머
   var restTimerHtml = '';
@@ -3246,6 +2994,16 @@ function renderWorkoutSession() {
             '</div>' +
             '<button class="session-header-btn" onclick="closeExerciseMenu()">' + icon('close', 18) + '</button>' +
           '</div>' +
+          // 상단 버튼 3개를 하나로 모으면서 코치·세트법이 여기로 들어왔다.
+          // 순서는 운동 중 손이 가는 빈도순 — 위험한 건너뛰기는 맨 아래.
+          '<button class="option-card" style="width:100%; margin-bottom:6px; text-align:left;" onclick="openSessionChatFromMenu()">' +
+            '<p class="font-display text-sm">AI 코치 상담</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">세트 사이에 짧게 물어봐요</p>' +
+          '</button>' +
+          '<button class="option-card" style="width:100%; margin-bottom:6px; text-align:left;" onclick="openSetSchemeFromMenu()">' +
+            '<p class="font-display text-sm">세트법 바꾸기</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + escapeHtml((SET_SCHEMES[sessionSchemeOf(exercise)] || SET_SCHEMES.straight).kr) + '로 하는 중</p>' +
+          '</button>' +
           '<button class="option-card" style="width:100%; margin-bottom:6px; text-align:left;" onclick="openExerciseSwap()">' +
             '<p class="font-display text-sm">종목 교체</p>' +
             '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">지금 종목을 다른 종목으로 바꿔요</p>' +
@@ -3391,10 +3149,10 @@ function renderWorkoutSession() {
           '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">' + escapeHtml(session.sessionName) + ' · 종목 ' + (session.currentExerciseIdx + 1) + '/' + totalExercises + '</p>' +
           '<p class="text-xs font-mono accent mt-0\\.5" style="display:flex;align-items:center;justify-content:center;gap:4px;">' + icon('clock', 12) + elapsedStr + '</p>' +
         '</div>' +
+        // 버튼 하나로 모은다 — 코치·세트법도 이 안에 있다. 상단에 셋을 늘어놓으면
+        // 정작 눌러야 할 세트 목록보다 위쪽이 시끄러워진다.
         '<div class="flex gap-2">' +
-          '<button class="session-header-btn" onclick="openSessionChat()" title="세트 사이 코치">' + icon('msg', 18) + '</button>' +
-          '<button class="session-header-btn" onclick="openSetSchemeSheet()" title="세트법 바꾸기" style="font-size:11px; font-weight:600;">세트법</button>' +
-          '<button class="session-header-btn" onclick="openExerciseMenu()" title="종목 메뉴 (교체·추가·건너뛰기)">' + icon('dots', 18) + '</button>' +
+          '<button class="session-header-btn" onclick="openExerciseMenu()" title="종목 메뉴">' + icon('more', 18) + '</button>' +
         '</div>' +
       '</div>' +
       
@@ -3410,16 +3168,14 @@ function renderWorkoutSession() {
       // 현재 종목 정보
       '<div class="exercise-info-card" role="button" tabindex="0" aria-label="종목 편집" ' +
         'onclick="openExerciseEdit(\'session\', ' + session.currentExerciseIdx + ')">' +
-        '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">현재 종목' +
-          (exercise.addedInSession ? ' · 운동 중 추가' : '') + (exercise.skipped ? ' · 건너뜀' : '') + '</p>' +
-        '<h2 class="font-bebas text-2xl mb-1">' + escapeHtml(exercise.name) + '</h2>' +
-        '<p class="text-xs font-mono text-stone-400">' + escapeHtml(exercise.type) +
-          // **실제로 적용된** 세트법(exercise.scheme)을 적는다. 저장된 선택(getSetScheme)을 적으면
-          // 무게를 모르는 종목에서 스킴이 스트레이트로 접혔는데도 "탑+백오프"라 써 놓게 된다.
-          ' · ' + (SET_SCHEMES[sessionSchemeOf(exercise)] || SET_SCHEMES.straight).short +
-          // 클래스 기본값(getExerciseRestSec)만 읽으면 AI 가 준 exercise.rest 나 세트법이 넣은
-          // set.rest 를 무시해, 여기 적힌 초와 실제로 도는 타이머가 어긋난다.
-          ' · 휴식 ' + exerciseRestLabelSec(exercise) + '초</p>' +
+        // 종목명 하나만 남긴다. 위의 '현재 종목' 은 화면이 자기를 설명하는 말이고,
+        // 아래의 '머신 · 스트레이트 · 휴식 180초' 는 종목 편집 시트에 그대로 있다.
+        // 종목 성격·세트법·휴식은 종목 편집 시트가 보여 준다(거기서 바꾸기도 한다).
+        // 건너뜀·운동 중 추가는 상태라서 이름 옆에 작게 붙인다.
+        '<h2 class="font-bebas text-2xl">' + escapeHtml(exercise.name) +
+          (exercise.addedInSession ? '<span class="ex-name-flag">운동 중 추가</span>' : '') +
+          (exercise.skipped ? '<span class="ex-name-flag">건너뜀</span>' : '') + '</h2>' +
+        // 슈퍼세트는 지금 어떻게 움직일지를 정하는 사실이라 남긴다.
         (typeof exercise.supersetWith === 'number' && session.exercises[exercise.supersetWith]
           ? '<p class="text-[11px] font-mono mt-1" style="color: var(--accent);">슈퍼세트 ' +
               (exercise.supersetKr || '') + ' — ' + escapeHtml(session.exercises[exercise.supersetWith].name) +
@@ -3431,98 +3187,8 @@ function renderWorkoutSession() {
       // 둘 다 "운동 중 매 순간 보고 있어야 하는 것"이 아니라 "궁금할 때 여는 것"이다.
       sessionFactsRowHtml(exercise) +
 
-      // 도전 권장 · 지난 기록 카드 (점진적 과부하) — 문장이 아니라 숫자로 읽는 카드다.
-      // 라벨(무엇을 할지) + 큰 숫자(얼마로) + 참고 한 줄(지난 기록)만 남긴다.
-      // 설명 문장(prog.note)은 걷었다 — 세트 목록에 이미 같은 무게가 찍혀 있어서 두 번 말하는 셈이었다.
-      (function() {
-        var prog = getProgressiveRecommendation(exercise.name, exercise.targetReps);
-        // 큰 숫자는 "지금 들 무게" 하나. 추정 1RM 은 헬스장에서 맞출 수 없는 소수점을 버린다.
-        var rm = get1RM(exercise.name);
-        if (rm) rm = Math.round(rm);
-        if (!prog && !rm) return '';
-
-        var isReverse = isReverseProgression(exercise.name);
-        // 어시스트 종목은 숫자 앞에 '보조'를 붙여야 뜻이 통한다 (40kg = 40kg만큼 도와준다).
-        var unitPrefix = isReverse ? '보조 ' : '';
-
-        // 큰 숫자 한 덩이. 무게가 바뀌는 날은 "이전 → 새 무게"로 이어 붙인다(이전은 작고 흐리게).
-        // 어시스트는 보조가 **줄어드는** 쪽이 증량이라, 같은 화살표가 반대 방향의 진행을 뜻한다.
-        var weightLine = function(weight, prevWeight, color) {
-          var changed = (prevWeight !== null && prevWeight !== undefined && String(prevWeight) !== String(weight));
-          return '<p class="rm-weight" style="color: ' + color + ';">' +
-              (isReverse ? '<span class="rm-weight-pre">보조</span>' : '') +
-              (changed
-                ? '<span class="rm-weight-prev">' + escapeHtml(prevWeight) + '<span class="rm-unit">kg</span></span>' +
-                  '<span class="rm-weight-arrow">→</span>'
-                : '') +
-              // 숫자와 단위는 한 덩이로 묶는다 — 따로 두면 flex 간격이 '65 kg' 처럼 벌어진다.
-              '<span class="rm-weight-now">' + escapeHtml(weight) + '<span class="rm-unit">kg</span></span>' +
-            '</p>';
-        };
-
-        var html = '<div class="rm-card">';
-        var refs = [];
-        var hasHead = false;
-
-        // ⚠️ 큰 숫자는 **이 종목의 기준 세트 무게**다 (sessionReferenceSet — 완료 여부와 무관).
-        // ① prog.weight 를 그대로 찍으면 "동일 무게 90kg" 카드 밑에 탑세트 95kg 세트가 깔리고,
-        // ② 남은 세트만 보면 탑세트를 끝내는 순간 기준이 백오프로 내려가 카드가 "무게 낮추기"로
-        //    뒤집힌다 — 아무것도 안 건드렸는데(2차 #1). 세션 내내 같은 한 세트를 가리켜야 한다.
-        // 무게를 아는 세트가 하나도 없을 때만 추천값으로 돌아간다.
-        var refSet = sessionReferenceSet(exercise);
-
-        if (prog && prog.source !== 'rm_estimate' && prog.previousWeight !== undefined) {
-          // 실제 수행 기록이 있는 경우
-          var shown = refSet ? refSet.weight : prog.weight;
-
-          // 라벨·색은 추천 갈래가 아니라 **지난 기록과의 비교**로 정한다 — 그래야 세트법 전환처럼
-          // 추천 갈래(maintain)와 실제 무게가 갈라지는 날에도 카드가 사실만 말한다.
-          var heavier = isReverse ? (shown < prog.previousWeight) : (shown > prog.previousWeight);
-          var lighter = isReverse ? (shown > prog.previousWeight) : (shown < prog.previousWeight);
-          // 색은 세 갈래다: 나아가는 날(초록) · 멈춰 세우는 날(앰버, 통증·재활) · 그대로 가는 날(주황).
-          // **라벨과 같은 순서로 판정한다** — 어긋나면 "통증 — 증량 보류"가 초록으로 칠해진다
-          // (저장소 디자인 규칙: 경고는 var(--warn)).
-          var color = prog.graduated ? 'var(--success)'
-            : (prog.source === 'rehab' || prog.painGated) ? 'var(--warn)'
-            : heavier ? 'var(--success)'
-            : 'var(--accent)';
-          var label = prog.graduated ? '맨몸 졸업'
-            : prog.source === 'rehab' ? '재활 — 무게 유지'
-            : prog.painGated ? (isReverse ? '통증 — 보조 유지' : '통증 — 증량 보류')
-            : heavier ? (isReverse ? '보조 낮추기 — 증량' : '도전 권장')
-            : lighter ? (isReverse ? '보조 올리기' : '무게 낮추기')
-            : (isReverse ? '동일 보조' : '동일 무게');
-          html += '<p class="rm-label" style="color: ' + color + ';">' + label + '</p>' +
-            weightLine(shown, prog.previousWeight, color);
-          hasHead = true;
-          // 지난 기록은 여기 적지 않는다 — 바로 위 [지난 기록] 버튼이 세션별 전 세트를 보여준다(#3).
-          // 카드에 요약을 또 적으면 같은 사실을 한 화면에서 두 번 말하게 된다.
-        } else if (prog && prog.source === 'rm_estimate') {
-          // 첫 시도 - 1RM 기반. 위와 **같은 기준 세트**를 쓴다 —
-          // 갈래마다 다른 세트를 찍으면 오름 사다리(피라미드)에서 카드는 첫 세트, 토스트는 탑세트를 말한다.
-          // 어시스트 맨몸(보조 0kg)은 falsy 지만 유효한 값이라 != null 로 본다.
-          var shownWeight = (refSet && refSet.weight != null) ? refSet.weight : prog.weight;
-          html += '<p class="rm-label accent">첫 시도 추천</p>' +
-            weightLine(shownWeight, null, 'var(--accent)');
-          hasHead = true;
-          // 첫 시도에는 기록이 없어 [지난 기록] 버튼도 안 생긴다 → 계획값이라도 여기 한 줄 남긴다.
-          refs.push('지난 기록 ' + prevText);
-        } else {
-          // 추천을 못 만든 종목(기록도 1RM 추정도 없음) — 참고 줄만 남는다.
-          refs.push('지난 기록 ' + prevText);
-        }
-
-        if (rm) refs.push('추정 1RM ' + rm + 'kg');
-        if (!hasHead && !refs.length) return '';
-
-        if (refs.length) {
-          // refs 의 조각들은 담을 때 이미 이스케이프했다 — 여기서 또 하면 &lt; 가 &amp;lt; 로 두 번 죽는다.
-          html += (hasHead ? '<div class="rm-divider"></div>' : '') +
-            '<p class="rm-ref">' + refs.join(' · ') + '</p>';
-        }
-        html += '</div>';
-        return html;
-      })() +
+      // 무게 카드(도전 권장 / 큰 숫자 / 추정 1RM)는 걷었다 — 세트 목록이 세트마다 무게를
+      // 이미 적어 주고, 추정 1RM 은 [지난 기록] 팝업과 더보기 → 내 1RM 에 있다.
 
       // 세트 목록 (건너뛴 종목이면 안내 + 되돌리기)
       '<div class="mb-3">' +
@@ -3540,9 +3206,6 @@ function renderWorkoutSession() {
           : '<button class="option-card" style="width: 100%; margin-top: 8px; text-align: center;" onclick="addSetToExercise(' + session.currentExerciseIdx + ')">' +
               '<p class="text-xs font-mono text-stone-400">＋ 세트 추가</p>' +
             '</button>') +
-        '<button class="option-card" style="width: 100%; margin-top: 8px; text-align: center;" onclick="openExerciseAdd()">' +
-          '<p class="text-xs font-mono text-stone-400">＋ 종목 추가 (다음 차례에)</p>' +
-        '</button>' +
       '</div>' +
       
       // 이전/다음 종목

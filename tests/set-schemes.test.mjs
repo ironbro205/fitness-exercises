@@ -1310,13 +1310,19 @@ function tapTopSet(weight) {
   if (weight !== undefined && app.state.topSetSheet) app.state.topSetSheet.weight = weight;
   return captureToast(() => app.confirmTopSetWeight());
 }
-const cardWeight = (html) => {
-  const m = html.match(/rm-weight-now">([\d.]+)</);
-  return m ? Number(m[1]) : null;
+// 운동 중 화면의 '도전 권장 / 큰 숫자 / 추정 1RM' 카드는 걷었다(사용자 결정).
+// 그 카드가 지키던 사실 — **세션 내내 같은 기준 세트를 가리키고, 완료해도 안 튄다** — 은
+// 그대로 살아 있으므로, 검사를 화면 문자열이 아니라 그 값 자체로 옮긴다.
+const refWeight = () => {
+  const ex = app.state.activeSession.exercises[app.state.activeSession.currentExerciseIdx];
+  const set = app.sessionReferenceSet(ex);
+  return set && typeof set.weight === 'number' ? set.weight : null;
 };
-const cardLabel = (html) => {
-  const m = html.match(/<p class="rm-label" style="color: ([^"]+);">([^<]+)</);
-  return m ? { text: m[2], color: m[1] } : null;
+// 라벨(도전 권장 / 통증 — 증량 보류 / 재활 — 무게 유지)은 카드와 함께 사라졌다.
+// 그 라벨을 정하던 근거는 추천 엔진에 그대로 있으니 거기서 확인한다.
+const progOf = () => {
+  const ex = app.state.activeSession.exercises[app.state.activeSession.currentExerciseIdx];
+  return app.getProgressiveRecommendation(ex.name, ex.targetReps);
 };
 
 // ── A. 역산 채널 제거 ─────────────────────────────────────
@@ -1531,11 +1537,10 @@ test('[탑세트] 통증으로 잠긴 종목은 프리필이 처방을 넘지 �
   assert.equal(app.state.topSetSheet.weight, prog.weight, '처방(80)까지만 채운다');
   assert.ok(app.state.topSetSheet.weight < 95, '통증 이전 세션의 무게로 올라가지 않는다');
 
-  // 확인해도 카드가 "증량 보류"라 말하면서 증량 화살표를 그리지 않는다
+  // 확인해도 기준 세트가 처방(80)을 넘지 않는다 — 통증 이전 세션의 95로 올라가면 안 된다
   captureToast(() => app.confirmTopSetWeight());
-  const card = cardLabel(app.renderWorkoutSession());
-  assert.equal(card.text, '통증 — 증량 보류');
-  assert.equal(cardWeight(app.renderWorkoutSession()), prog.weight, '카드 숫자도 처방 그대로');
+  assert.equal(progOf().painGated, true, '통증 게이트가 유지된다');
+  assert.equal(refWeight(), prog.weight, '기준 세트도 처방 그대로');
   endSession();
 });
 
@@ -1730,20 +1735,16 @@ test('[표시] 탑세트를 끝내도 카드가 "무게 낮추기"로 뒤집히�
   app.state.setSchemeOpen = false;
   assert.deepEqual([...weightsOf(ex)], [95, 85, 85]);
 
-  const before = app.renderWorkoutSession();
-  assert.equal(cardWeight(before), 95);
-  assert.equal(cardLabel(before).text, '도전 권장');
+  assert.equal(refWeight(), 95);
+  assert.ok(progOf().weight > progOf().previousWeight, '전제: 증량일이다');
 
   workingSets(ex)[0].completed = true;                    // 탑 완료
   workingSets(ex)[0].reps = 5;
-  const afterTop = app.renderWorkoutSession();
-  assert.equal(cardWeight(afterTop), 95, '기준 세트는 완료해도 그대로다');
-  assert.equal(cardLabel(afterTop).text, '도전 권장');
-  assert.equal(cardLabel(afterTop).color, 'var(--success)');
+  assert.equal(refWeight(), 95, '기준 세트는 완료해도 그대로다');
 
   workingSets(ex)[1].completed = true;                    // 백오프까지 완료
   workingSets(ex)[1].reps = 8;
-  assert.equal(cardWeight(app.renderWorkoutSession()), 95);
+  assert.equal(refWeight(), 95, '다 끝내도 백오프로 내려앉지 않는다');
   endSession();
 });
 
@@ -1751,28 +1752,26 @@ test('[표시] 첫 시도 갈래도 세트를 다 끝내면 튀지 않는다 (2�
   seedRecalc([], { '핵 스쿼트': 130 });
   const ex = startSession('핵 스쿼트');
   app.state.setSchemeOpen = false;
-  const shown = cardWeight(app.renderWorkoutSession());
-  assert.equal(shown, app.hardestWeight('핵 스쿼트', weightsOf(ex)), '카드 = 배정된 기준 세트');
+  const shown = refWeight();
+  assert.equal(shown, app.hardestWeight('핵 스쿼트', weightsOf(ex)), '기준 = 배정된 가장 무거운 세트');
   workingSets(ex).forEach((s) => { s.completed = true; s.reps = 8; });
-  assert.equal(cardWeight(app.renderWorkoutSession()), shown, '다 끝내도 1RM 추정값으로 튀지 않는다');
+  assert.equal(refWeight(), shown, '다 끝내도 1RM 추정값으로 튀지 않는다');
   endSession();
 });
 
-test('[표시] 통증·재활 라벨은 앰버다 (라벨과 색이 같은 순서로 판정된다)', () => {
+test('[판정] 통증·재활은 증량을 멈춘다 (라벨이 사라져도 판정은 남는다)', () => {
   seedRecalc([session('핵 스쿼트', 90, 8, 3, { painFlag: true }), session('핵 스쿼트', 90, 8, 10)]);
   startSession('핵 스쿼트');
   app.state.setSchemeOpen = false;
-  const pain = cardLabel(app.renderWorkoutSession());
-  assert.equal(pain.text, '통증 — 증량 보류');
-  assert.equal(pain.color, 'var(--warn)');
+  const pain = progOf();
+  assert.equal(pain.painGated, true, '통증 기록이 있으면 증량을 보류한다');
+  assert.equal(pain.weight, pain.previousWeight, '무게를 올리지 않는다');
   endSession();
 
   seedRecalc([session('페이스 풀', 20, 15, 3)]);
   startSession('페이스 풀');
   app.state.setSchemeOpen = false;
-  const rehab = cardLabel(app.renderWorkoutSession());
-  assert.equal(rehab.text, '재활 — 무게 유지');
-  assert.equal(rehab.color, 'var(--warn)');
+  assert.equal(progOf().source, 'rehab', '재활 종목은 무게를 유지한다');
   endSession();
 });
 
@@ -1832,9 +1831,9 @@ test('[가드] 건너뛴 종목은 세트법 변경으로 조용히 되살아나
   tapScheme('straight');
   assert.equal(ex.skipped, true, '확인을 거치기 전에는 그대로 건너뛴 상태다');
   assert.equal(ex.sets.filter((s) => !s.completed).length, 0);
-  // 카드도 떼어 둔 세트의 숫자를 말하지 않는다
-  assert.equal(cardWeight(app.renderWorkoutSession()),
-    app.getProgressiveRecommendation('핵 스쿼트', '5-8').weight);
+  // 떼어 둔 세트의 숫자를 어디에도 말하지 않는다 — 가리킬 세트 자체가 없다.
+  assert.equal(refWeight(), null, '건너뛴 종목인데 기준 세트를 가리키고 있다');
+  assert.ok(app.renderWorkoutSession().includes('건너뛴 종목'), '건너뛴 상태를 화면이 알린다');
   endSession();
 });
 
@@ -2111,7 +2110,7 @@ test('[수정] 끝낸 탑보다 무거운 값은 그 탑까지만 반영된다 (
     '백오프가 탑보다 무거워지지 않는다 (옛 코드는 [100, 110, 110])');
   assert.equal(toast.indexOf('110') === -1 && toast.indexOf('120') === -1, true,
     '존재하지 않는 탑 무게를 말하지 않는다');
-  assert.equal(cardWeight(app.renderWorkoutSession()), 100, '카드도 안 튄다');
+  assert.equal(refWeight(), 100, '기준 세트도 안 튄다');
 
   // 낮추는 방향은 그대로 먹힌다 — 남은 백오프를 실제로 조절할 수 있다
   tapTopSet(90);
