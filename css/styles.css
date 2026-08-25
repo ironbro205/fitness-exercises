@@ -85,6 +85,7 @@ button {
 .justify-center { justify-content: center; }
 .justify-between { justify-content: space-between; }
 .justify-end { justify-content: flex-end; }
+.text-left { text-align: left; }
 .text-center { text-align: center; }
 .text-right { text-align: right; }
 .relative { position: relative; }
@@ -97,6 +98,7 @@ button {
 .gap-3 { gap: 12px; }
 
 .grid { display: grid; }
+.grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
 .grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
 .grid-cols-7 { grid-template-columns: repeat(7, 1fr); }
@@ -104,22 +106,36 @@ button {
 /* ═══════════════════════════════════════════════
    SPACING
    ═══════════════════════════════════════════════ */
+.mb-0\.5 { margin-bottom: 2px; }
 .mb-1 { margin-bottom: 4px; }
+.mb-1\.5 { margin-bottom: 6px; }
 .mb-2 { margin-bottom: 8px; }
 .mb-3 { margin-bottom: 12px; }
 .mb-4 { margin-bottom: 16px; }
 .mb-5 { margin-bottom: 20px; }
+.mb-6 { margin-bottom: 24px; }
 .mt-0\.5 { margin-top: 2px; }
 .mt-1 { margin-top: 4px; }
 .mt-1\.5 { margin-top: 6px; }
 .mt-2 { margin-top: 8px; }
 .mt-3 { margin-top: 12px; }
 .mt-4 { margin-top: 16px; }
+.mt-5 { margin-top: 20px; }
+.mt-6 { margin-top: 24px; }
 .mt-20 { margin-top: 80px; }
 .pt-4 { padding-top: 16px; }
-.pt-12 { padding-top: 48px; }
+.pt-5 { padding-top: 20px; }
+/* 화면 최상단 여백. viewport-fit=cover 라 폰에서는 상태바가 화면 위에 겹쳐 온다 —
+   env(safe-area-inset-top) 를 더하지 않으면 '뒤로' 버튼이 상태바 밑으로 들어가고,
+   그만큼 아래 카드들이 헤더에 바짝 붙어 보인다. 노치가 없으면 0px 라 전과 같다. */
+.pt-12 { padding-top: calc(48px + env(safe-area-inset-top, 0px)); }
+.pb-2 { padding-bottom: 8px; }
+.pb-3 { padding-bottom: 12px; }
+.pb-4 { padding-bottom: 16px; }
 .pb-5 { padding-bottom: 20px; }
+.pb-20 { padding-bottom: 80px; }
 .pb-32 { padding-bottom: 128px; }
+.py-4 { padding-top: 16px; padding-bottom: 16px; }
 .px-1 { padding-left: 4px; padding-right: 4px; }
 .px-5 { padding-left: 20px; padding-right: 20px; }
 .py-1\.5 { padding-top: 6px; padding-bottom: 6px; }
@@ -161,8 +177,10 @@ button {
 .text-xs { font-size: 11px; }
 .text-sm { font-size: 13px; }
 .text-base { font-size: 15px; }
+.text-lg { font-size: 16px; }
 .text-xl { font-size: 18px; }
 .text-2xl { font-size: 22px; }
+.text-3xl { font-size: 28px; }
 .text-4xl { font-size: 36px; }
 
 /* ═══════════════════════════════════════════════
@@ -179,8 +197,10 @@ button {
    STYLE HELPERS
    ═══════════════════════════════════════════════ */
 .uppercase { text-transform: uppercase; }
+.tracking-wider { letter-spacing: 0.05em; }
 .tracking-widest { letter-spacing: 0.1em; }
 .font-bold { font-weight: 700; }
+.leading-tight { line-height: 1.25; }
 .leading-relaxed { line-height: 1.625; }
 
 /* ═══════════════════════════════════════════════
@@ -189,6 +209,13 @@ button {
 .card {
   background: var(--bg-2);
   border: 1px solid var(--bg-3);
+  border-radius: 24px;
+  padding: 20px;
+}
+/* 경고 톤 카드 — 실패·주의 안내를 담는다. .card 와 같은 골격에 앰버 테두리만. */
+.card-warning {
+  background: rgba(var(--warn-rgb), 0.06);
+  border: 1px solid rgba(var(--warn-rgb), 0.25);
   border-radius: 24px;
   padding: 20px;
 }
@@ -340,6 +367,39 @@ button {
   justify-content: center;
   color: var(--accent);
   margin: 0 auto 8px;
+}
+
+/* 한 화면에 다 들어오는 짧은 화면은 위에 붙이지 않고 세로 가운데에 둔다.
+   margin:auto 로 가운데를 잡는다 — justify-content:center 는 내용이 넘칠 때 위쪽이 잘려
+   맨 위 항목에 손이 닿지 않는다. */
+.screen-center {
+  min-height: 100vh;
+  min-height: 100dvh;
+  box-sizing: border-box;
+  padding-bottom: 116px;   /* 탭바(약 88px) + 여유 */
+  display: flex;
+  flex-direction: column;
+}
+.screen-center-inner { width: 100%; margin-top: auto; margin-bottom: auto; }
+
+/* 헤더가 있는 화면에서 그 아래 남은 영역만 세로 가운데로.
+   빼는 값 = 헤더(pt-12 48px + '뒤로' 44px + pb-3 12px = 104px) + 탭바(88px).
+   safe-area 는 .pt-12 가 헤더를 그만큼 밀어 내리므로 여기서도 같이 빼야 자리가 맞는다. */
+.screen-center-rest {
+  min-height: calc(100vh - 192px);
+  min-height: calc(100dvh - 192px - env(safe-area-inset-top, 0px));
+  display: flex;
+  flex-direction: column;
+}
+.screen-center-rest > * { margin-top: auto; margin-bottom: auto; }
+
+/* 글자만 있는 '뒤로' 버튼도 44px 표적이 되게 위아래 여백을 준다(가로는 글자만큼). */
+.screen-back-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 4px;
+  margin-left: -4px;
 }
 
 /* ═══════════════════════════════════════════════
@@ -1472,14 +1532,6 @@ button {
   background: var(--bg-0);
 }
 
-.food-input-header {
-  padding: 48px 20px 16px;
-  border-bottom: 1px solid var(--bg-2);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
 .chat-area {
   flex: 1;
   padding: 20px;
@@ -1991,7 +2043,9 @@ button {
   background: var(--bg-0);
 }
 .coach-header {
-  padding: 48px 20px 16px;
+  /* .pt-12 와 같은 규칙 — 이 헤더도 화면 맨 위에서 시작하므로 상태바를 피해야 한다.
+     한쪽만 보정하면 탭 화면과 오버레이 화면 사이에서 상단이 튄다. */
+  padding: calc(48px + env(safe-area-inset-top, 0px)) 20px 16px;
   border-bottom: 1px solid var(--bg-2);
   display: flex;
   align-items: center;
@@ -2933,13 +2987,28 @@ button {
    docs/research/warmup-stretching.md §6-D (화면 구성)
    ═══════════════════════════════════════════════ */
 
+/* 이름이 주인공 — 32px, 분량은 그 아래 24px 한 줄. 옛 배치(라벨 11px + 숫자 72px)는
+   숫자가 화면을 다 먹어 "무슨 동작인지"가 뒤로 밀렸다. 타입 스케일은 12·14·16·18·24·32 를 쓴다. */
+.mobility-hero { margin-top: 18px; }
 .mobility-name {
   font-family: var(--font-sans);
   font-weight: 800;
-  font-size: 28px;
-  line-height: 1.25;
+  font-size: 32px;
+  line-height: 1.2;
   color: #fff;
   word-break: keep-all;
+}
+.mobility-amount {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 24px;
+  line-height: 1.2;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;   /* 카운트다운 자릿수가 흔들리지 않게 */
+}
+.mobility-amount-sub {
+  font-size: 14px;
+  color: var(--text-muted);
 }
 
 .mobility-tag {
@@ -2959,8 +3028,7 @@ button {
 /* 현재 동작의 남은 시간 바 (전체 진행 바와 구분되게 얇게) */
 .mobility-segbar {
   height: 6px;
-  margin: 10px auto 0;
-  max-width: 220px;
+  margin: 12px 0 0;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   overflow: hidden;
@@ -2975,7 +3043,6 @@ button {
 /* 전환 3초 전 예고 */
 .mobility-precue {
   margin-top: 8px;
-  text-align: center;
   color: var(--warn);
   font-family: var(--font);
   font-weight: 700;
@@ -3035,24 +3102,6 @@ button {
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: var(--bg-1);
-}
-
-.mobility-modes { display: flex; gap: 8px; margin-top: 12px; }
-.mobility-mode-btn {
-  flex: 1;
-  padding: 10px 0;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: var(--bg-1);
-  color: var(--text-soft);
-  font-family: var(--font);
-  font-size: 12px;
-  font-weight: 600;
-}
-.mobility-mode-btn.active {
-  border-color: var(--accent);
-  background: var(--bg-3);
-  color: var(--accent);
 }
 
 /* 완료 화면의 "정리 스트레칭" 진입 카드 */

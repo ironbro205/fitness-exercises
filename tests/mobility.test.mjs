@@ -266,11 +266,11 @@ test('expandMobilitySegments — 사전에 없는 키는 건너뛴다', () => {
 
 test('mobilitySegmentLabel / Amount — 좌우와 분량 표기', () => {
   const [l, r] = app.expandMobilitySegments(['supine_hamstring_strap']);
-  assert.equal(app.mobilitySegmentLabel(l), '허벅지 뒤 — 누워서 다리 올리기 · 왼쪽');
-  assert.equal(app.mobilitySegmentLabel(r), '허벅지 뒤 — 누워서 다리 올리기 · 오른쪽');
+  assert.equal(app.mobilitySegmentLabel(l), '누워서 다리 올리기 · 왼쪽');
+  assert.equal(app.mobilitySegmentLabel(r), '누워서 다리 올리기 · 오른쪽');
   assert.equal(app.mobilitySegmentAmount(l), '30초');
   const [squat] = app.expandMobilitySegments(['bw_squat']);
-  assert.equal(app.mobilitySegmentLabel(squat), '하체 풀기 — 맨몸 스쿼트');
+  assert.equal(app.mobilitySegmentLabel(squat), '맨몸 스쿼트');
   assert.equal(app.mobilitySegmentAmount(squat), '12회');
 });
 
@@ -361,22 +361,35 @@ test('mobilitySkipStep — 좌우로 쪼개진 동작은 통째로 넘긴다', (
   assert.equal(segs2[l2 + 1].side, 'right');
 });
 
-// 3분 유산소 중에 "짧게"를 누르면 타이머가 되감겨 짧게 > 표준이 되는 역전이 있었다.
-test('setWarmupMode — 같은 구간을 하고 있으면 카운트다운을 이어간다', () => {
+// 화면의 '표준 6분 / 짧게 3분' 토글은 걷어냈다(사용자 결정) — 구간마다 '건너뛰기'와
+// '웜업 건너뛰고 바로 시작'이 남아 있어 시간을 줄이는 길은 그대로다.
+// 짧게 계획을 만드는 **도메인 능력**은 buildWarmupPlan({short:true}) 로 남아 있고
+// 위 '짧게 모드는 일반 웜업 3분만' 테스트가 그걸 지킨다.
+test('웜업 화면에 표준/짧게 토글이 없다', () => {
   freshWarmup(app);
-  const w = app.state.activeSession.warmup;
-  w.segEndsAt = Date.now() + 42000;    // 일반 유산소 진행 중(남은 42초)
-  app.setWarmupMode('short');
-  assert.equal(app.state.activeSession.warmup.mode, 'short');
-  assert.equal(app.state.activeSession.warmup.segEndsAt, w.segEndsAt, '남은 시간이 되감기면 안 됨');
-  assert.equal(app.state.activeSession.warmup.done, false);
+  const html = app.renderWarmupGuide();
+  assert.ok(!/표준 6분|짧게 3분/.test(html), '모드 토글 문구가 화면에 남아 있다');
+  assert.ok(!/setWarmupMode/.test(html), '모드 토글 핸들러가 화면에 남아 있다');
+  assert.equal(typeof app.setWarmupMode, 'undefined', '쓰이지 않는 전역이 남아 있다');
 });
 
-test('setWarmupMode — 드릴 구간에서 짧게로 바꾸면 웜업이 끝난다', () => {
+// 이름은 '부위 — 동작'이 아니라 동작 하나로 적는다(길어지면 두 줄로 접히고 무엇을
+// 하는지가 뒤로 밀린다). 새 동작을 넣을 때 옛 형식으로 되돌아가는 걸 막는다.
+test('동작 이름에 부위 접두어를 붙이지 않는다', () => {
+  const bad = Object.keys(DRILLS).filter((k) => /\s—\s/.test(DRILLS[k].kr));
+  assert.deepEqual(bad, [], `'부위 — 동작' 형식이 남아 있다: ${bad.join(', ')}`);
+});
+
+// 웜업 화면이 '이름 → 분량' 순서를 지키는지. 옛 배치는 라벨 11px + 숫자 72px 이 먼저였다.
+test('웜업 화면은 동작 이름이 먼저, 분량이 그 다음', () => {
   freshWarmup(app);
-  app.state.activeSession.warmup.idx = 3;   // 일반 웜업을 지나 드릴 진행 중
-  app.setWarmupMode('short');
-  assert.equal(app.state.activeSession.warmup.done, true);
+  const html = app.renderWarmupGuide();
+  const name = html.indexOf('mobility-name');
+  const amount = html.indexOf('mobility-amount');
+  assert.ok(name > -1 && amount > -1, '이름·분량 블록이 있어야 함');
+  assert.ok(name < amount, '이름이 분량보다 먼저 와야 함');
+  assert.ok(!/남은 시간|목표 횟수/.test(html), '분량 라벨은 걷어냈다');
+  assert.ok(!/다 하면 완료를 누르세요/.test(html), '동작 안내 줄은 걷어냈다');
 });
 
 test('mobilityRepairState — 범위 밖 idx로 복원돼도 갇히지 않는다', () => {

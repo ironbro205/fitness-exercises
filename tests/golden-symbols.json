@@ -1,5 +1,5 @@
 {
-  "functionCount": 500,
+  "functionCount": 499,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -452,7 +452,6 @@
     "setSetSchemeOverride",
     "setStatsPeriod",
     "setTab",
-    "setWarmupMode",
     "shiftRepRange",
     "shiftSessionExerciseIndexes",
     "shouldShowWeeklyReview",

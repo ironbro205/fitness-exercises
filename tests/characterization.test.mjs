@@ -2847,6 +2847,87 @@ test('디자인 규칙 — 잔글씨 하한 11px (탭바·단위 첨자만 예�
   assert.ok(!/font-size:\s*9px/.test(css), 'CSS 에도 9px 글씨가 남으면 안 된다');
 });
 
+// 이 저장소는 Tailwind 를 쓰지 않는다 — 같은 이름의 클래스를 css/styles.css 에 손으로 적어 둔다.
+// 그래서 **CSS 에 없는 이름을 쓰면 조용히 아무 일도 안 일어난다**(오류도 경고도 없다).
+// 실제로 두 갈래로 나 있었다:
+//   ① 정의를 통째로 빼먹음 — pb-2·pb-3·pb-4·pb-20·pt-5·mt-5·mt-6·mb-6·py-4·text-3xl·
+//      text-lg·text-left·grid-cols-2·leading-tight·tracking-wider·card-warning.
+//      '이전/다음 종목' 버튼이 2열이 아니라 위아래로 쌓이고, 로딩 카드의 'PUSH' 가 14px 로 떴다.
+//   ② HTML 에 CSS 이스케이프를 그대로 씀 — class="mt-0\.5" 의 클래스 이름은 백슬래시까지
+//      포함한 `mt-0\.5` 라, `.mt-0\.5`(= 이름 mt-0.5)와 **영원히** 안 맞는다. 51곳이 여백 0 이었다.
+//      그래서 이 검사는 백슬래시를 풀지 않고 **HTML 에 적힌 그대로** 비교한다.
+function usedClassTokens() {
+  const out = [];
+  for (const file of ['screens', 'core', 'bodymap']) {
+    const src = fs.readFileSync(path.join(DIR, '..', 'js', `${file}.js`), 'utf8');
+    src.split('\n').forEach((line, i) => {
+      for (const m of line.matchAll(/class="([^"]*)"/g)) {
+        let value = m[1];
+        // `class="a b' + cls + '"` 처럼 JS 문자열이 중간에 끊기면, 작은따옴표 앞까지만 본다.
+        // 끊긴 자리의 마지막 토큰은 반쪽(pb-3 인지 pb-32 인지 모른다)이라 버린다.
+        const cut = value.indexOf("'");
+        if (cut !== -1) {
+          value = value.slice(0, cut);
+          if (!/\s$/.test(value)) value = value.replace(/\S+$/, '');
+        }
+        for (const cls of value.split(/\s+/)) {
+          if (cls) out.push({ cls, where: `js/${file}.js:${i + 1}` });
+        }
+      }
+    });
+  }
+  return out;
+}
+
+function definedClassNames() {
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  const names = new Set();
+  for (const [, selector] of css.matchAll(/([^{}]+)\{/g)) {
+    if (selector.includes('@')) continue;          // @media·@keyframes 헤더는 셀렉터가 아니다
+    for (const m of selector.matchAll(/\.((?:[\w-]|\\.)+)/g)) {
+      names.add(m[1].replace(/\\(.)/g, '$1'));      // CSS 이스케이프를 푼 '진짜 클래스 이름'
+    }
+  }
+  return names;
+}
+
+test('디자인 규칙 — 화면이 쓰는 유틸 클래스가 CSS 에 전부 정의돼 있다', () => {
+  const defined = definedClassNames();
+  // 유틸 모양만 본다. 컴포넌트 클래스는 이름이 자유로워 오탐이 나고, JS 변수 조각도 걸러진다.
+  const UTIL = /^(?:[pm][trblxy]?-\d+(?:\.\d+)?|gap(?:-[xy])?-\d+(?:\.\d+)?|grid-cols-\d+|text-(?:xs|sm|base|lg|xl|\d?xl|left|center|right)|leading-\w+|tracking-\w+)$/;
+  const missing = new Map();
+  for (const { cls, where } of usedClassTokens()) {
+    if (!UTIL.test(cls.replace(/\\/g, ''))) continue;   // 유틸 모양인지는 백슬래시를 뺀 모습으로 판단
+    if (defined.has(cls)) continue;                      // 비교는 HTML 에 적힌 그대로
+    if (!missing.has(cls)) missing.set(cls, where);
+  }
+  assert.deepEqual([...missing.keys()], [],
+    'CSS 에 없어서 아무 효과가 없는 클래스: ' +
+    [...missing].map(([c, w]) => `${c} (${w})`).join(', '));
+});
+
+// viewport-fit=cover 로 화면 맨 위까지 그리므로, 폰에서는 상태바가 헤더 위에 겹쳐 온다.
+// 화면 맨 위에서 시작하는 규칙이 하나라도 보정을 빼먹으면 그 화면만 상단이 튄다
+// (실제로 .pt-12 만 고치고 .coach-header 8화면을 빠뜨린 적이 있다).
+test('디자인 규칙 — 최상단 여백이 전부 상태바(safe-area)를 피한다', () => {
+  const html = fs.readFileSync(path.join(DIR, '..', 'index.html'), 'utf8');
+  if (!/viewport-fit=cover/.test(html)) return;   // cover 를 안 쓰면 해당 없음
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  const bare = [];
+  for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    if (selector.includes('@')) continue;
+    // 상단 여백이 48px(=상태바 높이 자리)인 규칙. 그 자리엔 반드시 env() 가 있어야 한다.
+    const top = body.match(/padding(?:-top)?:\s*([^;]+);/);
+    if (!top || !/\b48px\b/.test(top[1].split(/\s+/)[0])) continue;
+    if (!/env\(safe-area-inset-top/.test(top[1])) bare.push(selector.trim());
+  }
+  assert.deepEqual(bare, [],
+    '상태바에 가려질 최상단 여백: ' + bare.join(' / ') +
+    ' — calc(48px + env(safe-area-inset-top, 0px)) 를 써야 한다');
+});
+
 test('디자인 규칙 — 화면 이름은 탭바에만 있고 한국어다', () => {
   const fresh = loadApp();
   for (const [tab, fn] of [['home', 'renderHome'], ['workout', 'renderWorkout'], ['stats', 'renderStats'], ['more', 'renderMore']]) {
