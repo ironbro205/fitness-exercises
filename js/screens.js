@@ -1012,7 +1012,6 @@ window.startGeneratedRoutine = function() {
   };
   // FREE·AI 루틴은 세션 타입이 없을 수 있어, 종목 목록에서 웜업 부위를 유도한다(buildWarmupPlan 내부).
   attachWarmupToSession(state.activeSession);
-  state.sessionMuscleFoldOpen = null;   // 새 세션은 자극 근육을 접은 채로 시작한다
   saveActiveSession();
 
   // 마법사 상태 리셋 (운동이 시작됐으니 마법사는 비움)
@@ -1440,7 +1439,6 @@ window.startSession = function(sessionType) {
   };
   // 그날 부위 맞춤 웜업(일반 유산소 3분 + 동적 드릴)을 본운동 앞에 붙인다 — 건너뛰기 가능.
   attachWarmupToSession(state.activeSession);
-  state.sessionMuscleFoldOpen = null;   // 새 세션은 자극 근육을 접은 채로 시작한다
   saveActiveSession();
 
   render();
@@ -1462,6 +1460,8 @@ window.endSession = function(fromBack) {
     state.restTimer = null;
     state.editingSet = null;
     state.setSchemeOpen = false;        // 세션 위 시트는 세션과 함께 닫는다 (남으면 다른 화면의 뒤로가기·스와이프를 먹는다)
+    state.lastRecordOpen = false;
+    state.muscleMapZoom = null;
     state.topSetSheet = null;
     state.exerciseSwapOpen = false;
     state.exerciseMenuOpen = false;
@@ -1674,6 +1674,8 @@ function finalizeSession() {
   state.restTimer = null;
   state.editingSet = null;
   state.setSchemeOpen = false;          // 세션 위 시트는 세션과 함께 닫는다
+  state.lastRecordOpen = false;
+  state.muscleMapZoom = null;
   state.topSetSheet = null;
   state.exerciseSwapOpen = false;
   state.exerciseMenuOpen = false;
@@ -2103,7 +2105,7 @@ function startRestTimerTick() {
       restTickerInterval = null;
       // 시트(편집/종목변경/채팅)가 열려 있으면 전체 렌더 대신 타이머 UI만 제거
       // (채팅 입력·스트리밍 중 전체 렌더는 키보드/포커스/말풍선을 끊는다)
-      if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.topSetSheet || state.sessionChatOpen || state.muscleMapZoom) {
+      if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.topSetSheet || state.sessionChatOpen || state.muscleMapZoom || state.lastRecordOpen) {
         var wrapEl = document.querySelector('.rest-timer-wrap');
         if (wrapEl && wrapEl.parentNode) wrapEl.parentNode.removeChild(wrapEl);
       } else {
@@ -2113,7 +2115,7 @@ function startRestTimerTick() {
     }
     // 시트(편집/종목변경/세트사이채팅)가 열려 있으면 시트가 깜빡이지 않도록 타이머만 부분 갱신
     // (채팅은 입력·스트리밍 중이라 전체 렌더가 매초 돌면 입력이 초기화된다)
-    if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.topSetSheet || state.sessionChatOpen || state.muscleMapZoom) {
+    if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.topSetSheet || state.sessionChatOpen || state.muscleMapZoom || state.lastRecordOpen) {
       var remaining = state.restTimer.duration - elapsed;
       var el = document.getElementById('rest-time-text');
       if (el) {
@@ -2138,10 +2140,6 @@ function startRestTimerTick() {
 // 그래서 쉬는 동안 펴 둔 인체도가 1초 만에 도로 접혔다. 여기서 state 에만 적고 **재렌더는 하지 않는다**
 // (브라우저가 이미 열고 닫은 뒤라 다시 그릴 이유가 없고, 그리면 스크롤이 튄다).
 // 값은 "펼쳐 둔 종목 번호" — 종목이 바뀌면 비교가 어긋나 자동으로 접힌다(따로 지울 필요 없음).
-window.setSessionMuscleFold = function(open) {
-  state.sessionMuscleFoldOpen = (open && state.activeSession)
-    ? state.activeSession.currentExerciseIdx : null;
-};
 
 // 종목 변경 (이동)
 window.goToExercise = function(idx) {
@@ -3336,7 +3334,9 @@ function renderWorkoutSession() {
           // **실제로 적용된** 세트법(exercise.scheme)을 적는다. 저장된 선택(getSetScheme)을 적으면
           // 무게를 모르는 종목에서 스킴이 스트레이트로 접혔는데도 "탑+백오프"라 써 놓게 된다.
           ' · ' + (SET_SCHEMES[sessionSchemeOf(exercise)] || SET_SCHEMES.straight).short +
-          ' · 휴식 ' + getExerciseRestSec(exercise.name) + '초</p>' +
+          // 클래스 기본값(getExerciseRestSec)만 읽으면 AI 가 준 exercise.rest 나 세트법이 넣은
+          // set.rest 를 무시해, 여기 적힌 초와 실제로 도는 타이머가 어긋난다.
+          ' · 휴식 ' + exerciseRestLabelSec(exercise) + '초</p>' +
         (typeof exercise.supersetWith === 'number' && session.exercises[exercise.supersetWith]
           ? '<p class="text-[11px] font-mono mt-1" style="color: var(--accent);">슈퍼세트 ' +
               (exercise.supersetKr || '') + ' — ' + escapeHtml(session.exercises[exercise.supersetWith].name) +
@@ -3344,14 +3344,9 @@ function renderWorkoutSession() {
           : '') +
       '</div>' +
 
-      // 자극 근육 인체도 (앞/뒤). 매핑 없는 종목이면 빈 문자열 → 아무것도 안 그림.
-      // 세션 화면에서는 접어 둔다 — 200px 을 쓰면서 알려주는 건 근육 이름 두 단어뿐이었다.
-      // 펼침 상태는 state 가 들고 있다 (휴식 타이머의 매초 재렌더에 접히지 않도록 — setSessionMuscleFold).
-      buildMuscleMapBlock(exercise.name, {
-        fold: true,
-        foldOpen: state.sessionMuscleFoldOpen === session.currentExerciseIdx,
-        foldToggle: 'setSessionMuscleFold(this.open)'
-      }) +
+      // 자극 부위 · 지난 기록 — 화면에 펼쳐 두지 않고 버튼 두 개로 접는다.
+      // 둘 다 "운동 중 매 순간 보고 있어야 하는 것"이 아니라 "궁금할 때 여는 것"이다.
+      sessionFactsRowHtml(exercise) +
 
       // 도전 권장 · 지난 기록 카드 (점진적 과부하) — 문장이 아니라 숫자로 읽는 카드다.
       // 라벨(무엇을 할지) + 큰 숫자(얼마로) + 참고 한 줄(지난 기록)만 남긴다.
@@ -3414,12 +3409,11 @@ function renderWorkoutSession() {
             : heavier ? (isReverse ? '보조 낮추기 — 증량' : '도전 권장')
             : lighter ? (isReverse ? '보조 올리기' : '무게 낮추기')
             : (isReverse ? '동일 보조' : '동일 무게');
-          var prevReps = (prog.previousReps || []).filter(function(r) { return r; });
           html += '<p class="rm-label" style="color: ' + color + ';">' + label + '</p>' +
             weightLine(shown, prog.previousWeight, color);
           hasHead = true;
-          refs.push('지난 기록 ' + unitPrefix + escapeHtml(prog.previousWeight) + 'kg' +
-            (prevReps.length ? ' × ' + escapeHtml(prevReps.join('·')) + '회' : ''));
+          // 지난 기록은 여기 적지 않는다 — 바로 위 [지난 기록] 버튼이 세션별 전 세트를 보여준다(#3).
+          // 카드에 요약을 또 적으면 같은 사실을 한 화면에서 두 번 말하게 된다.
         } else if (prog && prog.source === 'rm_estimate') {
           // 첫 시도 - 1RM 기반. 위와 **같은 기준 세트**를 쓴다 —
           // 갈래마다 다른 세트를 찍으면 오름 사다리(피라미드)에서 카드는 첫 세트, 토스트는 탑세트를 말한다.
@@ -3428,6 +3422,7 @@ function renderWorkoutSession() {
           html += '<p class="rm-label accent">첫 시도 추천</p>' +
             weightLine(shownWeight, null, 'var(--accent)');
           hasHead = true;
+          // 첫 시도에는 기록이 없어 [지난 기록] 버튼도 안 생긴다 → 계획값이라도 여기 한 줄 남긴다.
           refs.push('지난 기록 ' + prevText);
         } else {
           // 추천을 못 만든 종목(기록도 1RM 추정도 없음) — 참고 줄만 남는다.
@@ -3435,6 +3430,7 @@ function renderWorkoutSession() {
         }
 
         if (rm) refs.push('추정 1RM ' + rm + 'kg');
+        if (!hasHead && !refs.length) return '';
 
         if (refs.length) {
           // refs 의 조각들은 담을 때 이미 이스케이프했다 — 여기서 또 하면 &lt; 가 &amp;lt; 로 두 번 죽는다.
@@ -3486,8 +3482,83 @@ function renderWorkoutSession() {
     buildSetSchemeSheetHtml(session, exercise) +
     buildTopSetWeightSheetHtml(session, exercise) +
     buildSessionChatSheetHtml(session, exercise) +
+    buildLastRecordSheetHtml(exercise) +
     buildMuscleMapZoomHtml();
 }
+
+// 종목 카드 아래 버튼 두 개 — [자극 부위] · [지난 기록].
+// 예전엔 자극 근육을 접이식으로, 지난 기록을 카드 안 한 줄로 화면에 늘 깔아 뒀다.
+// 둘 다 세트를 하는 동안 계속 보고 있을 정보가 아니라 궁금할 때 여는 정보다(#3).
+// 자극 부위는 이미 있는 확대 오버레이를 그대로 열고, 지난 기록은 아래 시트를 연다.
+function sessionFactsRowHtml(exercise) {
+  if (!exercise) return '';
+  var btns = [];
+
+  if (getExerciseMuscles(exercise.name)) {
+    btns.push('<button class="session-fact-btn" onclick="openMuscleMapZoom(\'' + muscleMapJsArg(exercise.name) + '\')">' +
+      icon('info', 14) + '<span>자극 부위</span></button>');
+  }
+  // 기록이 없는 종목은 버튼을 만들지 않는다 — 눌러서 "없어요" 를 보게 하지 않는다.
+  if (getLastPerformedSets(exercise.name)) {
+    btns.push('<button class="session-fact-btn" onclick="openLastRecord()">' +
+      icon('chart', 14) + '<span>지난 기록</span></button>');
+  }
+
+  return btns.length ? '<div class="session-fact-row">' + btns.join('') + '</div>' : '';
+}
+
+// 지난 기록 시트 — 최근 세션을 날짜별로, 그날 한 세트를 **전부** 적는다.
+// 카드 한 줄(rm-ref)은 자리가 좁아 3묶음까지만 적으므로, 전부 보고 싶을 때 여기로 온다.
+function buildLastRecordSheetHtml(exercise) {
+  if (!state.lastRecordOpen || !exercise) return '';
+  var name = exercise.name;
+  var history = getRecentPerformances(name, 3);
+  var prefix = isReverseProgression(name) ? '보조 ' : '';
+
+  var rows = history.map(function(h) {
+    var line = formatSetsSummary(h.sets, { unitPrefix: prefix });
+    if (!line) return '';
+    var setCount = h.sets.filter(function(st) { return st && !isSetExtension(st); }).length || h.sets.length;
+    return '<div class="last-record-row">' +
+        '<div class="flex items-center justify-between">' +
+          '<p class="text-[11px] font-mono text-stone-500">' + escapeHtml(fmtDate(h.date)) + ' · ' + escapeHtml(daysAgo(h.date)) + '</p>' +
+          '<p class="text-[11px] font-mono text-stone-500">' + setCount + '세트</p>' +
+        '</div>' +
+        '<p class="text-sm font-mono mt-1">' + escapeHtml(line) + '</p>' +
+      '</div>';
+  }).filter(Boolean).join('');
+
+  var rm = get1RM(name);
+  var rmLine = rm ? '<p class="text-[11px] font-mono text-stone-500 mt-3">추정 1RM ' + Math.round(rm) + 'kg</p>' : '';
+
+  return '<div class="sheet-overlay" onclick="closeLastRecord()">' +
+      '<div class="sheet" onclick="event.stopPropagation()">' +
+        '<div class="sheet-handle"></div>' +
+        '<div class="flex items-center justify-between mb-3">' +
+          '<div>' +
+            '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">지난 기록</p>' +
+            '<p class="font-bebas text-2xl mt-1">' + escapeHtml(name) + '</p>' +
+          '</div>' +
+          '<button class="session-header-btn" onclick="closeLastRecord()" aria-label="닫기">' + icon('close', 18) + '</button>' +
+        '</div>' +
+        (rows || '<p class="text-sm text-stone-400">아직 기록이 없어요</p>') +
+        rmLine +
+      '</div>' +
+    '</div>';
+}
+
+window.openLastRecord = function() {
+  state.lastRecordOpen = true;
+  render();
+};
+
+window.closeLastRecord = function() {
+  if (!state.lastRecordOpen) return;
+  animateSheetCloseThen(function() {
+    state.lastRecordOpen = false;
+    render();
+  });
+};
 
 // 세트법 바꾸기 시트
 function buildSetSchemeSheetHtml(session, exercise) {
@@ -3843,13 +3914,12 @@ function renderWorkoutComplete() {
   for (var i = 0; i < displayCount; i++) {
     var ex = cs.exercises[i];
     var hasPR = cs.newPRs.some(function(pr) { return pr.exerciseName === ex.name; });
-    var repsStr = ex.reps.join(', ');
-    // 어시스트 종목의 대표값은 최대가 아니라 **최소 보조**(가장 어려웠던 세트)다.
-    var summaryWeight = (isReverseProgression(ex.name) && Array.isArray(ex.weights) && ex.weights.length)
-      ? Math.min.apply(null, ex.weights) : ex.maxWeight;
-    var weightStr = (summaryWeight !== null && summaryWeight !== undefined)
-      ? ((isReverseProgression(ex.name) ? '보조 ' : '') + summaryWeight + 'kg') : '';
-    var detail = weightStr ? (weightStr + ' × ' + repsStr) : (repsStr + '회');
+    // 세트마다 무게가 다르면 무게째로 끊어 적는다 — 대표 무게 하나로 접으면 오늘 실제로 든
+    // 무게 중 하나가 사라진다(#4). 어시스트는 숫자가 보조력이라 '보조' 접두를 앞에 한 번 붙인다.
+    var detail = formatSetsSummary(loggedExerciseSets(ex), {
+      unitPrefix: isReverseProgression(ex.name) ? '보조 ' : ''
+    });
+    if (!detail) detail = (Array.isArray(ex.reps) ? ex.reps.join('·') + '회' : '');
     
     exerciseSummary += 
       '<div class="exercise-summary-row">' +
@@ -7587,6 +7657,7 @@ function getTopLayer() {
   if (state.exerciseMenuOpen) return 'exerciseMenu';  // 종목 메뉴 (세션 위)
   if (state.topSetSheet) return 'topSetWeight';       // 탑세트 무게 입력 (세트법 시트에서 이어짐)
   if (state.setSchemeOpen) return 'setScheme';        // 세트법 변경 (세션 위)
+  if (state.lastRecordOpen) return 'lastRecord';      // 지난 기록 (세션 위)
   if (state.sessionChatOpen) return 'sessionChat';    // 세트 사이 채팅 (세션 위)
   if (state.apiKeyModalOpen) return 'apiKey';         // (더보기 위)
   if (state.profileEditModalOpen) return 'profileEdit';
@@ -7631,6 +7702,7 @@ function navBack() {
     case 'exerciseMenu': closeExerciseMenu(); break;
     case 'topSetWeight': closeTopSetWeightSheet(); break;
     case 'setScheme': closeSetSchemeSheet(); break;
+    case 'lastRecord': closeLastRecord(); break;
     case 'sessionChat': closeSessionChat(); break;
     case 'apiKey': closeApiKeyModal(); break;
     case 'profileEdit': closeProfileEditModal(); break;
