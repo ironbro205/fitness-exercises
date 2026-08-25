@@ -1881,47 +1881,102 @@ test('volumeByPartCardHtml — 2주 미만은 판정 보류, 이후는 프롬프
 // ═══════════════════════════════════════════════
 // 오늘의 추천 (죽어 있던 일일 AI 추천 되살리기)
 // ═══════════════════════════════════════════════
-test('오늘의 추천 — 카드 4상태 + 홈 연결 + 운동탭 배지 동기화', () => {
+// 시트를 새로 만들 때마다 반복되는 사고: state 플래그만 켜고 **화면 반환값에 안 붙여서**
+// 눌러도 아무 일이 안 일어난다. 2단계에서 실제로 두 번 났다 — 그래서 화면별로 못박는다.
+test('2단계 — 종목 줄을 누르면 편집 시트가 화면에 실제로 뜬다', () => {
+  const a = loadApp();
+  a.state.currentTab = 'workout';
+  a.state.workoutWizardStep = 2;
+  a.state.selectedBodyPart = 'push';
+  a.state.routineLoading = false;
+  a.state.generatedRoutine = { bodyPart: 'push', headline: 'x', duration: 55, totalSets: 9,
+    exercises: [{ name: '머신 체스트 프레스', type: '복합', isMain: true, sets: 3, reps: '8-10', weight: 60 }] };
+
+  assert.ok(!a.renderWorkoutStep2().includes('sheet-overlay'), '닫혀 있을 땐 시트가 없다');
+  a.openExerciseEdit('preview', 0);
+  const html = a.renderWorkoutStep2();
+  assert.ok(html.includes('sheet-overlay'), '시트가 2단계 화면에 안 붙었다 — state 만 바뀌고 화면은 그대로다');
+  assert.ok(html.includes('쉬는시간'), '편집 시트 내용이 없다');
+  assert.equal(a.getTopLayer(), 'exerciseEdit', '뒤로가기가 시트를 먼저 닫아야 한다');
+
+  // 종목 고르기도 같은 화면에 붙어야 한다
+  a.exerciseEditSwap();
+  assert.ok(a.renderWorkoutStep2().includes('종목 바꾸기'), '종목 고르기 시트가 2단계에 안 붙었다');
+  a.closeExerciseSwap();
+});
+
+test('2단계 — 종목을 다 빼면 시작을 막고 요약이 거짓말하지 않는다', () => {
+  const a = loadApp();
+  a.state.workoutWizardStep = 2;
+  a.state.selectedBodyPart = 'push';
+  a.state.routineLoading = false;
+  a.state.generatedRoutine = { bodyPart: 'push', headline: 'x', duration: 55, totalSets: 18, exercises: [] };
+  const html = a.renderWorkoutStep2();
+  assert.ok(!html.includes('startGeneratedRoutine'), '종목이 없는데 시작할 수 있다');
+  assert.ok(html.includes('종목을 먼저 추가하세요'));
+  assert.ok(!html.includes('0종목 · 18세트'), '저장된 옛 숫자를 그대로 적으면 화면이 거짓말을 한다');
+  assert.ok(html.includes('종목이 없어요'));
+});
+
+// 오늘의 추천은 홈 카드와 운동 탭 '추천' 배지 양쪽에서 뺐다(사용자 결정).
+// 화면에 안 쓰는 값을 하루 한 번 API 로 받아 오면 요금만 나가므로 배경 로드도 멈췄다.
+test('오늘의 추천 — 홈·운동 탭 어디에도 남아 있지 않다', () => {
   const fresh = loadApp();
+  fresh.state.apiKey = 'sk-ant-test';
+  fresh.state.aiRecommendation = { date: fresh.getTodayStr(), session: 'legs', title: '하체 가자',
+    reason: 'r', caution: '', suggestion: 's', intensity: 'moderate' };
 
-  // 1) API 키 없음 → 키 안내만
-  fresh.state.apiKey = null;
-  fresh.state.aiRecommendation = null;
-  fresh.state.aiRecLoading = false;
-  fresh.state.aiRecFailedDate = null;
-  assert.ok(fresh.renderAIRecommendationCard().includes('API 키'), '키 없으면 키 안내');
-  assert.ok(!fresh.renderHome().includes("setTab('workout')"), '홈에 운동 바로가기 문자열이 생기면 안 됨(묶음5 계약)');
+  const home = fresh.renderHome();
+  ['오늘의 추천', 'ai-rec-card', '하체 가자'].forEach((gone) => {
+    assert.ok(!home.includes(gone), '홈에 아직 남아 있다: ' + gone);
+  });
 
-  // 2) 로딩 → 스피너
-  fresh.state.apiKey = 'sk-test';
-  fresh.state.aiRecLoading = true;
-  assert.ok(fresh.renderAIRecommendationCard().includes('loading-spinner'), '로딩 스피너');
-
-  // 3) 오늘 실패 → 재시도 버튼만, 자동 재시도는 잠김
-  fresh.state.aiRecLoading = false;
-  fresh.state.aiRecommendation = null;
-  fresh.state.aiRecFailedDate = fresh.getTodayStr();
-  const failCard = fresh.renderAIRecommendationCard();
-  assert.ok(failCard.includes('refreshAIRecommendation()'), '수동 재시도 버튼');
-  fresh.state.aiRecFailedDate = null;
-  assert.equal(fresh.renderAIRecommendationCard(), '', '실패 기록도 결과도 없으면 빈 문자열');
-
-  // 4) 결과 → 부위·제목·이유·주의 표시
-  fresh.state.aiRecommendation = {
-    session: 'pull', title: '오늘은 PULL이 적절합니다', reason: '광배 볼륨이 부족해요',
-    caution: '허리 조심', suggestion: '랫풀다운 50kg 3세트', intensity: 'light',
-    date: fresh.getTodayStr(), aiGenerated: true
-  };
-  const card = fresh.renderAIRecommendationCard();
-  assert.ok(card.includes('PULL') && card.includes('오늘은 PULL이 적절합니다'), '부위·제목');
-  assert.ok(card.includes('광배 볼륨이 부족해요') && card.includes('허리 조심'), '이유·주의');
-  assert.ok(card.includes('가볍게'), 'intensity 한글화');
-  assert.ok(fresh.renderHome().includes('오늘의 추천'), '홈에 카드가 실제로 붙는다');
-
-  // 5) 운동 탭 STEP 1 ✨추천 배지가 AI 추천 부위를 따른다
+  fresh.state.currentTab = 'workout';
   fresh.state.workoutWizardStep = 1;
   const workout = fresh.renderWorkout();
-  assert.ok(workout.includes("selectBodyPart('pull')\"><span class=\"recommend-badge\">"), 'PULL 카드에 추천 배지');
+  ['recommend-badge', '추천', '이번 주'].forEach((gone) => {
+    assert.ok(!workout.includes(gone), '운동 탭에 아직 남아 있다: ' + gone);
+  });
+  // 부위 다섯 장은 그대로 고를 수 있어야 한다
+  ['push', 'pull', 'legs', 'upper', 'free'].forEach((k) => {
+    assert.ok(workout.includes("selectBodyPart('" + k + "')"), k + ' 를 고를 수 없다');
+  });
+  assert.ok(workout.includes('body-part-grid'), '2열 그리드가 아니다');
+
+  // 이 변경의 근거는 '화면에 안 쓰는 값을 하루 한 번 API 로 받으면 요금만 나간다' 였다.
+  // 마크업만 보면 renderHome 이 다시 배경 로드를 부르기 시작해도 이 테스트가 조용히 통과한다.
+  const src = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
+  const homeSrc = src.slice(src.indexOf('function renderHome()'), src.indexOf('function renderWorkout()'));
+  assert.ok(!/^\s*[^/\n]*loadAIRecommendationIfNeeded\s*\(/m.test(homeSrc),
+    '홈이 다시 오늘의 추천을 배경에서 불러온다 — 화면에 안 쓰는 값이라 요금만 나간다');
+});
+
+// 앱이 부상·장비 때문에 종목을 바꿨다면 그 사실은 사용자에게 알려야 한다.
+// 사용자가 지운 건 AI 가 쓴 '주의사항' 산문이지, **앱이 루틴에 한 일**이 아니다.
+test('2단계 — 안전·장비 교체는 알리고, AI 주의사항 산문은 안 적는다', () => {
+  const a = loadApp();
+  a.state.workoutWizardStep = 2;
+  a.state.selectedBodyPart = 'push';
+  a.state.routineLoading = false;
+  a.state.generatedRoutine = { bodyPart: 'push', headline: 'x', duration: 50, totalSets: 3,
+    caution: '어깨가 아프면 무리하지 마세요',
+    swaps: ['안전 교체: 바벨 스쿼트 → 핵 스쿼트 (허리 보호)'],
+    exercises: [{ name: '머신 체스트 프레스', type: '복합', sets: 3, reps: '8-10', weight: 60 }] };
+  const html = a.renderWorkoutStep2();
+  assert.ok(html.includes('안전 교체: 바벨 스쿼트 → 핵 스쿼트'), '앱이 종목을 바꾼 사실이 화면에 없다');
+  assert.ok(!html.includes('어깨가 아프면 무리하지 마세요'), 'AI 주의사항 산문은 걷어 냈다');
+
+  // 바꾼 게 없으면 줄도 안 뜬다
+  a.state.generatedRoutine.swaps = [];
+  assert.ok(!a.renderWorkoutStep2().includes('routine-swap-note'));
+
+  // API 키 없이 만든 템플릿 루틴은 그 사실을 알린다 — 옛 '기본 루틴' 배지가 'AI 분석 완료'
+  // 배지와 한 몸이라 같이 걷혔는데, 없으면 템플릿을 AI 맞춤으로 오해한다.
+  a.state.generatedRoutine.isFallback = true;
+  const fb = a.renderWorkoutStep2();
+  assert.ok(fb.includes('기본 루틴'), '폴백 루틴이 AI 루틴과 구분되지 않는다');
+  assert.ok(fb.includes('API 키'), '무엇을 하면 되는지 알려 준다');
+  assert.ok(!fb.includes('AI 분석 완료'), 'AI 배지는 되살리지 않는다');
 });
 
 // ── AI 종목 풀: 같은 운동이 두 이름으로 노출되면 AI가 둘 다 처방해 기록이 갈린다 ──
@@ -2081,7 +2136,7 @@ test('종목 편집 — 운동 중에는 아직 안 한 세트만 다시 짜고,
   a.openExerciseEdit('session', 0);
   a.adjustExerciseEdit('rest', -30);
   const rest = a.exerciseEditValues(ex).rest;
-  assert.ok(a.renderWorkoutSession().includes('휴식 ' + rest + '초'), '바꾼 쉬는시간이 화면에 안 뜬다');
+  assert.ok(a.buildExerciseEditSheetHtml().includes(String(rest)), '바꾼 쉬는시간이 시트에 안 뜬다');
   const nextPending = ex.sets.filter((st) => !st.completed && !st.isWarmup)[0];
   assert.equal(a.resolveRestSec(ex, nextPending), rest, '화면과 타이머가 다른 값을 본다');
 
@@ -2106,7 +2161,8 @@ test('종목 편집 — 미리보기에서 정한 쉬는시간이 세션까지 �
   // 걷어내지 않으면 사용자가 정한 값이 조용히 무시된다.
   assert.equal(a.exerciseEditValues(ex).rest, want, '미리보기에서 정한 쉬는시간이 세션에서 사라졌다');
   if (a.state.activeSession.warmup) a.state.activeSession.warmup.done = true;
-  assert.ok(a.renderWorkoutSession().includes('휴식 ' + want + '초'), '화면 표기가 따라오지 않는다');
+  const pending = (ex.sets || []).filter((st) => !st.completed && !st.isWarmup && !a.isSetExtension(st))[0];
+  assert.equal(a.resolveRestSec(ex, pending), want, '실제로 돌 타이머가 따라오지 않는다');
 
   // 워밍업·드롭의 짧은 휴식은 그 세트법의 정의라 그대로 둔다
   const warm = (ex.sets || []).filter((st) => st.isWarmup)[0];
@@ -2382,15 +2438,17 @@ test('휴식 표기 — 화면의 "휴식 N초" 가 실제로 걸릴 값과 같�
   a.state.data.workoutLog = []; a.storage.set(a.KEYS.WORKOUT_LOG, []);
   a.startSession('push');
   const ex = a.state.activeSession.exercises[0];
+  // 휴식 초는 운동 중 화면에서 걷어냈다(사용자 결정) — 종목 편집 시트가 보여 주고 거기서 바꾼다.
   // 세트법이 이미 set.rest 를 찍어 두며 그게 종목 rest 보다 우선이다(resolveRestSec 규칙 그대로).
-  // 종목 단위 휴식을 쓰려면 남은 세트의 지정을 지워야 한다 — 휴식 편집도 같은 방식으로 저장한다.
   ex.sets.forEach((st) => { delete st.rest; });
   ex.rest = '75';
-  assert.ok(a.renderWorkoutSession().includes('휴식 75초'), '헤더가 종목 휴식을 반영하지 않는다');
+  a.openExerciseEdit('session', 0);
+  assert.ok(a.buildExerciseEditSheetHtml().includes('75'), '편집 시트가 종목 휴식을 반영하지 않는다');
 
-  // 세트법이 찍어 둔 값이 있으면 그게 화면에도 뜬다 — 표기와 타이머가 같은 뿌리를 봐야 한다
-  a.state.activeSession.exercises[0].sets.forEach((st) => { if (!st.isWarmup) st.rest = 200; });
-  assert.ok(a.renderWorkoutSession().includes('휴식 200초'), '세트별 휴식이 화면에 안 뜬다');
+  // 세트법이 찍어 둔 값이 있으면 그게 시트에도 뜬다 — 표기와 타이머가 같은 뿌리를 봐야 한다
+  ex.sets.forEach((st) => { if (!st.isWarmup) st.rest = 200; });
+  assert.equal(a.exerciseEditValues(ex).rest, 200, '세트별 휴식이 시트에 안 뜬다');
+  a.state.exerciseEdit = null;
 });
 
 // ── 지난 기록 표기 (#4) ──
@@ -2699,19 +2757,24 @@ test('XSS 회귀 — AI 응답·사용자 입력을 심어도 어떤 화면에�
   assert.deepEqual(leakedTag, [], '태그가 살아있는 화면: ' + leakedTag.join(', '));
   assert.deepEqual(leakedAttr, [], '속성 탈출이 가능한 화면: ' + leakedAttr.join(', '));
 
-  // '지난 기록' 줄은 현재 종목 하나만 그린다 → 무게 있는 종목/맨몸 종목 두 갈래를 각각 태운다.
-  // ⚠ 이 줄은 추천이 'rm_estimate'(=수행 기록 없음 + 1RM 있음)일 때만 그려진다. 그 조건이 나중에
-  //   바뀌면 줄 자체가 사라져 "태그 없음" 어서션이 **아무것도 검사하지 않은 채 통과**한다.
-  //   그래서 통과 조건을 뒤집어, 페이로드가 **이스케이프된 모습으로 실제로 찍혔는지**를 확인한다.
-  //   (이 어서션이 깨지면 '이스케이프가 뚫렸다'가 아니라 '이 테스트가 헛돌기 시작했다'는 신호다)
-  const prevTextMarks = ['&lt;img src=x onerror=eeek()&gt;kg ×', '&lt;img src=x onerror=eeek()&gt;회 ×'];
+  // AI·사용자 문자열이 세션 화면에 실제로 닿는 자리는 **종목명**이다(옛 '지난 기록' 줄은
+  // 무게 카드와 함께 걷혔다). 통과 조건을 뒤집어, 페이로드가 **이스케이프된 모습으로 실제로
+  // 찍혔는지**를 확인한다 — 그래야 자리 자체가 사라졌을 때 조용히 통과하지 않는다.
+  // (이 어서션이 깨지면 '이스케이프가 뚫렸다'가 아니라 '이 테스트가 헛돌기 시작했다'는 신호다)
+  const NAME_MARK = '&lt;img src=x onerror=eeek()&gt;';
   for (const idx of [0, 1]) {
     fresh.state.activeSession.currentExerciseIdx = idx;
+    fresh.state.activeSession.exercises[idx].name = P;
     const h = fresh.renderWorkoutSession();
     assert.ok(!h.includes('<img'), '세션 화면 종목 ' + idx + ' 에서 태그가 살아있다');
-    assert.ok(h.includes('지난 기록'), "'지난 기록' 줄이 안 그려졌다 — 이 검사가 헛돌고 있다 (종목 " + idx + ')');
-    assert.ok(h.includes(prevTextMarks[idx]),
-      '지난 기록 줄에 이스케이프된 값이 안 보인다 — 이 검사가 헛돌고 있다 (종목 ' + idx + ')');
+    assert.ok(h.includes(NAME_MARK), '종목명이 이스케이프된 모습으로 안 보인다 — 이 검사가 헛돌고 있다 (종목 ' + idx + ')');
+
+    // 종목 편집 시트도 같은 이름을 다시 그린다 (onclick 문자열에도 들어간다)
+    fresh.state.exerciseEdit = { scope: 'session', idx: idx, name: P };
+    const sheet = fresh.buildExerciseEditSheetHtml();
+    assert.ok(!sheet.includes('<img'), '종목 편집 시트에서 태그가 살아있다');
+    assert.ok(sheet.includes(NAME_MARK), '편집 시트에 이스케이프된 종목명이 없다 — 이 검사가 헛돌고 있다');
+    fresh.state.exerciseEdit = null;
   }
   fresh.state.activeSession.currentExerciseIdx = 0;
 
@@ -2958,21 +3021,36 @@ test('기록 정렬 — 최신이 위. 기록이 표시 개수(10)를 넘어도 
   assert.equal(uniq[0], newest, '맨 위가 최신이어야 한다');
 });
 
-test('AI 배지 — 폴백(기본 루틴)에는 "AI 분석 완료"를 붙이지 않는다', () => {
+// 2단계는 "오늘 뭘 할지"만 보여 준다 — AI 분석 완료 배지 · 다시 분석 아이콘 · 단계 표시 ·
+// 큰 부위명 · 헤드라인 · 주의사항 박스는 전부 걷었다(사용자 결정). 다시 새어 들어오면 잡는다.
+test('2단계 — 종목 목록 위에 설명 카드가 없다', () => {
   const fresh = loadApp();
   fresh.state.workoutWizardStep = 2;
   fresh.state.selectedBodyPart = 'push';
-  const base = {
-    bodyPart: 'push', headline: '기본 루틴', duration: 50, totalSets: 18, intensity: 'moderate', caution: '',
-    exercises: [{ name: '머신 체스트 프레스', type: '복합', sets: 3, reps: '8-12', weight: 60, rir: 2, note: '' }]
-  };
-  fresh.state.generatedRoutine = Object.assign({}, base, { isFallback: true });
-  const fallback = fresh.renderWorkoutStep2();
-  assert.ok(!fallback.includes('AI 분석 완료'), '폴백에 AI 배지가 붙으면 배지와 본문이 반대말을 한다');
-  assert.ok(fallback.includes('기본 루틴'), '폴백은 "기본 루틴"으로 표시');
+  fresh.state.routineLoading = false;
+  fresh.state.generatedRoutine = { bodyPart: 'push', headline: '가슴 상부 보충', reason: '이유',
+    caution: '어깨 통증이 있으면 가볍게', duration: 55, totalSets: 12, intensity: 'moderate',
+    exercises: [{ name: '머신 체스트 프레스', type: '복합', isMain: true, sets: 3, reps: '8-10', weight: 60,
+      note: '이번 주 인클라인만 했으니 평평한 각도로' }] };
+  const html = fresh.renderWorkoutStep2();
 
-  fresh.state.generatedRoutine = base;                        // isFallback 없음 = AI 생성
-  assert.ok(fresh.renderWorkoutStep2().includes('AI 분석 완료'), 'AI 루틴에는 배지를 붙인다');
+  ['AI 분석 완료', '기본 루틴', '2단계', 'step-indicator', 'routine-analysis-card',
+   '주의사항', 'regenerateRoutine()'].forEach((gone) => {
+    assert.ok(!html.includes(gone), '2단계에 아직 남아 있다: ' + gone);
+  });
+  assert.ok(!html.includes('가슴 상부 보충'), '헤드라인이 남아 있다');
+  assert.ok(!html.includes('이번 주 인클라인만'), 'AI 가 왜 골랐는지(note)는 화면에 적지 않는다');
+
+  // 남아야 하는 것: 요약 한 줄 · 종목명 · 처방 · 편집 입구
+  // 세트 합계는 저장된 routine.totalSets 가 아니라 **아래 목록이 실제로 적을 세트**에서 온다 —
+  // 같은 화면의 편집 시트에서 세트를 늘려도 헤더가 따라오게 하려면 출처가 하나여야 한다.
+  const planSets = fresh.getRoutinePreviewPlan(fresh.state.generatedRoutine.exercises[0])
+    .sets.filter((st) => !st.isWarmup && !fresh.isSetExtension(st)).length;
+  assert.ok(html.includes('1종목 · ' + planSets + '세트 · 55분'),
+    '요약 한 줄이 실제 세트 수와 다르다: ' + (html.match(/\d+종목[^<]*/) || [])[0]);
+  assert.ok(html.includes('머신 체스트 프레스'));
+  assert.ok(/60kg × 8~10회 × 3세트/.test(html), '처방 줄이 없다: ' + (html.match(/routine-ex-prescription[^<]*<[^>]*>([^<]*)/) || [])[1]);
+  assert.ok(html.includes("openExerciseEdit('preview', 0)"), '종목 줄이 편집 시트를 열지 않는다');
 });
 
 test('주간 리뷰 — API 키가 없어도 막다른 길이 아니다(키 설정 진입점)', () => {
@@ -3092,29 +3170,37 @@ test('처방 한 줄 — 값은 [시작] 이 실제로 만들 세트에서 온�
   assert.ok(fresh.renderWorkoutStep3().includes(plan.weight + 'kg × '), '대화 미리보기 무게가 처방 줄과 다르다');
 });
 
-test('처방 표 — 고중량 복합에 탑세트+백오프 구조를 적는다 (스트레이트는 적지 않는다)', () => {
+// 2단계는 한 종목당 두 줄(이름 + 처방)이라, 옛 '탑세트 1 + 백오프 2 (90% · RIR 2-3→0-1)'
+// 구조 줄은 처방 줄 끝의 **짧은 세트법 이름**으로 접었다. 이름은 SET_SCHEMES 에서 오고,
+// 스트레이트면 아무것도 안 붙는다 — 세트 수가 이미 말한 사실이기 때문이다.
+test('처방 줄 — 세트법 이름은 표에서 오고, 스트레이트에는 안 붙는다', () => {
   const { app, html } = step2Lines(SAME_VALUE_ROUTINE);
 
-  // 화면 문구의 숫자·비율은 세션이 실제로 만드는 세트 배열에서 와야 한다 — 여기서 그걸 대조한다.
   const plan = app.getSessionSetPlan('덤벨 벤치 프레스', 30, '5-8', { sets: 3, warmup: false });
-  const working = plan.sets.filter((s) => !s.isWarmup);
   assert.equal(plan.scheme, 'top_backoff', '고중량 복합의 기본 세트법이 바뀌었다 — 이 테스트가 헛돌고 있다');
-  assert.equal(working.filter((s) => s.role === 'top').length, 1, '탑세트 1개');
-  assert.equal(working.filter((s) => s.role === 'backoff').length, 2, '백오프 2개');
+  const short = app.SET_SCHEMES.top_backoff.short;
+  assert.ok(short && short.length <= 8, '짧은 이름이 아니다: ' + short);
+  assert.ok(html.includes('· ' + short), '처방 줄에 세트법 이름이 없다: ' + short);
 
-  // 비율·RIR은 상수와 세트 배열에서 와야 한다 — 화면에 손으로 적으면 상수를 바꿔도 안 따라온다.
-  const backoffs = working.filter((s) => s.role === 'backoff');
-  // 마지막 백오프만 RIR 0~1 이다(v2 §2-E②) — 같은 역할 안에서 바뀌는 값도 구조 줄이 다 밝혀야 한다.
-  const backoffRirs = backoffs.map((s) => s.rir).filter((r, i, a) => a.indexOf(r) === i);
-  const expected = '탑세트 1 + 백오프 2 (' + Math.round(app.BACKOFF_PCT * 100) + '% · RIR ' + backoffRirs.join('→') + ')';
-  assert.ok(html.includes(expected), '미리보기에 세트 구조가 없다: ' + expected);
-  assert.equal(backoffRirs.length, 2, '마지막 백오프의 RIR 0~1 처방이 사라졌다');
-  // 'RIR' 열은 기준 세트(탑) 값만 담는다 → 뒤 세트 RIR이 다르면 구조 줄이 그걸 밝혀야 한다
-  assert.notEqual(backoffs[0].rir, working[0].rir, '탑·백오프 RIR이 같으면 이 검사가 헛돈다');
+  // 스트레이트 종목에는 붙지 않는다 — 화면에 세트법 이름이 딱 하나만 있어야 한다
+  assert.equal((html.match(new RegExp('· ' + short, 'g')) || []).length, 1,
+    '스트레이트 종목에도 세트법 이름이 붙었다');
+  assert.ok(!html.includes(app.SET_SCHEMES.straight.short || '스트레이트'),
+    '스트레이트는 이름을 적지 않는다');
 
-  // 스트레이트 종목(머신 체스트 프레스·사이드 레터럴)에는 붙이지 않는다 — 세트 열이 이미 한 말이다
-  assert.equal((html.match(/routine-ex-scheme/g) || []).length, 1,
-    '스트레이트 종목에도 세트 구조 줄이 붙었다');
+  // 세트가 실제로 어떻게 나뉘는지(탑세트 1 + 백오프 2 · 90%)는 세트법을 **고르는 자리**로 옮겼다.
+  // 2단계에서 이 줄을 걷으면서 describeSetStructure 가 앱에서 죽을 뻔했다.
+  const b = loadApp();
+  b.state.data.workoutLog = []; b.storage.set(b.KEYS.WORKOUT_LOG, []);
+  b.storage.set(b.KEYS.ONE_RM_DATA, { '스미스 머신 벤치 프레스': 90 });
+  b.startSession('push');
+  const sess = b.state.activeSession, ex = sess.exercises[0];
+  ex.name = '스미스 머신 벤치 프레스';
+  b.setSetSchemeOverride('스미스 머신 벤치 프레스', 'top_backoff');
+  b.rebuildPendingSets(ex, { baseWeight: 60 });
+  b.state.setSchemeOpen = true;
+  const sheet = b.buildSetSchemeSheetHtml(sess, ex);
+  assert.ok(/지금 탑세트 1 \+ 백오프 2/.test(sheet), '세트법 시트가 지금 구성을 안 알려 준다: ' + (sheet.match(/지금 [^<]*/) || [])[0]);
 });
 
 test('세트 구조 문구 — 표기와 실제 세트가 어긋날 수 없다 (엔진에서 센다)', () => {

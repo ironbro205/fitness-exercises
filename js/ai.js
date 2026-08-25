@@ -1372,12 +1372,17 @@ async function generateFullRoutine(bodyPart) {
     if (!guarded.exercises.length) {
       return { error: '부상 안전 필터로 모든 종목이 제외됐어요. 다시 시도해주세요.' };
     }
-    var cautionText = aiText(parsed.caution);   // 아래에서 가드레일 알림을 이어 붙이므로 반드시 글자여야 한다
+    var cautionText = aiText(parsed.caution);
+    // 가드레일이 종목을 바꾼 사실은 **caution 과 분리해서** 담는다.
+    // 예전엔 caution 문자열에 이어 붙였는데, 화면에서 주의사항 박스를 걷자 "앱이 내 루틴을
+    // 이렇게 바꿨다"는 알림까지 조용히 같이 사라졌다. 이건 AI 의 조언이 아니라 앱의 행동이라
+    // 사용자가 반드시 알아야 한다.
+    var swapNotes = [];
     if (guarded.changes.length) {
       var changeMsgs = guarded.changes.map(function(c) {
         return c.to ? (c.from + ' → ' + c.to + ' (' + c.areaKr + ' 보호)') : (c.from + ' 제외 (' + c.areaKr + ' 보호)');
       });
-      cautionText = (cautionText ? cautionText + ' · ' : '') + '🛡️ 안전 교체: ' + changeMsgs.join(', ');
+      swapNotes.push('안전 교체: ' + changeMsgs.join(', '));
     }
     // 장비 가드레일 (안전 다음) — 풀에 없는 미보유 기구 종목이 응답에 섞여 들어왔으면 여기서 교체/제거
     var eqGuarded = applyEquipmentGuardrail(guarded.exercises);
@@ -1386,9 +1391,9 @@ async function generateFullRoutine(bodyPart) {
     }
     guarded.exercises = eqGuarded.exercises;
     if (eqGuarded.changes.length) {
-      cautionText = (cautionText ? cautionText + ' · ' : '') + '🏋️ 장비 교체: ' + eqGuarded.changes.map(function(c) {
+      swapNotes.push('장비 교체: ' + eqGuarded.changes.map(function(c) {
         return c.to ? (c.from + ' → ' + c.to) : (c.from + ' 제외');
-      }).join(', ') + ' (헬스장에 없는 기구)';
+      }).join(', ') + ' (헬스장에 없는 기구)');
     }
 
     // e.sets 는 normalizeAIExercise 를 지나 항상 숫자다 — 이 합계가 문자열 이어붙이기로 변하지 않는다.
@@ -1402,6 +1407,7 @@ async function generateFullRoutine(bodyPart) {
       totalSets: aiInt(parsed.totalSets, setsSum, { positive: true, max: 100 }),
       intensity: aiEnum(parsed.intensity, AI_INTENSITY_LEVELS, 'moderate'),
       caution: cautionText,
+      swaps: swapNotes,          // 앱이 바꾼 종목 — 2단계가 이 줄만 따로 그린다
       exercises: guarded.exercises,
       generatedAt: new Date().toISOString()
     };

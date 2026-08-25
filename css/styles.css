@@ -1189,33 +1189,7 @@ button {
 }
 
 /* 도전 권장 카드 — 라벨 한 줄 + 큰 숫자 + 참고 한 줄. 문장은 없다. */
-.rm-label {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-.rm-weight {
-  margin-top: 2px;
-  font-family: var(--font-bebas);
-  font-size: 40px;
-  line-height: 1.1;
-  letter-spacing: 0.02em;
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px;
-}
 /* 이전 무게는 "어디서 왔는지"만 알면 되므로 작고 흐리게 — 큰 숫자는 오늘 들 무게 하나다. */
-.rm-weight-prev { font-size: 22px; color: var(--text-muted); }
-.rm-weight-arrow { font-size: 20px; color: var(--text-muted); }
-.rm-weight-pre { font-size: 15px; color: var(--text-muted); }
-.rm-unit { font-size: 13px; color: var(--text-muted); }
-.rm-divider {
-  height: 1px;
-  background: var(--bg-3);
-  margin: 12px 0 8px;
-}
 .rm-ref {
   font-size: 11px;
   font-family: var(--font-mono);
@@ -2145,24 +2119,6 @@ button {
 /* ═══════════════════════════════════════════════
    COMPONENT: AI 추천 카드
    ═══════════════════════════════════════════════ */
-.ai-rec-card {
-  background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
-  border: 1px solid rgba(var(--accent-rgb), 0.4);
-  border-radius: 28px;
-  padding: 24px;
-  position: relative;
-  overflow: hidden;
-}
-.ai-rec-card::before {
-  content: '';
-  position: absolute;
-  top: -20%;
-  right: -10%;
-  width: 50%;
-  height: 140%;
-  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.15) 0%, transparent 70%);
-  pointer-events: none;
-}
 .ai-badge {
   display: inline-flex;
   align-items: center;
@@ -2176,26 +2132,6 @@ button {
   border-radius: 9999px;
   background: rgba(var(--accent-rgb), 0.15);
   border: 1px solid rgba(var(--accent-rgb), 0.4);
-}
-.ai-rec-reason {
-  background: rgba(var(--white-rgb), 0.03);
-  border-radius: 12px;
-  padding: 12px 14px;
-  margin-top: 16px;
-}
-.ai-rec-caution {
-  background: rgba(var(--warn-rgb), 0.08);
-  border: 1px solid rgba(var(--warn-rgb), 0.2);
-  border-radius: 12px;
-  padding: 10px 14px;
-  margin-top: 10px;
-}
-.ai-rec-suggestion {
-  background: rgba(var(--accent-rgb), 0.06);
-  border: 1px solid rgba(var(--accent-rgb), 0.2);
-  border-radius: 12px;
-  padding: 10px 14px;
-  margin-top: 10px;
 }
 
 /* ═══════════════════════════════════════════════
@@ -2306,137 +2242,60 @@ button {
 .step-line.active { background: rgba(var(--accent-rgb), 0.4); }
 
 /* 주간 기록 - 7일 막대그래프 */
-.weekly-bars-card {
-  background: var(--bg-2);
-  border: 1px solid var(--bg-3);
-  border-radius: 20px;
-  padding: 18px 16px;
-  margin-bottom: 20px;
-}
-.weekly-bars-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 16px;
-}
-.weekly-bars-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
-  align-items: end;
-  height: 80px;
-}
-.day-bar-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  height: 100%;
-}
-.day-bar-shape {
-  width: 100%;
+/* 운동 중 종목명 옆 상태 꼬리표 (건너뜀 · 운동 중 추가) — 이름과 같은 줄에 작게 */
+.ex-name-flag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 6px;
   background: var(--bg-3);
-  border-radius: 4px 4px 0 0;
-  transition: all 0.3s;
-  position: relative;
-  min-height: 6px;
-}
-.day-bar-shape.push { background: linear-gradient(to top, var(--accent), rgba(var(--accent-rgb), 0.5)); }
-.day-bar-shape.pull { background: linear-gradient(to top, var(--purple), rgba(var(--purple-rgb), 0.5)); }
-.day-bar-shape.legs { background: linear-gradient(to top, var(--warn), rgba(var(--warn-rgb), 0.5)); }
-.day-bar-shape.free { background: linear-gradient(to top, var(--text-muted), rgba(var(--muted-rgb), 0.5)); }
-.day-bar-shape.upper { background: linear-gradient(to top, var(--success), rgba(var(--success-rgb), 0.5)); }
-.day-bar-shape.today {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-.day-bar-label {
-  font-size: 11px;
-  font-family: var(--font-mono);
   color: var(--text-muted);
-  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  vertical-align: middle;
 }
-.day-bar-label.today { color: var(--accent); font-weight: 700; }
 
-/* 부위 선택 카드 (큰 버튼) */
+/* 부위 선택 — 2열 그리드 + FREE 한 칸. 다섯 장이 스크롤 없이 한 화면에 들어와야
+   "고르기"가 한 번에 끝난다. '추천'/'이번 주 N' 배지 계열은 화면에서 뺐다. */
+.body-part-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
 .body-part-card {
   background: var(--bg-2);
   border: 1px solid var(--bg-3);
-  border-radius: 24px;
-  padding: 22px 20px;
-  margin-bottom: 12px;
+  border-radius: 18px;
+  padding: 18px 16px;
   cursor: pointer;
   transition: all 0.2s;
   position: relative;
   overflow: hidden;
-}
-.body-part-card:active { transform: scale(0.985); }
-.body-part-card:hover {
-  border-color: rgba(var(--accent-rgb), 0.3);
-}
-
-.body-part-card.recommended {
-  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15) 0%, rgba(var(--accent-rgb), 0.04) 100%);
-  border: 1px solid rgba(var(--accent-rgb), 0.5);
-}
-.body-part-card.recommended::before {
-  content: '';
-  position: absolute;
-  top: -30%;
-  right: -10%;
-  width: 50%;
-  height: 160%;
-  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.18) 0%, transparent 70%);
-  pointer-events: none;
-}
-
-.body-part-card.completed {
-  opacity: 0.65;
-}
-
-.body-part-header {
+  min-height: 92px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  position: relative;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
 }
+.body-part-card.wide {
+  min-height: 0;
+  padding: 14px 16px;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 10px;
+}
+.body-part-card:active { transform: scale(0.985); background: var(--bg-3); }
+.body-part-card:hover { border-color: rgba(var(--accent-rgb), 0.3); }
 
 .body-part-name {
   font-family: var(--font-bebas);
-  font-size: 38px;
+  font-size: 30px;
   letter-spacing: 0.04em;
   line-height: 1;
 }
-.body-part-name.recommended { color: var(--accent); }
-
-.body-part-meta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  position: relative;
-}
-
-.body-part-count {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-}
-.body-part-count-num {
-  font-family: var(--font-bebas);
-  font-size: 24px;
-  color: var(--text-soft);
-}
-.body-part-count-num.zero { color: var(--warn); }
-.body-part-count-num.done { color: var(--accent); }
-.body-part-count-label {
-  font-size: 10px;
-  font-family: var(--font-mono);
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
+.body-part-card.wide .body-part-name { font-size: 22px; }
 
 .body-part-desc {
   font-size: 11px;
@@ -2445,83 +2304,24 @@ button {
   position: relative;
 }
 
-.recommend-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: rgba(var(--accent-rgb), 0.2);
-  border: 1px solid rgba(var(--accent-rgb), 0.5);
-  color: var(--accent);
-  padding: 3px 9px;
-  border-radius: 9999px;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  font-weight: 600;
-  margin-bottom: 8px;
-  position: relative;
-}
-
 /* ═══════════════════════════════════════════════
    COMPONENT: STEP 2 - 루틴 분석 결과
    ═══════════════════════════════════════════════ */
 
 /* AI 분석 헤더 카드 */
-.routine-analysis-card {
-  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.12) 0%, rgba(var(--accent-rgb), 0.02) 100%);
-  border: 1px solid rgba(var(--accent-rgb), 0.4);
-  border-radius: 24px;
-  padding: 22px;
-  margin-bottom: 16px;
-  position: relative;
-  overflow: hidden;
-}
-.routine-analysis-card::before {
-  content: '';
-  position: absolute;
-  top: -30%;
-  right: -10%;
-  width: 50%;
-  height: 160%;
-  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.15) 0%, transparent 70%);
-  pointer-events: none;
-}
-.routine-meta-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(var(--accent-rgb), 0.2);
-  position: relative;
-}
-.routine-meta-item {
-  text-align: center;
-}
-.routine-meta-num {
-  font-family: var(--font-bebas);
-  font-size: 24px;
-  color: white;
-  letter-spacing: 0.02em;
-}
-.routine-meta-label {
-  font-size: 10px;
-  font-family: var(--font-mono);
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin-top: 2px;
-}
 
 /* 루틴 종목 카드 */
 .routine-exercise {
   background: var(--bg-2);
   border: 1px solid var(--bg-3);
-  border-radius: 16px;
-  padding: 14px 16px;
-  margin-bottom: 8px;
+  border-radius: 14px;
+  padding: 11px 14px;
+  margin-bottom: 6px;
   position: relative;
   transition: all 0.15s;
+  cursor: pointer;                    /* 줄 전체가 종목 편집 시트를 연다 */
 }
+.routine-exercise:active { background: var(--bg-3); }
 .routine-exercise:hover {
   border-color: rgba(var(--accent-rgb), 0.3);
 }
@@ -2529,11 +2329,29 @@ button {
   border-color: rgba(var(--accent-rgb), 0.3);
   background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.04) 0%, var(--bg-2) 100%);
 }
-.routine-ex-header {
+/* 앱이 부상·장비 때문에 종목을 바꿨다는 알림 (AI 가 쓴 '주의사항' 산문과는 다른 것) */
+.routine-swap-note {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 6px;
+  align-items: center;
+  gap: 6px;
+  margin: 0 2px 10px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: rgba(var(--warn-rgb), 0.08);
+  border: 1px solid rgba(var(--warn-rgb), 0.25);
+  color: var(--warn);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+}
+.routine-swap-note svg { flex-shrink: 0; }
+
+/* 종목 한 줄 — 번호 + 이름. 옛 .routine-ex-header(두 열 배치)는 종목 성격·AI 설명 줄이
+   같이 사라지면서 쓸 자리가 없어졌다. */
+.routine-ex-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .routine-ex-num {
   width: 28px;
@@ -2559,39 +2377,25 @@ button {
   font-size: 14px;
   color: white;
 }
-.routine-ex-type {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--text-muted);
-  margin-top: 2px;
-}
 /* 처방 한 줄 — "20kg × 8~12회 × 3세트 · 휴식 2분".
    단위를 값에 붙여 머리글 없이 읽히게 했다(옛 5열 격자·머리글은 삭제). */
 .routine-ex-prescription {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--bg-3);
-  font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 700;
-  color: white;
-}
-/* 세트 구성 한 줄 (탑세트 1 + 백오프 2) — 세트 수가 어떻게 나뉘는지 */
-.routine-ex-scheme {
-  margin-top: 8px;
-  font-size: 11px;
+  margin-top: 4px;
+  padding-left: 38px;                 /* 번호 칸(28px) + gap(10px) 만큼 들여 이름과 줄을 맞춘다 */
   font-family: var(--font-mono);
-  color: var(--text-muted);
+  font-size: 12px;
+  color: var(--text-soft);
 }
 .routine-ex-tag {
   display: inline-block;
   background: rgba(var(--accent-rgb), 0.1);
   color: var(--accent);
-  padding: 2px 7px;
+  padding: 1px 7px;
   border-radius: 4px;
-  font-size: 10px;
+  font-size: 11px;                    /* 잔글씨 하한 11px (디자인 규칙) */
   font-family: var(--font-mono);
   margin-left: 6px;
+  vertical-align: middle;
 }
 
 /* 액션 버튼들 (수정/시작) */
@@ -2636,24 +2440,6 @@ button {
 .routine-btn-start:active { transform: scale(0.98); }
 
 /* AI 한 줄 카드 (이유, 주의 등) */
-.routine-insight {
-  background: rgba(var(--white-rgb), 0.03);
-  border-radius: 12px;
-  padding: 12px 14px;
-  margin-top: 10px;
-  position: relative;
-}
-.routine-insight.warning {
-  background: rgba(var(--warn-rgb), 0.06);
-  border: 1px solid rgba(var(--warn-rgb), 0.2);
-}
-.routine-insight-label {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-bottom: 4px;
-}
 
 /* 로딩 화면 (분석 중) */
 .routine-loading-card {
@@ -2819,30 +2605,6 @@ button {
 .change-icon.modify { background: rgba(var(--accent-rgb), 0.2); color: var(--accent); }
 
 /* 빠른 수정 칩 */
-.routine-quick-chips {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding: 0 0 8px 0;
-  margin-bottom: 8px;
-}
-.rc-quick-chip {
-  background: var(--bg-2);
-  border: 1px solid var(--bg-3);
-  border-radius: 9999px;
-  padding: 7px 12px;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--text-soft);
-  white-space: nowrap;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.rc-quick-chip:active {
-  background: rgba(var(--accent-rgb), 0.15);
-  border-color: var(--accent);
-}
-
 /* 하단 입력 + 시작 버튼 */
 .routine-chat-bottom {
   position: fixed;
