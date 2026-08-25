@@ -1518,6 +1518,9 @@ var WALK_HANDRAIL_OPTIONS = [
 // ★"활성화(activation)" 과대 표현 금지 (§1-F, 근거 등급 낮음): "둔근을 깨우면 스쿼트가 강해진다" X
 //   → "그날 쓸 패턴을 가볍게 예행연습한다" O.
 //
+// kr : 화면에 뜨는 이름. **동작 이름 하나**로 쓴다 — '어깨뼈 풀기 — 바닥 밀어내기' 처럼
+//      부위를 앞에 붙이면 이름이 길어져 두 줄로 접히고, 정작 무엇을 하는지가 뒤로 밀린다.
+//      부위는 목록을 짜는 코드(*_BY_PART)가 이미 알고 있으니 이름에 다시 적지 않는다.
 // mode: 'reps'(횟수) | 'time'(시간 유지) | 'timePerSide'(좌우 각각 시간) | 'repsPerSide'(좌우 각각 횟수)
 // sec        : time 계열의 유지 시간(초) — 타이머가 실제로 세는 값
 // reps/secPerRep : 횟수와 1회 참고 소요(초). secPerRep은 타이머가 아니라 **총시간 추정용**이다
@@ -1530,7 +1533,7 @@ var MOBILITY_DRILLS = {
 
   // ── 공통 오프닝 (§3-A · §1-A) ─────────────────────────────
   general_cardio: {
-    kr: '몸 데우기 — 걷기나 자전거', phase: 'warmup',
+    kr: '몸 데우기', phase: 'warmup',
     mode: 'time', sec: 180, gear: 'cardio',
     prep: '러닝머신에 올라서거나 실내자전거에 앉아요. 러닝머신은 경사 3~5%로 맞춰요.',
     cue: '숨은 조금 차도 대화가 되는 정도로 움직여요. 자전거는 등을 세우고 앉아요.',
@@ -1542,7 +1545,7 @@ var MOBILITY_DRILLS = {
 
   // ── 웜업 드릴 (§3-B ~ §3-G) ─────────────────────────────
   cat_camel: {
-    kr: '척추 풀기 — 캣-카멜', phase: 'warmup',
+    kr: '캣-카멜', phase: 'warmup',
     mode: 'reps', reps: 6, secPerRep: 4, gear: 'mat',
     prep: '매트에 네발로 엎드려요. 손은 어깨 아래, 무릎은 엉덩이 아래에 둬요.',
     cue: '등을 천천히 둥글게 올렸다가 평평하게 내려요. 끝까지 밀지 말고 편한 범위에서만 오가요.',
@@ -1551,7 +1554,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   bird_dog: {
-    kr: '허리 고정 — 버드독', phase: 'warmup',
+    kr: '버드독', phase: 'warmup',
     mode: 'repsPerSide', reps: 6, secPerRep: 5, gear: 'mat',
     prep: '매트에 네발로 엎드려요. 손목은 어깨 밑, 무릎은 엉덩이 밑에 둬요.',
     cue: '한쪽 팔은 앞으로, 반대쪽 다리는 뒤로 뻗어요. 등 높이보다 올리지 말고 골반은 돌리지 않아요.',
@@ -1560,7 +1563,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   mcgill_curlup: {
-    kr: '복부 버티기 — 맥길 컬업', phase: 'warmup',
+    kr: '맥길 컬업', phase: 'warmup',
     mode: 'repsPerSide', reps: 3, secPerRep: 12, gear: 'mat',
     prep: '매트에 누워 한쪽 무릎만 세우고 반대 다리는 펴요. 두 손은 허리 밑에 넣어 받쳐요.',
     cue: '머리와 어깨를 한 덩어리로 3cm쯤만 들어요. 목을 접거나 허리를 바닥에 누르지 않아요.',
@@ -1569,7 +1572,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   side_bridge: {
-    kr: '옆구리 버티기 — 사이드 브리지', phase: 'warmup',
+    kr: '사이드 브리지', phase: 'warmup',
     mode: 'repsPerSide', reps: 3, secPerRep: 12, gear: 'mat',
     prep: '매트에 옆으로 누워 무릎을 90도로 접어요. 아래쪽 팔꿈치는 어깨 바로 밑, 위쪽 손은 반대쪽 어깨에 얹어요.',
     cue: '엉덩이를 들어 무릎부터 머리까지 일직선을 만들어요. 몸이 앞으로 기울거나 엉덩이가 처지지 않게요.',
@@ -1578,7 +1581,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   scap_pushup: {
-    kr: '어깨뼈 풀기 — 바닥 밀어내기', phase: 'warmup',
+    kr: '바닥 밀어내기', phase: 'warmup',
     mode: 'reps', reps: 10, secPerRep: 3, gear: 'none',
     prep: '팔굽혀펴기 자세로 엎드려 팔을 곧게 펴요. 손은 어깨 바로 아래, 힘들면 벽을 짚고 서서 해요.',
     cue: '팔은 편 채 가슴을 내렸다가 바닥을 밀어 등을 넓혀요. 팔꿈치가 굽거나 허리가 처지지 않게 해요.',
@@ -1587,7 +1590,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   band_pull_apart: {
-    kr: '등 위쪽 풀기 — 밴드 벌리기', phase: 'warmup',
+    kr: '밴드 벌리기', phase: 'warmup',
     mode: 'reps', reps: 15, secPerRep: 2, gear: 'band',
     prep: '서서 밴드를 잡고 두 팔을 앞으로 가슴 높이까지 뻗어요. 손은 어깨너비보다 조금 넓게 잡아요.',
     cue: '팔꿈치를 살짝 굽힌 채 밴드가 가슴에 닿게 벌려요. 어깨를 으쓱하지 않아요.',
@@ -1596,7 +1599,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   wall_slide: {
-    kr: '어깨 열기 — 벽에 팔 올리기', phase: 'warmup',
+    kr: '벽에 팔 올리기', phase: 'warmup',
     mode: 'reps', reps: 10, secPerRep: 3, gear: 'wall',
     prep: '벽에 등을 대고 서고, 발은 벽에서 한 뼘 앞에 둬요. 팔은 어깨 높이로 굽혀 팔꿈치와 손등을 벽에 붙여요.',
     cue: '팔꿈치와 손등을 벽에 붙인 채 천천히 위로 밀어 올렸다 내려요. 허리가 젖혀지면 거기서 멈춰요.',
@@ -1605,7 +1608,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   open_book: {
-    kr: '등 위쪽 돌리기 — 팔 열기', phase: 'warmup',
+    kr: '누워서 팔 열기', phase: 'warmup',
     mode: 'repsPerSide', reps: 6, secPerRep: 4, gear: 'mat',
     prep: '매트에 옆으로 누워 무릎을 배 앞으로 90도 접고 허벅지를 붙여요. 두 팔은 가슴 앞으로 나란히 뻗어요.',
     cue: '가슴부터 돌리며 위쪽 팔을 바닥 쪽으로 넘겨요. 무릎이 벌어지면 허리가 대신 비틀려요.',
@@ -1614,7 +1617,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   straight_arm_pulldown: {
-    kr: '등 옆쪽 — 밴드 눌러 내리기', phase: 'warmup',
+    kr: '밴드 눌러 내리기', phase: 'warmup',
     mode: 'reps', reps: 15, secPerRep: 2, gear: 'band',
     prep: '밴드를 문틀 위나 랙 높은 곳에 걸고 마주 서요. 팔 편 채로 잡고 한 걸음 물러나요.',
     cue: '팔을 편 채로 등 옆 근육으로 밴드를 허벅지까지 눌러요. 어깨가 귀 쪽으로 솟으면 잘못된 거예요.',
@@ -1623,7 +1626,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   prone_y_raise: {
-    kr: '등 가운데 — 엎드려 Y 들기', phase: 'warmup',
+    kr: '엎드려 Y 들기', phase: 'warmup',
     mode: 'reps', reps: 8, secPerRep: 3, gear: 'mat',
     prep: '매트에 엎드려 이마를 수건에 대요. 팔은 머리 위 Y자로 벌리고 엄지는 천장을 봐요.',
     cue: '팔을 편 채 바닥에서 살짝 들었다 내려요. 허리를 젖혀 몸통이 뜨면 잘못된 거예요.',
@@ -1632,7 +1635,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   arm_circle: {
-    kr: '어깨 풀기 — 팔로 원 그리기', phase: 'warmup',
+    kr: '팔로 원 그리기', phase: 'warmup',
     mode: 'reps', reps: 20, secPerRep: 1.5, gear: 'none',
     prep: '발을 어깨너비로 벌리고 서요. 두 팔을 옆으로 어깨 높이까지 들어요.',
     cue: '작은 원부터 시작해 점점 크게 돌려요. 어깨를 으쓱하거나 허리를 젖히지 않아요.',
@@ -1641,7 +1644,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   band_external_rotation: {
-    kr: '어깨 속 근육 — 밴드로 돌리기', phase: 'warmup',
+    kr: '밴드로 어깨 돌리기', phase: 'warmup',
     // 한쪽씩 하는 동작이라 repsPerSide 다 — 'reps'로 두면 화면이 15회만 안내하고
     // 예상 시간도 반쪽만 잡는다(좌우 두 구간으로 쪼개져야 맞다).
     mode: 'repsPerSide', reps: 15, secPerRep: 2, gear: 'band',
@@ -1652,7 +1655,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   glute_bridge: {
-    kr: '엉덩이 들기 — 글루트 브리지', phase: 'warmup',
+    kr: '글루트 브리지', phase: 'warmup',
     mode: 'reps', reps: 12, secPerRep: 4, gear: 'mat',
     prep: '매트에 누워 무릎을 세우고 팔은 몸 옆에 둬요. 발은 엉덩이에서 한 뼘 앞, 골반 너비로 둬요.',
     cue: '발뒤꿈치로 밀어 엉덩이를 들어요. 어깨·엉덩이·무릎이 일직선이 되면 멈추고 더 젖히지 않아요.',
@@ -1661,7 +1664,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   bw_squat: {
-    kr: '하체 풀기 — 맨몸 스쿼트', phase: 'warmup',
+    kr: '맨몸 스쿼트', phase: 'warmup',
     mode: 'reps', reps: 12, secPerRep: 3, gear: 'none',
     prep: '발을 어깨너비로 벌리고 서요. 발끝은 살짝 바깥으로 향해요.',
     cue: '엉덩이를 뒤로 빼며 앉았다 일어나요. 무릎이 안으로 모이지 않게, 뒤꿈치는 붙인 채로요.',
@@ -1670,7 +1673,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   reverse_lunge: {
-    kr: '다리 균형 — 뒤로 런지', phase: 'warmup',
+    kr: '뒤로 런지', phase: 'warmup',
     mode: 'repsPerSide', reps: 8, secPerRep: 3, gear: 'none',
     prep: '발을 골반 너비로 두고 서요. 손은 허리에 얹고 배에 살짝 힘을 줘요.',
     cue: '한 발을 뒤로 크게 내딛고 뒤 무릎을 바닥 가까이 내려요. 상체는 세우고 앞 무릎은 발끝 방향으로요.',
@@ -1679,7 +1682,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   ankle_wall_knee: {
-    kr: '발목 풀기 — 무릎으로 벽 밀기', phase: 'warmup',
+    kr: '무릎으로 벽 밀기', phase: 'warmup',
     mode: 'repsPerSide', reps: 10, secPerRep: 2, gear: 'wall',
     prep: '벽을 보고 서서 두 손으로 벽을 짚어요. 앞발 발끝을 벽에서 5cm 떨어뜨리고 다른 발은 뒤에 둬요.',
     cue: '뒤꿈치를 바닥에 붙인 채 무릎을 앞으로 밀어 벽에 대요. 뒤꿈치가 뜨면 거기까지예요.',
@@ -1688,7 +1691,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   wrist_circle: {
-    kr: '손목 풀기 — 돌리고 접었다 펴기', phase: 'warmup',
+    kr: '손목 돌리기', phase: 'warmup',
     mode: 'reps', reps: 10, secPerRep: 2, gear: 'none',
     prep: '서서 두 팔을 앞으로 뻗고 주먹을 가볍게 쥐어요. 팔꿈치는 움직이지 않아요.',
     cue: '손목만 써서 작은 원부터 점점 크게 그려요. 이어서 위아래로 천천히 접었다 펴요.',
@@ -1697,7 +1700,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   elbow_flex_ext: {
-    kr: '팔꿈치 풀기 — 접었다 펴기', phase: 'warmup',
+    kr: '팔꿈치 접었다 펴기', phase: 'warmup',
     mode: 'reps', reps: 15, secPerRep: 2, gear: 'none',
     prep: '서서 팔을 옆으로 늘어뜨려요. 팔꿈치는 몸통 옆에 붙이고 손바닥은 앞을 봐요.',
     cue: '손바닥을 어깨 쪽으로 접었다가 다시 펴요. 어깨가 앞뒤로 흔들리면 잘못된 거예요.',
@@ -1706,7 +1709,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   band_curl_pushdown: {
-    kr: '팔 깨우기 — 밴드 컬·푸시다운', phase: 'warmup',
+    kr: '밴드 컬·푸시다운', phase: 'warmup',
     mode: 'reps', reps: 15, secPerRep: 2, gear: 'band',
     prep: '컬은 밴드 가운데를 한 발로 밟고 손바닥이 위로 오게 양끝을 잡아요. 푸시다운은 밴드를 문틀 위에 걸어요.',
     cue: '둘 다 팔꿈치를 옆구리에 붙인 채 손만 움직여요. 몸을 흔들어 반동을 쓰지 않아요.',
@@ -1719,7 +1722,7 @@ var MOBILITY_DRILLS = {
   // 전부 30초 안팎이다: ACSM(2011)의 "10~30초 × 2~4회 = 근육당 총 60초" 유지 기준을 맞춘 값이며,
   // 델파이 합의문의 "만성 유연성 향상(3세트×120초)" 기준에는 못 미친다 — 화면 문구도 그렇게 정직하게 쓴다(§2-A).
   doorway_chest: {
-    kr: '가슴 열기 — 문틀에 팔 대기', phase: 'stretch',
+    kr: '문틀에 팔 대기', phase: 'stretch',
     mode: 'timePerSide', sec: 30, gear: 'wall',
     prep: '문틀 옆에 서요. 한쪽 팔꿈치를 어깨 높이로 들고 90도로 굽혀 아래팔을 문틀에 대요.',
     cue: '같은 쪽 발을 한 걸음 앞으로 내디뎌요. 허리를 젖히지 말고 체중만 앞으로 실어요.',
@@ -1728,7 +1731,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   cross_body_rear_delt: {
-    kr: '어깨 뒤 — 팔 가로질러 당기기', phase: 'stretch',
+    kr: '팔 가로질러 당기기', phase: 'stretch',
     mode: 'timePerSide', sec: 30, gear: 'none',
     prep: '편하게 서거나 앉아 어깨 힘을 빼요. 한쪽 팔을 펴서 반대쪽 어깨 쪽으로 보내요.',
     cue: '반대 손으로 팔꿈치 위쪽을 잡고 몸쪽으로 당겨요. 팔꿈치를 누르거나 어깨를 올리지 않아요.',
@@ -1737,7 +1740,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   overhead_triceps: {
-    kr: '팔 뒤 — 팔꿈치 눌러 늘리기', phase: 'stretch',
+    kr: '팔꿈치 눌러 늘리기', phase: 'stretch',
     mode: 'timePerSide', sec: 30, gear: 'none',
     prep: '서서 한쪽 팔을 위로 뻗어요. 팔꿈치를 접어 손바닥이 등 가운데에 닿게 내려요.',
     cue: '반대 손으로 팔꿈치 바로 위를 잡고 지그시 눌러요. 허리가 젖혀지지 않게 배에 힘을 줘요.',
@@ -1746,7 +1749,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   tspine_foamroll: {
-    kr: '등 위쪽 — 폼롤러로 젖히기', phase: 'stretch',
+    kr: '폼롤러로 등 젖히기', phase: 'stretch',
     mode: 'time', sec: 40, gear: 'foamroller', optional: true,
     prep: '폼롤러를 가로로 두고 날개뼈 높이에 등을 대고 누워요. 무릎을 세우고 손은 머리 뒤로 깍지 껴요.',
     cue: '손으로 머리를 받친 채 등 위쪽만 뒤로 젖혀요. 엉덩이는 바닥에서 떼지 않아요.',
@@ -1756,7 +1759,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   standing_lat_hinge: {
-    kr: '등 옆 늘리기 — 엉덩이 빼기', phase: 'stretch',
+    kr: '서서 엉덩이 빼기', phase: 'stretch',
     mode: 'timePerSide', sec: 30, gear: 'none',
     prep: '랙이나 문틀을 한 손으로 허리 높이쯤 잡아요. 팔이 펴질 만큼 뒤로 물러서요.',
     cue: '무릎을 살짝 굽히고 엉덩이만 뒤로 빼요. 허리는 편 채로, 등이 말리기 전까지만 가요.',
@@ -1765,7 +1768,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   biceps_wall: {
-    kr: '팔 앞 — 벽 짚고 몸 돌리기', phase: 'stretch',
+    kr: '벽 짚고 몸 돌리기', phase: 'stretch',
     mode: 'timePerSide', sec: 30, gear: 'wall',
     prep: '벽을 옆에 두고 서요. 팔을 뒤로 펴 어깨 높이 벽에 손바닥을 붙이고 손가락은 뒤를 향해요.',
     cue: '발을 조금씩 옮겨 몸 전체를 벽 반대쪽으로 돌려요. 허리만 비틀거나 어깨를 올리지 않아요.',
@@ -1774,7 +1777,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   seated_tspine_rotation: {
-    kr: '등 위쪽 — 앉아서 돌리기', phase: 'stretch',
+    kr: '앉아서 상체 돌리기', phase: 'stretch',
     mode: 'timePerSide', sec: 30, gear: 'none',
     prep: '의자나 벤치에 앉아 두 발을 바닥에 붙여요. 팔짱 끼듯 양손으로 반대쪽 어깨를 잡아요.',
     cue: '무릎을 붙인 채 가슴만 한쪽으로 돌려요. 무릎이 벌어지면 허리까지 비튼 거예요.',
@@ -1783,7 +1786,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   neck_lateral: {
-    kr: '목 옆 풀기 — 귀를 어깨로', phase: 'stretch',
+    kr: '귀를 어깨로', phase: 'stretch',
     mode: 'timePerSide', sec: 30, gear: 'none',
     prep: '바르게 앉아 늘릴 쪽 손으로 의자 옆을 잡아요. 그 어깨를 아래로 내려요.',
     cue: '머리를 반대쪽으로 천천히 기울여요. 손으로 당기지 말고 머리 무게만 써요.',
@@ -1792,7 +1795,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   supine_hamstring_strap: {
-    kr: '허벅지 뒤 — 누워서 다리 올리기', phase: 'stretch',
+    kr: '누워서 다리 올리기', phase: 'stretch',
     mode: 'timePerSide', sec: 30, gear: 'mat',
     prep: '매트에 누워 두 무릎을 세워요. 수건이나 밴드를 한쪽 발바닥에 걸고 양끝을 잡아요.',
     cue: '수건 건 다리를 무릎 편 채 위로 올려요. 허리가 바닥에서 뜨지 않게 해요.',
@@ -1801,7 +1804,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   lunge_hipflexor: {
-    kr: '골반 앞 — 무릎 꿇고 밀기', phase: 'stretch',
+    kr: '무릎 꿇고 밀기', phase: 'stretch',
     mode: 'timePerSide', sec: 30, gear: 'mat',
     prep: '매트에 늘릴 쪽 무릎을 대고 앉아요. 그 무릎은 엉덩이 아래, 앞발은 앞무릎 아래에 둬요.',
     cue: '바닥에 댄 쪽 엉덩이에 힘을 주고 몸을 앞으로 밀어요. 허리가 젖혀지면 덜 밀어요.',
@@ -1810,7 +1813,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   supine_figure4: {
-    kr: '엉덩이 — 누워서 4자 당기기', phase: 'stretch',
+    kr: '누워서 4자 당기기', phase: 'stretch',
     mode: 'timePerSide', sec: 30, gear: 'mat',
     prep: '매트에 누워 두 무릎을 세워요. 늘릴 쪽 발목을 반대쪽 무릎 위에 걸쳐요.',
     // 이 동작은 '무릎 가슴으로 당기기'(요추 굴곡이라 배제)의 대체다. 무릎을 잡고 당기면 골반이 말려
@@ -1821,7 +1824,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   calf_wall: {
-    kr: '종아리 늘리기 — 벽에 기대기', phase: 'stretch',
+    kr: '벽에 기대 종아리 늘리기', phase: 'stretch',
     mode: 'timePerSide', sec: 30, gear: 'wall',
     prep: '벽에 두 손을 대고 서요. 한 발을 크게 뒤로 빼고, 뒤 무릎은 펴고 발끝은 벽을 향해요.',
     cue: '앞 무릎을 굽히며 몸을 벽 쪽으로 기울여요. 뒷발 뒤꿈치는 바닥에 붙인 채로요.',
@@ -1830,7 +1833,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   quad_standing: {
-    kr: '허벅지 앞 — 서서 발목 잡기', phase: 'stretch',
+    kr: '서서 발목 잡기', phase: 'stretch',
     mode: 'timePerSide', sec: 30, gear: 'none',
     prep: '늘릴 다리 반대쪽 손으로 벽을 짚고 서요. 두 무릎은 나란히 붙여요.',
     cue: '무릎을 접어 같은 쪽 손으로 발목을 잡고 당겨요. 배에 힘을 줘 허리가 젖혀지지 않게요.',
@@ -1839,7 +1842,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   wrist_flexor_extensor: {
-    kr: '손목 늘리기 — 손 맞대고 펴기', phase: 'stretch',
+    kr: '손 맞대고 펴기', phase: 'stretch',
     mode: 'time', sec: 40, gear: 'none',
     prep: '가슴 앞에서 손바닥끼리 맞대고 손끝은 위로 향해요. 팔꿈치는 옆으로 벌려요.',
     cue: '손을 배꼽 쪽으로 천천히 내려요. 20초 남으면 손등끼리 맞대고 손끝을 아래로 두고 올려요.',
@@ -1848,7 +1851,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   standing_side_bend: {
-    kr: '옆구리 — 팔 올려 기울이기', phase: 'stretch',
+    kr: '팔 올려 옆으로 기울이기', phase: 'stretch',
     mode: 'timePerSide', sec: 20, gear: 'none',
     prep: '발을 골반 너비로 벌리고 서요. 한 손은 허리에 얹어요.',
     cue: '반대쪽 팔을 머리 위로 올리고, 허리에 손 얹은 쪽으로 기울여요. 앞으로 숙이거나 비틀지 않아요.',
@@ -1857,7 +1860,7 @@ var MOBILITY_DRILLS = {
     discSafe: true
   },
   breathing_9090: {
-    kr: '마무리 호흡 — 90/90 자세', phase: 'stretch',
+    kr: '90/90 호흡', phase: 'stretch',
     mode: 'time', sec: 60, gear: 'mat',
     prep: '매트에 누워 종아리를 의자나 소파에 올려요. 엉덩이와 무릎을 90도로 맞추고 한 손은 배에 얹어요.',
     cue: '코로 4초 들이쉬고 6초 내쉬어요. 가슴 말고 배가 부풀게 하고, 어깨는 힘을 빼요.',

@@ -233,16 +233,20 @@ function renderWorkout() {
 
   // 단계 표시와 '이번 주 기록'(7일 막대)은 걷었다 — 이 화면이 할 일은 부위를 고르는 것 하나고,
   // 다섯 장이 스크롤 없이 한 화면에 들어와야 그게 한 번에 끝난다.
+  // 다섯 장을 화면 위에 붙이면 아래쪽 절반이 통째로 비어 화면이 미완성으로 보였다 →
+  // 탭바 위 남은 영역의 세로 가운데에 둔다(글자 정렬은 왼쪽 그대로).
   return '' +
-    '<div class="px-5 pt-12 pb-32">' +
-      '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest mb-3 px-1">부위 선택</p>' +
-      '<div class="body-part-grid">' +
-        partCard('push', 'PUSH', '가슴 · 어깨 · 삼두') +
-        partCard('pull', 'PULL', '등 · 이두') +
-        partCard('legs', 'LEGS', '하체 · 코어') +
-        partCard('upper', 'UPPER', '상체 전체') +
+    '<div class="px-5 pt-12 screen-center">' +
+      '<div class="screen-center-inner">' +
+        '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest mb-3 px-1">부위 선택</p>' +
+        '<div class="body-part-grid">' +
+          partCard('push', 'PUSH', '가슴 · 어깨 · 삼두') +
+          partCard('pull', 'PULL', '등 · 이두') +
+          partCard('legs', 'LEGS', '하체 · 코어') +
+          partCard('upper', 'UPPER', '상체 전체') +
+        '</div>' +
+        partCard('free', 'FREE', '직접 종목 선택', true) +
       '</div>' +
-      partCard('free', 'FREE', '직접 종목 선택', true) +
     '</div>';
 }
 
@@ -863,23 +867,27 @@ function renderWorkoutStep2() {
     }
   }
 
+  // '뒤로'는 글자 높이(13px)만큼만 눌리는 표적이었다 → 위아래 여백을 줘 44px 표적으로 키운다.
+  // 그만큼 헤더가 두꺼워지면서 아래 첫 박스와의 간격(측정 1px)도 같이 해결된다.
   var headerHtml =
-    '<div class="px-5 pt-12 pb-2">' +
+    '<div class="px-5 pt-12 pb-3">' +
       '<div class="flex items-center justify-between">' +
-        '<button onclick="backToStep1()" class="text-xs font-mono accent">← 뒤로</button>' +
+        '<button onclick="backToStep1()" class="text-xs font-mono accent screen-back-btn">← 뒤로</button>' +
         (summaryLine ? '<p class="text-[11px] font-mono text-stone-500">' + summaryLine + '</p>' : '') +
       '</div>' +
     '</div>' +
     '<div class="px-5 pb-32">';
   
-  // 로딩 화면
+  // 로딩 화면 — 부위 선택 화면과 같은 기준으로, 헤더 아래 남은 영역의 세로 가운데에 둔다.
   if (state.routineLoading) {
     return headerHtml +
+      '<div class="screen-center-rest">' +
       '<div class="routine-loading-card">' +
         '<div class="loading-spinner"></div>' +
         '<p class="font-bebas text-3xl mb-1" style="color: var(--accent);">' + partNames[part] + '</p>' +
         '<p class="text-xs text-stone-400 mb-1">' + partKor[part] + '</p>' +
         '<p class="text-sm text-stone-300 mt-4">AI가 맞춤 루틴 분석 중...</p>' +
+      '</div>' +
       '</div>' +
       '</div>';
   }
@@ -4419,31 +4427,6 @@ window.toggleMobilitySound = function() {
   render();
 };
 
-// 짧게(3분 · 일반 웜업만) / 표준(6분 · 일반 + 부위별 드릴) 토글 — §5-C 시간 압박 모드.
-window.setWarmupMode = function(mode) {
-  var s = state.activeSession;
-  if (!s || !s.warmup || s.warmup.done) return;
-  if (s.warmup.mode === mode) return;
-  var before = expandMobilitySegments(s.warmup.keys)[s.warmup.idx] || null;
-  var plan = buildWarmupPlan(s.sessionType, s.exercises, { short: mode === 'short' });
-  var segs = expandMobilitySegments(plan.keys);
-  s.warmup.mode = mode;
-  s.warmup.keys = plan.keys;
-  s.warmup.omitted = plan.omitted;
-  // 지금 하고 있는 동작이 그대로면 카운트다운을 이어간다. 안 그러면 3분 유산소 중에 "짧게"를 눌렀을 때
-  // 타이머가 3분으로 되감겨 "짧게"가 표준보다 길어지는 역전이 생긴다.
-  var after = segs[s.warmup.idx] || null;
-  var sameSeg = !!(before && after && before.key === after.key && before.side === after.side);
-  if (!sameSeg) {
-    s.warmup.segEndsAt = null;
-    mobilityRuntime.lastCueSec = null;
-  }
-  // 짧게로 바꿨는데 이미 그 지점을 지났으면(일반 웜업을 마친 뒤) 웜업을 끝낸 것으로 본다.
-  if (s.warmup.idx >= segs.length) { mobilityFinish('warmup'); return; }
-  saveActiveSession();
-  render();
-};
-
 // 완료 화면 → 정리 스트레칭 시작
 window.openStretchGuide = function() {
   var cs = state.completedSession;
@@ -4504,16 +4487,6 @@ function buildMobilityGuideHtml(kind) {
   var warnLine = seg.warn ? '<p class="mobility-warn">' + escapeHtml(seg.warn) + '</p>' : '';
   var optionalTag = seg.optional ? '<span class="mobility-tag">선택</span>' : '';
 
-  var modeToggle = '';
-  if (isWarmup) {
-    var isShort = (g.mode === 'short');
-    modeToggle =
-      '<div class="mobility-modes">' +
-        '<button class="mobility-mode-btn' + (isShort ? '' : ' active') + '" onclick="setWarmupMode(\'standard\')">표준 6분</button>' +
-        '<button class="mobility-mode-btn' + (isShort ? ' active' : '') + '" onclick="setWarmupMode(\'short\')">짧게 3분</button>' +
-      '</div>';
-  }
-
   return '' +
     // 헤더
     '<div class="px-5 pt-12" style="padding-bottom:14px;">' +
@@ -4530,18 +4503,18 @@ function buildMobilityGuideHtml(kind) {
 
     '<div class="px-5" style="padding-bottom:150px;">' +
 
-      // 동작 이름
-      '<div class="text-center" style="margin-top:14px;">' +
+      // 동작 이름이 주인공이고, 분량은 그 아래 한 줄로 붙인다.
+      // 옛 배치는 '남은 시간' 라벨 + 72px 숫자가 화면을 다 먹어, 정작 무슨 동작인지가
+      // 숫자 위로 밀려 있었다. 시간 구간은 카운트다운이라 진행 바를 같이 둔다.
+      '<div class="mobility-hero">' +
         '<p class="mobility-name">' + escapeHtml(mobilitySegmentLabel(seg)) + optionalTag + '</p>' +
-      '</div>' +
-
-      // 분량 (시간 = 카운트다운 / 횟수 = 사용자가 완료를 누름)
-      '<div class="text-center" style="margin-top:6px;">' +
-        '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">' + (isTime ? '남은 시간' : '목표 횟수') + '</p>' +
-        '<p id="mob-amount" class="font-bebas" style="font-size:72px;line-height:1;letter-spacing:1px;">' + amountText + '</p>' +
+        '<p class="mobility-amount">' +
+          '<span id="mob-amount">' + amountText + '</span>' +
+          (isTime ? '' : '<span class="mobility-amount-sub"> · 약 ' + seg.sec + '초</span>') +
+        '</p>' +
         (isTime
           ? '<div class="mobility-segbar"><div id="mob-seg-fill" class="mobility-segbar-fill" style="width:' + segFillPct.toFixed(1) + '%"></div></div>'
-          : '<p class="text-[11px] font-mono text-stone-600 mt-1">천천히 · 반동 없이 · 다 하면 완료를 누르세요 (약 ' + seg.sec + '초)</p>') +
+          : '') +
       '</div>' +
 
       // 전환 예고 배너 (3초 전)
@@ -4571,8 +4544,6 @@ function buildMobilityGuideHtml(kind) {
           (next ? escapeHtml(mobilitySegmentLabel(next) + ' · ' + mobilitySegmentAmount(next)) : (isWarmup ? '본운동 시작' : '마지막 동작')) +
         '</p>' +
       '</div>' +
-
-      modeToggle +
 
       '<button class="option-card" style="width:100%;margin-top:14px;text-align:center;padding:14px 0;" onclick="mobilitySkipAll()">' +
         '<p class="text-sm font-mono accent">' + (isWarmup ? '웜업 건너뛰고 바로 시작 →' : '스트레칭 그만하기') + '</p>' +

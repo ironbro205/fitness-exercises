@@ -2847,6 +2847,48 @@ test('디자인 규칙 — 잔글씨 하한 11px (탭바·단위 첨자만 예�
   assert.ok(!/font-size:\s*9px/.test(css), 'CSS 에도 9px 글씨가 남으면 안 된다');
 });
 
+// 이 저장소는 Tailwind 를 쓰지 않는다 — 같은 이름의 유틸 클래스를 css/styles.css 에 손으로 적어 둔다.
+// 그래서 `pb-2` 처럼 **정의를 빼먹은 클래스를 쓰면 조용히 여백 0** 이 된다(오류도 경고도 없다).
+// 실제로 pb-2·pb-3·pb-4·pb-20·pt-5·mt-5·mt-6·mb-6·py-4 아홉 개가 정의 없이 18곳에서 쓰이고 있었고,
+// 그래서 '뒤로' 버튼과 아래 첫 박스가 1px 간격으로 붙어 있었다.
+test('디자인 규칙 — 화면이 쓰는 여백 유틸 클래스가 CSS 에 전부 정의돼 있다', () => {
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
+  const defined = new Set();
+  // `.mt-0\.5 {` 처럼 이스케이프된 이름도 원래 이름으로 되돌려 담는다.
+  for (const m of css.matchAll(/^\.((?:[\w-]|\\.)+)\s*(?:,|\{)/gm)) {
+    defined.add(m[1].replace(/\\/g, ''));
+  }
+  const missing = new Map();
+  for (const file of ['screens', 'core', 'bodymap']) {
+    const src = fs.readFileSync(path.join(DIR, '..', 'js', `${file}.js`), 'utf8');
+    src.split('\n').forEach((line, i) => {
+      for (const m of line.matchAll(/class="([^"]*)"/g)) {
+        for (const cls of m[1].split(/\s+/)) {
+          // 여백 유틸만 본다 — 컴포넌트 클래스(card, routine-exercise…)는 대상이 아니다.
+          if (!/^[pm][trblxy]?-\d+(\.\d+)?$/.test(cls)) continue;
+          if (defined.has(cls)) continue;
+          if (!missing.has(cls)) missing.set(cls, `js/${file}.js:${i + 1}`);
+        }
+      }
+    });
+  }
+  assert.deepEqual([...missing.keys()], [],
+    'CSS 에 정의가 없어 여백이 0 이 되는 클래스: ' +
+    [...missing].map(([c, w]) => `${c} (${w})`).join(', '));
+});
+
+// viewport-fit=cover 로 화면 맨 위까지 그리므로, 폰에서는 상태바가 헤더 위에 겹쳐 온다.
+// 최상단 여백에 safe-area 를 더하지 않으면 '뒤로' 버튼이 상태바 밑으로 들어간다.
+test('디자인 규칙 — 최상단 여백이 상태바(safe-area)를 피한다', () => {
+  const html = fs.readFileSync(path.join(DIR, '..', 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
+  if (!/viewport-fit=cover/.test(html)) return;   // cover 를 안 쓰면 해당 없음
+  const rule = css.match(/^\.pt-12\s*\{[^}]*\}/m);
+  assert.ok(rule, '.pt-12 규칙이 있어야 함');
+  assert.match(rule[0], /env\(safe-area-inset-top/,
+    '.pt-12 는 env(safe-area-inset-top) 를 더해야 한다 — 안 그러면 헤더가 상태바에 가린다');
+});
+
 test('디자인 규칙 — 화면 이름은 탭바에만 있고 한국어다', () => {
   const fresh = loadApp();
   for (const [tab, fn] of [['home', 'renderHome'], ['workout', 'renderWorkout'], ['stats', 'renderStats'], ['more', 'renderMore']]) {
