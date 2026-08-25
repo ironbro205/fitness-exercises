@@ -122,7 +122,7 @@ test('진행: 통증 게이트는 "보조 유지"로 말한다 (증량 금지가
   assert.equal(rec.source, 'maintain');
   assert.equal(rec.painGated, true);
   assert.equal(rec.weight, 40, '통증 기록 시 보조를 줄이지 않는다');
-  assert.match(rec.note, /보조를 줄이지/);
+  assert.match(rec.note, /보조는 그대로/, '어시스트는 보조를 줄이는 게 증량이다 — 통증 때는 그대로 두라고 말해야 한다');
 });
 
 test('정방향 종목의 동작은 그대로다 (회귀 방지)', () => {

@@ -1875,7 +1875,7 @@ test('volumeByPartCardHtml — 2주 미만은 판정 보류, 이후는 프롬프
   assert.ok(html.includes('부족'));
   assert.ok(!html.includes('과잉'), "'과잉'은 근거를 넘어선 표현이라 쓰지 않는다");
   assert.ok(!html.includes('MEV'), '사용자 화면에 전문 약어 노출 금지');
-  assert.ok(html.includes('연구 평균이라 본인 반응은 다를 수 있어요.'), '근거 범위의 한계를 계속 밝힌다(ⓘ 안으로 접혔을 뿐)');
+  assert.ok(html.includes('기준은 평균이라 본인 반응은 다를 수 있어요.'), '근거 범위의 한계를 계속 밝힌다(ⓘ 안으로 접혔을 뿐)');
 });
 
 // ═══════════════════════════════════════════════
@@ -2656,6 +2656,95 @@ test('디자인 규칙 — 화면 이름은 탭바에만 있고 한국어다', (
   const bar = fresh.renderTabbar();
   ['홈', '운동', '러닝', '기록', '더보기'].forEach((l) => assert.ok(bar.includes('>' + l + '<'), '탭바 라벨: ' + l));
   ['HOME', 'STATS', 'MORE'].forEach((l) => assert.ok(!bar.includes(l), '탭바에 영어 라벨이 남아 있다: ' + l));
+});
+
+// ── 문구 규칙 (CLAUDE.md "디자인 규칙 · 문구·크기") ──
+// 이모지·하드코딩 색은 위 검사들이 막아 줘서 0건을 유지하고 있다. 말투·길이 쪽은 검사가 없어
+// 계속 새고 있었다(해요체에 합니다체 혼입, 느낌표, 40자 초과). 같은 방식으로 고정한다.
+//
+// 대상은 **사용자가 읽는 화면 문자열**뿐이다.
+//  · js/ai.js 전체와 data.js 의 COACH_KNOWLEDGE 는 AI 에게 보내는 프롬프트라 규칙 예외다(CLAUDE.md).
+//  · data.js 의 화면용 표(MOBILITY_DRILLS·SET_SCHEMES)는 각자 전용 검사가 이미 있다
+//    (tests/mobility.test.mjs · tests/set-schemes.test.mjs) → 여기서 또 보지 않는다.
+//  · domain.js 안의 프롬프트 블록 빌더도 화면이 아니라 아래 목록으로 뺀다.
+//    새 프롬프트 빌더를 만들면 여기에 이름을 추가할 것.
+const COPY_FILES = ['screens.js', 'core.js', 'bodymap.js', 'domain.js'];
+const PROMPT_BUILDERS = ['buildSafetyPromptBlock', 'buildEquipmentPromptBlock', 'buildExerciseCatalogBlock',
+  'formatBalanceAnalysis', 'formatCoachMemoryForPrompt', 'getUnavailableExerciseNames'];
+const HANGUL_RE = /[가-힣]/;
+
+// 줄 끝 주석을 떼어낸 코드 부분. 문자열 안의 '//' 는 주석이 아니므로 따옴표 상태를 따라간다
+// (이게 없으면 `... // '딴!' 올림` 같은 설명 주석이 화면 문구로 잡힌다).
+function codeOf(line) {
+  let q = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (q) {
+      if (c === '\\') { i++; continue; }
+      if (c === q) q = null;
+    } else if (c === "'" || c === '"' || c === '`') {
+      q = c;
+    } else if (c === '/' && line[i + 1] === '/') {
+      return line.slice(0, i);
+    }
+  }
+  return line;
+}
+
+// 화면 파일에서 한글이 든 문자열 리터럴만 뽑는다 (주석·프롬프트 빌더 제외).
+function uiLiterals() {
+  const out = [];
+  for (const f of COPY_FILES) {
+    const lines = fs.readFileSync(path.join(DIR, '..', 'js', f), 'utf8').split('\n');
+    let inPrompt = false;
+    lines.forEach((line, i) => {
+      const t = line.trim();
+      if (PROMPT_BUILDERS.some((fn) => t.startsWith('function ' + fn))) inPrompt = true;
+      else if (inPrompt && t === '}') { inPrompt = false; return; }
+      if (inPrompt) return;
+      if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return;   // 주석은 사람이 읽는 메모
+      for (const raw of codeOf(line).match(/'(?:[^'\\]|\\.)*'/g) || []) {
+        const str = raw.slice(1, -1).replace(/\\'/g, "'");
+        if (HANGUL_RE.test(str)) out.push({ where: `js/${f}:${i + 1}`, str });
+      }
+    });
+  }
+  return out;
+}
+
+// 리터럴 → 사람이 한 번에 읽는 "문장" 조각들. 태그·개행에서 끊고 마크업/CSS 조각은 버린다.
+function uiSentences(str) {
+  return str
+    .replace(/\\n/g, '\n')
+    .split(/<br\s*\/?>|<\/?[a-zA-Z][^>]*>|\n/)
+    .flatMap((part) => part.split(/(?<=[.?!])\s+/))
+    .map((s) => s.trim())
+    .filter((s) => HANGUL_RE.test(s))
+    .filter((s) => !/[<>]|="|;\s*$|:\s*var\(|px;|\bfunction\b/.test(s));   // 마크업·CSS·코드 조각
+}
+
+test('디자인 규칙 — 화면 문구는 해요체로 통일한다 (합니다체 혼입 금지)', () => {
+  const bad = uiLiterals()
+    .filter(({ str }) => uiSentences(str).some((s) => /(합니다|됩니다|입니다|습니다|하십시오|주십시오)/.test(s)))
+    .map(({ where, str }) => `${where}  ${str.slice(0, 70)}`);
+  assert.deepEqual(bad, [], '해요체와 합니다체가 섞였다 — 한 앱에서 두 말투를 쓰지 않는다');
+});
+
+test('디자인 규칙 — 화면 문구에 느낌표를 쓰지 않는다 (칭찬은 사실로)', () => {
+  const bad = uiLiterals()
+    .filter(({ str }) => uiSentences(str).some((s) => /[가-힣][^A-Za-z<>]{0,4}!/.test(s)))
+    .map(({ where, str }) => `${where}  ${str.slice(0, 70)}`);
+  assert.deepEqual(bad, [], '느낌표는 쓰지 않는다 — "3세트 완료" 처럼 사실로 적는다');
+});
+
+test('디자인 규칙 — 화면 문구는 한 문장 40자 이내', () => {
+  const bad = [];
+  for (const { where, str } of uiLiterals()) {
+    for (const s of uiSentences(str)) {
+      if ([...s].length > 40) bad.push(`${where}  (${[...s].length}자) ${s.slice(0, 60)}`);
+    }
+  }
+  assert.deepEqual(bad, [], '한 문장이 40자를 넘는다 — 쪼개거나 덜어낸다(더 필요하면 noteBlock 으로 접는다)');
 });
 
 test('디자인 규칙 — 접이식 안내 noteBlock 은 네이티브 details 라 재렌더가 없다', () => {

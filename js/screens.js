@@ -1544,7 +1544,7 @@ function advanceCycleIfWeekComplete() {
     state.data.cycleHistory = state.data.cycleHistory || [];
     state.data.cycleHistory.unshift({ cycle: updated.currentCycle - 1, endedAt: getTodayStr() });
     storage.set(KEYS.CYCLE_HISTORY, state.data.cycleHistory);
-    showToast('새 사이클 ' + updated.currentCycle + ' 시작!');
+    showToast('새 사이클 ' + updated.currentCycle + ' 시작');
   } else {
     showToast(updated.currentWeek + '주차로 진행 · ' + updated.cyclePhase);
   }
@@ -3912,7 +3912,7 @@ function buildSetSchemeSheetHtml(session, exercise) {
           '<button class="session-header-btn" onclick="closeSetSchemeSheet()">' + icon('close', 18) + '</button>' +
         '</div>' +
         noteBlock('아직 안 한 세트에만 적용돼요.',
-          '볼륨이 같으면 세트법 간 근비대 차이는 없어요(Angleri 2017). 종목에 맞게 자동으로 골라 두지만 바꿔도 돼요.') +
+          '볼륨이 같으면 세트법 간 근비대 차이는 없어요. 종목에 맞는 기본값이 잡혀 있고 바꿔도 돼요.') +
         '<div style="max-height: 48vh; overflow-y: auto; padding-right: 4px;">' + list + supersetRow + '</div>' +
       '</div>' +
     '</div>';
@@ -3973,7 +3973,7 @@ function buildTopSetWeightSheetHtml(session, exercise) {
 
         '<p class="text-[11px] font-mono text-stone-500 mt-2">' + sourceKr + '</p>' +
         noteBlock('탑 1세트 뒤 나머지는 90% 무게로 채워요.',
-          '가장 무거운 1세트로 자극을 주고, 뒤 세트는 감량해 반복을 지켜요. 뒤 세트 반복이 무너지면서 잃는 볼륨 로드를 감량이 되살려요.') +
+          '가장 무거운 1세트로 자극을 주고 뒤 세트는 감량해 반복을 지켜요.') +
 
         // .grid-cols-2 는 이 저장소 CSS에 없다 — 새로 정의하면 이 시트 밖 화면까지 바뀐다.
         '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px;">' +
@@ -5036,10 +5036,11 @@ function renderOneRMList() {
       '<div class="px-5 pt-5 pb-20">' +
         
         // 첫 줄만 남기고 나머지는 ⓘ 안으로. 근거(Epley·Nuzzo 2024)는 지우지 않고 접기만 한다.
-        '<p class="text-xs text-stone-300 leading-relaxed mb-2">최근 기록으로 계산한 추정값이에요. 종목끼리 비교하지 말고, 같은 종목이 오르는지만 보세요.</p>' +
+        '<p class="text-xs text-stone-300 leading-relaxed mb-2">최근 기록으로 계산한 추정값이에요. 종목끼리 비교하지 말고 같은 종목이 오르는지만 보세요.</p>' +
         noteBlock('어떻게 계산하나요? · 작업무게란?',
-          '최근 몇 번의 운동 중 최고 기록으로 추적해요(Epley 공식). 신기록은 바로 반영되고, 한동안 못 들면 천천히 내려가요 — 컨디션 난조 한 번으로 폭락하지 않아요.<br>' +
-          '실제로 1회 들어본 값이 아니라서 종목에 따라 10~15% 차이날 수 있어요. 그래서 종목 간 비교에는 못 써요.<br>' +
+          '최근 운동 중 최고 기록 기준이에요.<br>' +
+          '신기록은 바로 오르고 한동안 못 들면 천천히 내려가요. 컨디션 난조 한 번으로 폭락하진 않아요.<br>' +
+          '실제로 1회 들어본 값이 아니라 종목마다 10~15% 차이가 나요.<br>' +
           '<b>작업</b>은 1RM의 75% — 보통 8~12회를 낼 수 있는 무게예요.') +
         
         categoriesHtml +
@@ -5193,7 +5194,7 @@ function renderMore() {
   var backupReminderHtml = '';
   if (backupStatus.stale) {
     var reminderText = backupStatus.never
-      ? '아직 백업 파일을 만든 적이 없어요. 지금 한 번 저장해 두면 폰을 바꿔도 기록을 그대로 옮길 수 있어요.'
+      ? '아직 백업 파일을 만든 적이 없어요. 지금 저장해 두면 폰을 바꿔도 기록이 따라와요.'
       : '마지막 백업이 ' + backupStatus.daysSince + '일 전이에요. 그 뒤로 쌓인 기록은 아직 저장돼 있지 않아요.';
     backupReminderHtml =
       '<div class="backup-reminder">' +
@@ -5255,7 +5256,7 @@ function renderMore() {
               '<div style="color: var(--accent); flex-shrink: 0; margin-top: 2px;">' + icon('info', 16) + '</div>' +
               '<div>' +
                 '<p class="text-xs accent font-mono uppercase tracking-widest mb-1">왜 필요한가요?</p>' +
-                '<p class="text-xs text-stone-300 leading-relaxed">AI 코치·루틴·주간 리뷰·정체기 분석에 Anthropic Claude를 써요. 키가 없으면 그 기능만 꺼져요.</p>' +
+                '<p class="text-xs text-stone-300 leading-relaxed">코치·루틴·주간 리뷰·정체기 분석에 Claude 를 써요.<br>키가 없으면 그 기능만 꺼져요.</p>' +
               '</div>' +
             '</div>' +
           '</div>' +
@@ -5345,7 +5346,7 @@ function renderMore() {
               '<div class="menu-icon-sm">' + icon('info', 18) + '</div>' +
               '<div class="menu-row-content">' +
                 '<p class="text-sm font-display font-bold">정체기 분석</p>' +
-                '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + (state.plateauCheck ? state.plateauCheck.signals.length + '개 신호 감지됨' : '진행 정체 자동 진단') + '</p>' +
+                '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + (state.plateauCheck ? state.plateauCheck.signals.length + '개 신호' : '무게가 멈춘 종목 찾기') + '</p>' +
               '</div>' +
               (state.plateauCheck ? '<span class="api-status-badge" style="background: rgba(var(--warn-rgb), 0.15); color: var(--warn); border: 1px solid rgba(var(--warn-rgb), 0.4);">감지</span>' : '<div class="menu-arrow">' + icon('chevron', 16) + '</div>') +
             '</div>'
@@ -5586,7 +5587,7 @@ window.sendCoachMessage = async function() {
         '1. **더보기** 탭으로 이동\n' +
         '2. **Anthropic API 키** 메뉴\n' +
         '3. 키 입력 후 저장\n\n' +
-        '키는 본인 기기에만 저장되며 외부로 전송되지 않습니다.' 
+        '키는 본인 기기에만 저장되고 밖으로 보내지 않아요.' 
     });
     state.coachInputText = '';
     render();
@@ -6180,7 +6181,7 @@ function renderPlateauDetail() {
           '<div style="width: 36px;"></div>' +
         '</div>' +
         '<div style="padding: 80px 20px; text-align: center;">' +
-          '<p class="text-sm text-stone-400">정체기 신호가 감지되지 않았어요.</p>' +
+          '<p class="text-sm text-stone-400">정체기 신호가 없어요.</p>' +
         '</div>' +
       '</div>';
   }
@@ -6764,15 +6765,14 @@ function volumeByPartCardHtml() {
   // 판정 보류 안내는 접어 둔다 — 판정 배지가 없다는 것 자체가 이미 신호다.
   var guardHtml = enoughData ? '' :
     noteBlock('아직 판단하기 일러요 — 세트 수만 보여줘요',
-      '기록이 2주 이상 쌓이면 부족·적정을 표시해요.');
+      '부족·적정 판정은 기록 2주치부터예요.');
 
   return '<div class="card mb-4">' + head +
-      '<p class="text-[11px] font-mono text-stone-600 mb-3">진한 막대 = 직접 세트 · 연한 막대 = 간접 포함</p>' +
       guardHtml +
       rows.map(volRow).join('') +
       (untouched.length > 0 ? '<p class="text-[11px] font-mono text-stone-600 mt-2">주 0세트: ' + untouched.join(' · ') + '</p>' : '') +
       noteBlock('이 범위는 어디서 왔나요?',
-        '연구 평균이라 본인 반응은 다를 수 있어요. 간접 세트는 보조근을 0.5로 셈해요.') +
+        '기준은 평균이라 본인 반응은 다를 수 있어요. 간접 세트에서 보조근은 0.5세트로 쳐요.') +
     '</div>';
 }
 
@@ -6902,7 +6902,7 @@ function cardioInclineLabel(seg) {
 }
 // 다음 구간 안내 문구 — "올리세요/내리세요"로 방향을 명시한다(§3-4).
 function cardioInclineCue(cur, next) {
-  if (!next) return '곧 완주!';
+  if (!next) return '곧 완주';
   var ci = Number(cur && cur.incline) || 0;
   var ni = Number(next.incline) || 0;
   var spd = Number((next.targetSpeed != null) ? next.targetSpeed : next.speed) || 0;
@@ -7271,7 +7271,7 @@ function cardioPaintDynamic(elapsed) {
       if (isWalk) {
         pc.textContent = cardioInclineCue(seg, next) + ' (' + Math.ceil(ttl) + ')';
       } else {
-        pc.textContent = next ? ('곧 ' + cardioTypeIcon(next.type) + ' ' + cardioTypeLabel(next.type) + ' ' + (next.targetSpeed || 0).toFixed(1) + '! (' + Math.ceil(ttl) + ')') : ('곧 완주! (' + Math.ceil(ttl) + ')');
+        pc.textContent = next ? ('곧 ' + cardioTypeIcon(next.type) + ' ' + cardioTypeLabel(next.type) + ' ' + (next.targetSpeed || 0).toFixed(1) + ' (' + Math.ceil(ttl) + ')') : ('곧 완주 (' + Math.ceil(ttl) + ')');
       }
     } else { pc.style.display = 'none'; pc.textContent = ''; }
   }
@@ -7789,7 +7789,7 @@ function renderCardioRPE() {
         '<h1 class="font-bebas text-4xl mt-1">' + (completed ? '완주' : '중단') + '</h1>' +
         '<p class="text-sm font-mono text-stone-400 mt-2">' + cardioFmtClock(endSec) + ' · ' + run.distanceKm.toFixed(2) + 'km</p>' +
         kcalLine +
-        (isWalk ? '<p class="text-[11px] font-mono text-stone-500 mt-2">종아리 스트레칭 30초씩 2번 하고 가세요 (무릎 편 상태 / 굽힌 상태)</p>' : '') +
+        (isWalk ? '<p class="text-[11px] font-mono text-stone-500 mt-2">종아리 스트레칭 30초씩 2번 하고 가세요<br>(무릎 편 상태 / 굽힌 상태)</p>' : '') +
       '</div>' +
 
       handrailCard +
@@ -7800,11 +7800,11 @@ function renderCardioRPE() {
         '<div class="condition-ends" style="max-width:280px;margin:8px auto 0;"><span>쉬움</span><span>한계</span></div>' +
         noteBlock('이 값이 다음 구성에 어떻게 쓰이나요?',
           isWalk
-            ? '완주하고 RPE 6 이하면 다음엔 한 축만 조금 올라가요(시간 → 빈도 → 경사 → 속도 순). 허리·종아리 통증이 있으면 쉬세요.'
+            ? '완주하고 RPE 6 이하면 다음엔 한 축만 조금 올려요.<br>순서는 시간 → 빈도 → 경사 → 속도. 허리·종아리 통증이 있으면 쉬세요.'
             : '뛰기가 7 이하로 완주했다면 다음 구성은 걷기가 조금 줄어들어요. 통증이 있으면 쉬세요.') +
         '<button class="option-card" style="width:100%;margin-top:12px;text-align:center;" onclick="submitCardioRpe(null)"><p class="text-xs font-mono text-stone-400">평가 건너뛰기</p></button>' +
       '</div>' +
-      (isWalk ? '<p class="text-[11px] font-mono text-stone-600 text-center mt-4" style="line-height:1.7;">디스크 증상은 몇 시간 뒤에 나올 수 있어요.<br>오늘 저녁까지 허리·다리 저림이 없는지 확인하고 다음 세션을 정하세요.</p>' : '') +
+      (isWalk ? '<p class="text-[11px] font-mono text-stone-600 text-center mt-4" style="line-height:1.7;">디스크 증상은 몇 시간 뒤에 나올 수 있어요.<br>오늘 저녁까지 허리·다리 저림을 살피고 다음 세션을 정하세요.</p>' : '') +
     '</div>';
 }
 

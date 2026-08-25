@@ -406,7 +406,7 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
       repRange: range,
       exClass: cls,
       note: reverse
-        ? '최근 2주 내 통증 기록 — 보조를 줄이지 말고 폼·그립·가동범위를 점검해요'
+        ? '최근 2주 통증 기록 — 보조는 그대로, 폼·그립·가동범위를 점검해요'
         : '최근 2주 내 통증 기록 — 증량 대신 폼·그립·가동범위를 점검해요'
     };
   }
@@ -440,7 +440,7 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
         previousReps: lastReps,
         repRange: range,
         exClass: cls,
-        note: '보조 0kg에서 상단 ' + topReps + '회 달성 — 이제 맨몸 풀업/딥스예요! 다음은 중량조끼·딥벨트로 무게를 더할 차례'
+        note: '보조 0kg · 상단 ' + topReps + '회 — 맨몸 졸업. 다음은 중량조끼·딥벨트로 무게를 더할 차례예요'
       };
     }
     var newW = progressedWeight(exerciseName, maxW, inc);
@@ -462,12 +462,12 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
   if (reverse) {
     // 역방향의 "유지"는 보조 무게를 그대로 두고 반복을 쌓는 것 = 더블 프로그레션의 앞 단계.
     if (lastReachedTop && needSessions > 1) {
-      holdNote = '보조 ' + maxW + 'kg × ' + topReps + '회 달성! 한 세션 더 유지하면 보조 −' + inc + 'kg';
+      holdNote = '보조 ' + maxW + 'kg × ' + topReps + '회 달성. 한 세션 더 유지하면 보조 −' + inc + 'kg';
     } else {
       holdNote = '지난 보조 ' + maxW + 'kg에서 ' + topReps + '회 도전 (상단 도달 시 보조 −' + inc + 'kg = 증량)';
     }
   } else if (lastReachedTop && needSessions > 1) {
-    holdNote = maxW + 'kg × ' + topReps + '회 달성! 한 세션 더 유지하면 +' + inc + 'kg' +
+    holdNote = maxW + 'kg × ' + topReps + '회 달성. 한 세션 더 유지하면 +' + inc + 'kg' +
       (cls === 'light_isolation' ? ' (경량 고립은 무게보다 반복·템포·컨트롤로 진행)' : '');
   } else if (cls === 'light_isolation') {
     holdNote = maxW + 'kg 고정, ' + range.low + '~' + range.high + '회에서 반복·템포·컨트롤로 진행';
