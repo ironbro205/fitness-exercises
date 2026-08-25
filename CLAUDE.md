@@ -82,7 +82,10 @@ AI results are cached in `localStorage` and reused while fresh — daily recomme
 
 ## 디자인 규칙 (감사 후 확정 — docs/research/design-audit.md §5)
 
-새 화면·문구를 쓸 때 이 규칙을 따른다. 테스트가 일부를 실제로 막는다(`디자인 규칙 —` 로 시작하는 테스트).
+새 화면·문구를 쓸 때 이 규칙을 따른다. **대부분을 테스트가 실제로 막는다**(`디자인 규칙 —` 로 시작하는 테스트 — 이모지·하드코딩 색·11px 하한·해요체 통일·느낌표 금지·한 문장 40자).
+규칙을 어기면 `node --test tests/characterization.test.mjs` 가 위반 목록을 파일:줄 로 뱉는다.
+검사 대상은 **화면 파일**(`js/screens.js`·`core.js`·`bodymap.js`·`domain.js`)의 한글 문자열이다.
+⚠️ 사각지대 하나: `EXERCISE_SAFETY[].mod` 는 `js/data.js` 에 있지만 부상 토스트로 **화면에 뜬다**. 지금 111문장이 문체·길이 규칙을 어기고 있고(부상 안내라 뜻이 바뀔 위험이 커서 일괄 재작성은 보류), `부상 안내(mod) 문구 위반이 더 늘지 않는다` 테스트가 **개수만** 못박아 두었다 — 종목을 새로 넣을 땐 해요체·40자로 쓸 것. `js/ai.js` 전체와 `data.js` 의 `COACH_KNOWLEDGE` 는 AI 프롬프트라 예외이고, `domain.js` 의 프롬프트 블록 빌더는 테스트의 `PROMPT_BUILDERS` 목록으로 뺀다 — 새 프롬프트 빌더를 만들면 그 목록에 이름을 추가할 것.
 
 **이모지**
 1. 기본 UI에 이모지를 쓰지 않는다. 아이콘이 필요하면 `ICONS` 31종에서 고른다 (`icon('trophy', 16)`).

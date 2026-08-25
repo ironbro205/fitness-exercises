@@ -250,7 +250,7 @@ function parseBackupFile(input) {
   }
   var version = Number(parsed.version);
   if (!version || version < 1) {
-    return { ok: false, error: '백업 파일의 형식(버전)을 알 수 없어요.\n파일이 손상됐을 수 있습니다.' };
+    return { ok: false, error: '백업 파일의 형식(버전)을 알 수 없어요.\n파일이 손상됐을 수 있어요.' };
   }
   if (version > BACKUP_VERSION) {
     return { ok: false, error: '이 백업 파일은 더 새로운 버전의 앱에서 만들었어요.\n앱을 최신으로 새로고침한 뒤 다시 시도해 주세요.' };
@@ -271,7 +271,7 @@ function parseBackupFile(input) {
   var safeData = sanitizeBackupData(parsed.data);
   if (!backupHasRecords(safeData)) {
     // 덮어쓰기는 되돌릴 수 없으므로, 알맹이가 없는 파일로는 기존 기록을 지우지 않는다.
-    return { ok: false, error: '복원할 기록이 없어요.\n기록이 하나도 담기지 않은 백업 파일입니다.' };
+    return { ok: false, error: '복원할 기록이 없어요.\n백업 파일이 비어 있어요.' };
   }
   var safeBackup = { app: 'fitness', version: version, exportedAt: parsed.exportedAt, data: safeData };
   return { ok: true, backup: safeBackup, summary: summarizeBackup(safeBackup) };
@@ -469,8 +469,8 @@ function restoreFromBackup(input) {
   if (failed) {
     var restored = rollback();
     return { ok: false, error: restored
-      ? '저장 공간이 부족해 복원을 끝내지 못했어요.\n원래 기록은 그대로 되돌려 놨습니다. 기기 저장 공간을 정리한 뒤 다시 시도해 주세요.'
-      : '저장 공간이 부족해 복원을 끝내지 못했고, 일부 기록은 되돌리지도 못했어요.\n기기 저장 공간을 정리한 뒤 백업 파일로 다시 복원해 주세요.' };
+      ? '저장 공간이 부족해 복원을 끝내지 못했어요.\n원래 기록은 그대로 되돌려 놨어요. 저장 공간을 정리한 뒤 다시 시도해 주세요.'
+      : '저장 공간이 부족해 복원을 끝내지 못했어요.\n일부 기록은 되돌리지도 못했어요. 저장 공간을 정리한 뒤 다시 복원해 주세요.' };
   }
 
   // 기존 임시 진행상태·파생 캐시 정리 (옛 세션/캐시가 새 데이터와 충돌하지 않도록).

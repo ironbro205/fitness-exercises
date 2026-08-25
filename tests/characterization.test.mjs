@@ -1875,7 +1875,7 @@ test('volumeByPartCardHtml — 2주 미만은 판정 보류, 이후는 프롬프
   assert.ok(html.includes('부족'));
   assert.ok(!html.includes('과잉'), "'과잉'은 근거를 넘어선 표현이라 쓰지 않는다");
   assert.ok(!html.includes('MEV'), '사용자 화면에 전문 약어 노출 금지');
-  assert.ok(html.includes('연구 평균이라 본인 반응은 다를 수 있어요.'), '근거 범위의 한계를 계속 밝힌다(ⓘ 안으로 접혔을 뿐)');
+  assert.ok(html.includes('기준은 평균이라 본인 반응은 다를 수 있어요.'), '근거 범위의 한계를 계속 밝힌다(ⓘ 안으로 접혔을 뿐)');
 });
 
 // ═══════════════════════════════════════════════
@@ -2111,6 +2111,144 @@ test('종목 편집 — 미리보기에서 정한 쉬는시간이 세션까지 �
   // 워밍업·드롭의 짧은 휴식은 그 세트법의 정의라 그대로 둔다
   const warm = (ex.sets || []).filter((st) => st.isWarmup)[0];
   if (warm) assert.equal(a.resolveRestSec(ex, warm), a.REST_WARMUP_SEC, '워밍업 휴식까지 덮으면 안 된다');
+});
+
+// ── 병합 전 적대적 리뷰가 잡은 결함 (전부 실물 재현 확인) ──
+
+test('종목 편집 — 갈래는 전역 state 가 아니라 종목 객체로 정한다 (코치 적용 크래시)', () => {
+  const a = loadApp();
+  a.state.activeSession = null;
+  a.state.exerciseEdit = null;                 // 편집 시트를 안 거치는 호출부(코치 [적용])
+  a.state.generatedRoutine = { bodyPart: 'push', exercises: [
+    { name: '머신 체스트 프레스', type: '복합', sets: 3, reps: '8-10', weight: 60 }] };
+
+  // 미리보기 종목인데 세션 갈래로 빠지면 ex.sets.concat 에서 render() 가 통째로 죽었다
+  assert.equal(a.isPreviewExercise(a.state.generatedRoutine.exercises[0]), true, 'sets 가 숫자면 미리보기');
+  assert.equal(a.isPreviewExercise({ name: 'x', sets: [] }), false, 'sets 가 배열이면 세션');
+
+  const msg = { role: 'assistant', content: '90초로?', apply: [{ action: 'rest', exercise: '', value: 90 }], applyStatus: 'pending' };
+  a.state.coachMessages = [msg];
+  assert.doesNotThrow(() => a.buildCoachApplyCardHtml(msg, 0), '카드 렌더가 죽으면 안 된다');
+  assert.doesNotThrow(() => a.approveCoachApply(0), '적용이 죽으면 안 된다');
+  assert.equal(a.state.generatedRoutine.exercises[0].rest, 90);
+});
+
+test('종목 편집 — 세트 스테퍼가 완료 세트를 이중으로 세지 않는다', () => {
+  const a = loadApp();
+  a.state.data.workoutLog = []; a.storage.set(a.KEYS.WORKOUT_LOG, []);
+  a.startSession('push');
+  const ex = a.state.activeSession.exercises[0];
+  const working = () => ex.sets.filter((s) => !s.isWarmup && !a.isSetExtension(s));
+  working()[0].completed = true;                       // 1세트 완료
+
+  a.openExerciseEdit('session', 0);
+  const start = a.exerciseEditValues(ex).sets;
+  a.adjustExerciseEdit('sets', 1);
+  assert.equal(a.exerciseEditValues(ex).sets, start + 1, '[+1] 이 한 개만 늘어야 한다');
+  assert.equal(working().filter((s) => s.completed).length, 1, '완료 세트는 그대로 남아야 한다');
+
+  a.adjustExerciseEdit('sets', -1);
+  assert.equal(a.exerciseEditValues(ex).sets, start, '[−1] 이 되돌려야 한다');
+
+  // 완료 세트 수가 하한 — 그 아래로는 안 내려간다(이미 한 기록을 지울 수 없다)
+  for (let i = 0; i < 6; i++) a.adjustExerciseEdit('sets', -1);
+  assert.ok(a.exerciseEditValues(ex).sets >= 1);
+  assert.equal(working().filter((s) => s.completed).length, 1);
+});
+
+test('종목 편집 — 탑세트를 끝낸 뒤에도 무게 스테퍼가 화면과 같이 움직인다', () => {
+  const a = loadApp();
+  a.state.data.workoutLog = []; a.storage.set(a.KEYS.WORKOUT_LOG, []);
+  a.storage.set(a.KEYS.ONE_RM_DATA, { '스미스 머신 벤치 프레스': 90 });
+  a.startSession('push');
+  const ex = a.state.activeSession.exercises[0];
+  ex.name = '스미스 머신 벤치 프레스';
+  a.setSetSchemeOverride('스미스 머신 벤치 프레스', 'top_backoff');
+  a.rebuildPendingSets(ex, { baseWeight: 60 });
+  assert.equal(ex.scheme, 'top_backoff', '이 검사는 탑+백오프에서만 뜻이 있다');
+  ex.sets.filter((s) => !s.isWarmup)[0].completed = true;   // 탑 완료
+
+  a.openExerciseEdit('session', 0);
+  const shown = a.exerciseEditValues(ex).weight;
+  const inc = a.getWeightIncrement(ex.name);
+  a.adjustExerciseEdit('weight', -inc);
+  // 사다리 꼭대기를 다시 매기면 남은 세트가 그 90% 로 내려앉아 화면 숫자는 그대로였다
+  assert.equal(a.exerciseEditValues(ex).weight, shown - inc, '[−] 가 화면에 반영돼야 한다');
+  const pending = ex.sets.filter((s) => !s.isWarmup && !s.completed && !a.isSetExtension(s));
+  pending.forEach((s) => assert.equal(s.weight, shown - inc, '남은 세트가 그 무게여야 한다'));
+
+  // 반복·세트를 만졌다고 무게가 조용히 한 단 떨어지면 안 된다 —
+  // 사다리를 다시 매길 때 백오프 무게를 baseWeight 로 넘기던 탓이었다.
+  const held = a.exerciseEditValues(ex).weight;
+  a.adjustExerciseEdit('reps', 1);
+  assert.equal(a.exerciseEditValues(ex).weight, held, '반복만 바꿨는데 무게가 움직였다');
+  a.adjustExerciseEdit('sets', 1);
+  assert.equal(a.exerciseEditValues(ex).weight, held, '세트만 바꿨는데 무게가 움직였다');
+});
+
+test('종목 편집 — 미리보기 편집이 마법사 저장까지 간다 (새로고침에 안 사라진다)', () => {
+  const a = loadApp();
+  a.state.generatedRoutine = { bodyPart: 'push', exercises: [
+    { name: '머신 체스트 프레스', type: '복합', sets: 3, reps: '8-10', weight: 60 }] };
+  a.saveWizard();
+  a.openExerciseEdit('preview', 0);
+  a.adjustExerciseEdit('weight', a.getWeightIncrement('머신 체스트 프레스'));
+  a.adjustExerciseEdit('sets', 1);
+
+  const saved = a.storage.get(a.KEYS.WORKOUT_WIZARD, {});
+  const savedEx = saved && saved.generatedRoutine && saved.generatedRoutine.exercises[0];
+  assert.ok(savedEx, '마법사 블롭에 루틴이 저장돼야 한다');
+  assert.equal(savedEx.weight, a.state.generatedRoutine.exercises[0].weight);
+  assert.equal(savedEx.sets, a.state.generatedRoutine.exercises[0].sets);
+});
+
+test('처방 줄 휴식 — 사용자가 정한 값만 세트법 기본값을 이긴다 (AI 값은 아니다)', () => {
+  const a = loadApp();
+  const cls = a.getExerciseRestSec('인클라인 덤벨 프레스');
+
+  const aiOnly = { name: '인클라인 덤벨 프레스', type: '복합', sets: 3, reps: '8-12', weight: 20, rest: '90' };
+  assert.equal(a.routineRestSec(aiOnly), cls, 'AI 가 준 rest 는 앱 계산을 이기지 못한다');
+
+  const userSet = { name: '인클라인 덤벨 프레스', type: '복합', sets: 3, reps: '8-12', weight: 20, rest: 90, restLocked: true };
+  assert.equal(a.routineRestSec(userSet), 90);
+  assert.equal(a.buildPrescriptionValues(userSet, a.getRoutinePreviewPlan(userSet)).rest, a.restSecToMin(90),
+    '처방 줄이 사용자가 정한 휴식과 달라지면 화면이 거짓말을 한다');
+
+  // 편집 시트를 거치면 자물쇠가 걸린다
+  const b = loadApp();
+  b.state.generatedRoutine = { bodyPart: 'push', exercises: [{ name: '인클라인 덤벨 프레스', type: '복합', sets: 3, reps: '8-12', weight: 20 }] };
+  b.openExerciseEdit('preview', 0);
+  b.adjustExerciseEdit('rest', -15);
+  assert.equal(b.state.generatedRoutine.exercises[0].restLocked, true);
+});
+
+test('코치 apply 블록 — 잘리거나 뒤에 글자가 붙어도 본문에 원문이 남지 않는다', () => {
+  const p = app.parseCoachApplyBlock;
+  const cut = p('네.\n```apply\n[{"action":"rest","value":90}');
+  assert.equal(cut.clean, '네.', '잘린 블록도 본문에서 걷어낸다');
+  assert.deepEqual(plain(cut.actions), []);
+
+  const tail = p('네.\n```apply\n[{"action":"rest","value":90}]\n```\n더 궁금한 거 있으면 말해요.');
+  assert.equal(tail.clean, '네.\n더 궁금한 거 있으면 말해요.', '블록 뒤 문장은 살린다');
+  assert.equal(tail.actions.length, 1);
+
+  const broken = p('네.\n```apply\n망가짐\n```\n끝.');
+  assert.equal(broken.clean, '네.\n끝.');
+  assert.deepEqual(plain(broken.actions), []);
+
+  ['정상', '잘림', '꼬리'].forEach(() => {});
+  [cut, tail, broken].forEach((r) => assert.ok(!r.clean.includes('```apply'), '원문 블록이 채팅에 노출되면 안 된다'));
+});
+
+test('스와이프 가드 — 시트가 떠 있으면 뒤 종목이 넘어가지 않는다', () => {
+  const src = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
+  const handler = src.slice(src.indexOf("document.addEventListener('touchend'"));
+  const body = handler.slice(0, handler.indexOf('var touch = e.changedTouches[0]'));
+  // 시트를 새로 만들면 이 목록에도 넣어야 한다 — 안 넣으면 시트 위 스와이프가 뒤 종목을 넘긴다
+  ['state.exerciseEdit', 'state.lastRecordOpen', 'state.sessionChatOpen', 'state.editingSet',
+   'state.setSchemeOpen', 'state.topSetSheet', 'state.muscleMapZoom'].forEach((flag) => {
+    assert.ok(body.includes('if (' + flag + ') return;'), '스와이프 가드에 ' + flag + ' 가 없다');
+  });
 });
 
 // ── 코치 제안 적용 (#2) ──
@@ -2656,6 +2794,122 @@ test('디자인 규칙 — 화면 이름은 탭바에만 있고 한국어다', (
   const bar = fresh.renderTabbar();
   ['홈', '운동', '러닝', '기록', '더보기'].forEach((l) => assert.ok(bar.includes('>' + l + '<'), '탭바 라벨: ' + l));
   ['HOME', 'STATS', 'MORE'].forEach((l) => assert.ok(!bar.includes(l), '탭바에 영어 라벨이 남아 있다: ' + l));
+});
+
+// ── 문구 규칙 (CLAUDE.md "디자인 규칙 · 문구·크기") ──
+// 이모지·하드코딩 색은 위 검사들이 막아 줘서 0건을 유지하고 있다. 말투·길이 쪽은 검사가 없어
+// 계속 새고 있었다(해요체에 합니다체 혼입, 느낌표, 40자 초과). 같은 방식으로 고정한다.
+//
+// 대상은 **사용자가 읽는 화면 문자열**뿐이다.
+//  · js/ai.js 전체와 data.js 의 COACH_KNOWLEDGE 는 AI 에게 보내는 프롬프트라 규칙 예외다(CLAUDE.md).
+//  · data.js 의 화면용 표(MOBILITY_DRILLS·SET_SCHEMES)는 각자 전용 검사가 이미 있다
+//    (tests/mobility.test.mjs · tests/set-schemes.test.mjs) → 여기서 또 보지 않는다.
+//  · domain.js 안의 프롬프트 블록 빌더도 화면이 아니라 아래 목록으로 뺀다.
+//    새 프롬프트 빌더를 만들면 여기에 이름을 추가할 것.
+const COPY_FILES = ['screens.js', 'core.js', 'bodymap.js', 'domain.js'];
+const PROMPT_BUILDERS = ['buildSafetyPromptBlock', 'buildEquipmentPromptBlock', 'buildExerciseCatalogBlock',
+  'formatBalanceAnalysis', 'formatCoachMemoryForPrompt', 'getUnavailableExerciseNames'];
+const HANGUL_RE = /[가-힣]/;
+
+// 줄 끝 주석을 떼어낸 코드 부분. 문자열 안의 '//' 는 주석이 아니므로 따옴표 상태를 따라간다
+// (이게 없으면 `... // '딴!' 올림` 같은 설명 주석이 화면 문구로 잡힌다).
+function codeOf(line) {
+  let q = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (q) {
+      if (c === '\\') { i++; continue; }
+      if (c === q) q = null;
+    } else if (c === "'" || c === '"' || c === '`') {
+      q = c;
+    } else if (c === '/' && line[i + 1] === '/') {
+      return line.slice(0, i);
+    }
+  }
+  return line;
+}
+
+// 화면 파일에서 한글이 든 문자열 리터럴만 뽑는다 (주석·프롬프트 빌더 제외).
+function uiLiterals() {
+  const out = [];
+  for (const f of COPY_FILES) {
+    const lines = fs.readFileSync(path.join(DIR, '..', 'js', f), 'utf8').split('\n');
+    let inPrompt = false;
+    lines.forEach((line, i) => {
+      const t = line.trim();
+      if (PROMPT_BUILDERS.some((fn) => t.startsWith('function ' + fn))) inPrompt = true;
+      else if (inPrompt && t === '}') { inPrompt = false; return; }
+      if (inPrompt) return;
+      if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return;   // 주석은 사람이 읽는 메모
+      for (const raw of codeOf(line).match(/'(?:[^'\\]|\\.)*'/g) || []) {
+        const str = raw.slice(1, -1).replace(/\\'/g, "'");
+        if (HANGUL_RE.test(str)) out.push({ where: `js/${f}:${i + 1}`, str });
+      }
+    });
+  }
+  return out;
+}
+
+// 리터럴 → 사람이 한 번에 읽는 "문장" 조각들. 태그·개행에서 끊고 마크업/CSS 조각은 버린다.
+function uiSentences(str) {
+  return str
+    .replace(/\\n/g, '\n')
+    .split(/<br\s*\/?>|<\/?[a-zA-Z][^>]*>|\n/)
+    .flatMap((part) => part.split(/(?<=[.?!])\s+/))
+    .map((s) => s.trim())
+    .filter((s) => HANGUL_RE.test(s))
+    .filter((s) => !/[<>]|="|;\s*$|:\s*var\(|px;|\bfunction\b/.test(s));   // 마크업·CSS·코드 조각
+}
+
+test('디자인 규칙 — 화면 문구는 해요체로 통일한다 (합니다체 혼입 금지)', () => {
+  const bad = uiLiterals()
+    .filter(({ str }) => uiSentences(str).some((s) => /(합니다|됩니다|입니다|습니다|하십시오|주십시오)/.test(s)))
+    .map(({ where, str }) => `${where}  ${str.slice(0, 70)}`);
+  assert.deepEqual(bad, [], '해요체와 합니다체가 섞였다 — 한 앱에서 두 말투를 쓰지 않는다');
+});
+
+test('디자인 규칙 — 화면 문구에 느낌표를 쓰지 않는다 (칭찬은 사실로)', () => {
+  const bad = uiLiterals()
+    .filter(({ str }) => uiSentences(str).some((s) => /[가-힣][^A-Za-z<>]{0,4}!/.test(s)))
+    .map(({ where, str }) => `${where}  ${str.slice(0, 70)}`);
+  assert.deepEqual(bad, [], '느낌표는 쓰지 않는다 — "3세트 완료" 처럼 사실로 적는다');
+});
+
+test('디자인 규칙 — 화면 문구는 한 문장 40자 이내', () => {
+  const bad = [];
+  for (const { where, str } of uiLiterals()) {
+    for (const s of uiSentences(str)) {
+      if ([...s].length > 40) bad.push(`${where}  (${[...s].length}자) ${s.slice(0, 60)}`);
+    }
+  }
+  assert.deepEqual(bad, [], '한 문장이 40자를 넘는다 — 쪼개거나 덜어낸다(더 필요하면 noteBlock 으로 접는다)');
+});
+
+// EXERCISE_SAFETY[].mod 는 js/data.js 에 있지만 **화면 토스트로 뜬다**(js/screens.js 의
+// checkExerciseSafety → showToast). 위 문구 3종 검사는 data.js 를 안 보므로 여기가 사각지대다.
+// 111문장을 지금 다시 쓰는 건 부상 안내의 뜻을 건드릴 위험이 커서 미룬다. 대신 **숫자가 늘지 않게**
+// 못박아, 새 종목을 넣을 때 같은 문체가 더 불어나는 것만 막는다.
+// (이 수는 줄어들 수는 있다 — 줄었으면 아래 상수를 내려 적는 게 맞다.)
+const SAFETY_MOD_KNOWN_VIOLATIONS = 111;
+
+test('디자인 규칙 — 부상 안내(mod) 문구 위반이 더 늘지 않는다', () => {
+  const bad = [];
+  Object.keys(app.EXERCISE_SAFETY).forEach((name) => {
+    const mod = app.EXERCISE_SAFETY[name].mod;
+    if (!mod) return;
+    Object.keys(mod).forEach((area) => {
+      String(mod[area]).split(/(?<=[.?!])\s+/).forEach((raw) => {
+        const t = raw.trim().replace(/\.$/, '');
+        if (!t) return;
+        if (/(한다|된다|이다|가능하다|합니다|됩니다|입니다)$/.test(t) || [...t].length > 40) {
+          bad.push(`${name}.${area}: ${t.slice(0, 40)}`);
+        }
+      });
+    });
+  });
+  assert.ok(bad.length <= SAFETY_MOD_KNOWN_VIOLATIONS,
+    `부상 안내 문구 위반이 ${SAFETY_MOD_KNOWN_VIOLATIONS} → ${bad.length} 로 늘었다. 새로 넣은 것부터 해요체·40자로:\n  ` +
+    bad.slice(-5).join('\n  '));
 });
 
 test('디자인 규칙 — 접이식 안내 noteBlock 은 네이티브 details 라 재렌더가 없다', () => {
