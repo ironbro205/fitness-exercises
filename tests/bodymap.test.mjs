@@ -272,32 +272,31 @@ test('확대 오버레이 — state.muscleMapZoom 이 있을 때만 그려진다
   app.state.muscleMapZoom = null;
 });
 
-// 루틴이 새로 생성·수정되면 종목 순서가 바뀐다. index 만 기억하면 엉뚱한 줄이 저절로 펼쳐진다.
-test('루틴 미리보기 — 루틴이 바뀌면 펼쳐둔 인체도가 저절로 닫힌다', () => {
-  const routine = { exercises: [{ name: '바벨 스쿼트' }, { name: '랫 풀다운' }, { name: '덤벨 컬' }] };
-  app.state.generatedRoutine = routine;
+// 미리보기에서 종목 줄을 누르면 이제 인체도를 펼치는 대신 **종목 편집 시트**가 열린다(#1).
+// 인체도는 그 시트 안에 들어 있다 — 정보를 잃지 않으면서 한 줄이 한 가지 일만 하게 된다.
+test('루틴 미리보기 — 종목 줄을 누르면 편집 시트가 열리고 그 안에 인체도가 있다', () => {
+  app.state.generatedRoutine = { bodyPart: 'pull', exercises: [
+    { name: '바벨 스쿼트', sets: 3, reps: '5-8' },
+    { name: '랫 풀 다운', sets: 3, reps: '8-12' }
+  ] };
+  app.state.routinePreviewExpanded = true;
+  app.state.workoutWizardStep = 3;
 
-  app.toggleRoutineExerciseMap(1);                       // '랫 풀다운' 펼침
-  assert.equal(app.state.routineExMapIdx, 1);
-  assert.equal(app.state.routineExMapKey, '랫 풀다운');
-  assert.equal(app.isRoutineExerciseMapOpen(1, '랫 풀다운'), true);
+  const preview = app.renderWorkoutStep3();
+  assert.ok(preview.includes("openExerciseEdit('preview', 1)"), '종목 줄이 편집 시트를 열지 않는다');
+  assert.ok(!preview.includes('mm-views'), '인체도가 미리보기에 그대로 펼쳐져 있다');
 
-  // 루틴이 바뀌어 index 1 에 다른 종목이 오면 → 닫힌 상태로 읽힌다
-  assert.equal(app.isRoutineExerciseMapOpen(1, '케이블 로우'), false);
-  // 같은 종목이 다른 자리로 옮겨가도 → 닫힌 상태
-  assert.equal(app.isRoutineExerciseMapOpen(0, '랫 풀다운'), false);
+  app.openExerciseEdit('preview', 1);
+  assert.equal(app.state.exerciseEdit.name, '랫 풀 다운');
+  const sheet = app.buildExerciseEditSheetHtml();
+  assert.ok(sheet.includes('mm-views'), '편집 시트 안에 인체도가 없다');
+  assert.ok(sheet.includes('종목 바꾸기') && sheet.includes('종목 빼기'));
 
-  app.toggleRoutineExerciseMap(1);                       // 같은 줄 다시 누르면 접힘
-  assert.equal(app.state.routineExMapIdx, null);
-  assert.equal(app.state.routineExMapKey, null);
-
-  // 없는 index 는 아무 일도 없어야 한다
-  app.toggleRoutineExerciseMap(99);
-  assert.equal(app.state.routineExMapIdx, null);
-
+  // 시트가 떠 있는 동안 루틴이 바뀌어 그 자리에 다른 종목이 오면 조용히 닫힌 것처럼 읽힌다
+  app.state.generatedRoutine.exercises[1] = { name: '케이블 로우', sets: 3, reps: '8-12' };
+  assert.equal(app.buildExerciseEditSheetHtml(), '', '엉뚱한 종목을 고치지 않도록 대상이 안 잡혀야 한다');
+  app.state.exerciseEdit = null;
   app.state.generatedRoutine = null;
-  app.toggleRoutineExerciseMap(0);                       // 루틴 자체가 없을 때도 안 터진다
-  assert.equal(app.state.routineExMapIdx, null);
 });
 
 test('뒤로가기 — 확대 오버레이가 가장 위 레이어로 잡힌다', () => {

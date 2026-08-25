@@ -1260,7 +1260,18 @@ function buildSchemeSets(exerciseName, weight, reps, range, scheme, opts) {
 // 워밍업만 뺀다 — 미리보기는 워킹세트 구성만 말하고, 워킹세트는 워밍업 유무와 무관하다.
 function getRoutinePreviewPlan(ex) {
   if (!ex || !ex.name) return null;
-  return getSessionSetPlan(ex.name, ex.weight, ex.reps || '8-12', { sets: ex.sets || 3, warmup: false });
+  return getSessionSetPlan(ex.name, ex.weight, ex.reps || '8-12', routinePlanOpts(ex, { warmup: false }));
+}
+
+// 미리보기·세션 시작이 공유하는 계획 옵션.
+// weightLocked: 사용자가 종목 편집 시트에서 직접 정한 무게다. 그냥 fallbackWeight 로 넘기면
+// 수행 기록이 있는 종목에서 추천 엔진(+2.5kg 등)이 이겨, 화면에 20kg 라 적어 놓고 세션은
+// 22.5kg 로 시작한다. baseWeight 는 "호출부가 못박은 무게가 이긴다"는 계약이라 이쪽을 쓴다.
+function routinePlanOpts(ex, extra) {
+  var opts = { sets: (ex && ex.sets) || 3 };
+  if (extra) { for (var k in extra) { if (Object.prototype.hasOwnProperty.call(extra, k)) opts[k] = extra[k]; } }
+  if (ex && ex.weightLocked && ex.weight !== undefined && ex.weight !== null) opts.baseWeight = ex.weight;
+  return opts;
 }
 
 // 미리보기 처방 표 한 줄의 값 — 무게·반복·세트·RIR·휴식.
@@ -1848,6 +1859,74 @@ function parseCoachMemoryBlock(responseText) {
     }
   } catch (e) { /* 망가진 블록 → 본문에서만 제거, 항목 없음 */ }
   return { clean: clean, items: items };
+}
+
+// 코치 응답 끝의 숨김 블록 → 앱이 실제로 적용할 수 있는 변경 제안 (#2).
+//
+// 코치 채팅은 글자만 돌려줄 뿐 앱을 전혀 못 건드렸다. 그래서 "쉬는시간 줄여줘" 에
+// "줄였어요" 라고 답해 놓고 실제 운동은 그대로였다. 이제 코치가 응답 끝에 이 블록을 붙이면
+// 화면에 [적용] 버튼이 뜨고, 누를 때만 반영된다 (루틴 수정 화면이 쓰던 승인 흐름과 같다).
+//
+// ```apply
+// [{"action":"rest","exercise":"인클라인 덤벨 프레스","value":90}]
+// ```
+//
+// 받는 값은 전부 여기서 좁힌다 — 화면·타이머에 닿기 전에 걸러야 이상한 값이 세션에 박히지 않는다.
+var COACH_APPLY_FIELDS = { rest: true, weight: true, reps: true, sets: true };
+
+// 스트리밍 중 화면에 흘려보낼 텍스트. 아직 닫히지 않은 ```apply 블록을 여는 표시부터 잘라낸다.
+function stripCoachApplyBlock(text) {
+  var t = String(text == null ? '' : text);
+  var i = t.indexOf('```apply');
+  return (i === -1 ? t : t.slice(0, i)).trim();
+}
+
+function parseCoachApplyBlock(responseText) {
+  var text = String(responseText == null ? '' : responseText);
+  var m = text.match(/```apply\s*([\s\S]*?)```\s*$/);
+  if (!m) return { clean: text.trim(), actions: [] };
+  var clean = text.slice(0, m.index).trim();
+  var actions = [];
+  try {
+    var parsed = JSON.parse(m[1].trim());
+    if (!Array.isArray(parsed)) parsed = [parsed];
+    parsed.forEach(function(it) {
+      if (!it || !COACH_APPLY_FIELDS[it.action]) return;
+      var value = it.value;
+      if (it.action === 'reps') {
+        value = String(value == null ? '' : value).trim();
+        if (!/^\d+(\s*-\s*\d+)?$/.test(value)) return;
+      } else {
+        value = Number(value);
+        if (!isFinite(value)) return;
+        if (it.action === 'rest') { if (value < 30 || value > REST_MAX_SEC) return; }
+        else if (it.action === 'weight') { if (value < 0 || value > 1000) return; }
+        else if (it.action === 'sets') { if (value < 1 || value > 10) return; }
+      }
+      actions.push({
+        action: it.action,
+        exercise: it.exercise ? String(it.exercise).trim() : '',
+        value: value
+      });
+    });
+  } catch (e) { /* 망가진 블록 → 본문에서만 제거, 제안 없음 */ }
+  return { clean: clean, actions: actions.slice(0, 4) };   // 한 번에 네 가지까지
+}
+
+// 제안 한 줄을 사람이 읽는 문장으로. 카드에 그대로 적힌다.
+var COACH_APPLY_KR = { rest: '쉬는시간', weight: '무게', reps: '목표 반복', sets: '세트' };
+var COACH_APPLY_UNIT = { rest: '초', weight: 'kg', reps: '회', sets: '개' };
+
+function describeCoachAction(act, currentValue) {
+  if (!act) return '';
+  var label = COACH_APPLY_KR[act.action] || act.action;
+  var unit = COACH_APPLY_UNIT[act.action] || '';
+  var to = act.value + unit;
+  var head = act.exercise ? (act.exercise + ' · ') : '';
+  if (currentValue !== undefined && currentValue !== null && String(currentValue) !== String(act.value)) {
+    return head + label + ' ' + currentValue + unit + ' → ' + to;
+  }
+  return head + label + ' ' + to;
 }
 
 function normalizeMemoryKey(category, text) {

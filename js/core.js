@@ -619,6 +619,9 @@ var state = {
   exercisePickerMode: 'swap',   // 그 시트가 지금 무슨 일을 하는지 — 'swap'=교체 / 'add'=다음에 추가
   setSchemeOpen: false,
   lastRecordOpen: false,  // 지난 기록 시트 (운동 중 종목 카드의 [지난 기록] 버튼)
+  exerciseEdit: null,     // 종목 편집 시트 { scope:'preview'|'session', idx, name } — 두 화면이 같은 시트를 쓴다
+  exercisePickerScope: 'session',  // 종목 고르기 시트가 지금 어느 화면의 종목을 가리키는가
+  exercisePickerIdx: null,         // 미리보기일 때 그 index (세션은 currentExerciseIdx 를 본다)
   topSetSheet: null,      // 탑세트 무게 입력 시트 { weight, source } — 확인 전에는 세트를 안 바꾼다
   restTimer: null,
   completedSession: null,
@@ -675,8 +678,6 @@ var state = {
   routineChatInput: '',
   routineChatThinking: false,
   routinePreviewExpanded: false,
-  routineExMapIdx: null,      // 루틴 미리보기에서 자극 근육 인체도를 펼친 종목 index (null=없음)
-  routineExMapKey: null,      // 그 index 에 있던 종목명 — 루틴이 바뀌면 안 맞아서 저절로 닫힌다
   // 자극 근육 인체도 (js/bodymap.js)
   muscleMapZoom: null,        // 확대해서 보는 중인 종목명 (null=닫힘)
   // 기록 항목 상세 시트 (삭제용)

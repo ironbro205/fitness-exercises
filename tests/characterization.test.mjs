@@ -2039,6 +2039,140 @@ test('종목 교체 검색 — 옛 별칭 이름으로 검색해도 표준명이
   assert.deepEqual(pressHits.filter((n) => a.isAliasExerciseName(n)), [], '별칭 표기가 그대로 노출되면 안 된다');
 });
 
+// ── 종목 편집 시트 (#1) ──
+// 미리보기에서는 AI 와 대화하는 수밖에 없었고, 쉬는시간은 앱 어디에서도 못 바꿨다.
+test('종목 편집 — 미리보기에서 무게·반복·세트·쉬는시간을 직접 바꾼다', () => {
+  const a = loadApp();
+  a.state.generatedRoutine = { bodyPart: 'push', exercises: [
+    { name: '머신 체스트 프레스', type: '복합', sets: 3, reps: '8-10', weight: 60 }
+  ] };
+  a.openExerciseEdit('preview', 0);
+  const ex = a.state.generatedRoutine.exercises[0];
+  const inc = a.getWeightIncrement('머신 체스트 프레스');
+
+  a.adjustExerciseEdit('weight', inc);
+  assert.equal(ex.weight, 60 + inc);
+  assert.equal(ex.weightLocked, true, '사용자가 정한 무게는 추천 엔진이 덮지 못하게 못박는다');
+
+  a.adjustExerciseEdit('reps', 1);
+  assert.equal(ex.reps, '9-11', '범위는 폭을 지킨 채 통째로 밀린다');
+
+  a.adjustExerciseEdit('sets', 1);
+  assert.equal(ex.sets, 4);
+
+  const before = a.exerciseEditValues(ex).rest;
+  a.adjustExerciseEdit('rest', -15);
+  assert.equal(ex.rest, before - 15, '쉬는시간을 바꿀 수 있어야 한다');
+
+  // 못박은 무게가 미리보기 계획에도, 세션 시작에도 그대로 간다
+  assert.equal(a.getRoutinePreviewPlan(ex).weight, 60 + inc,
+    '미리보기가 사용자가 정한 무게와 다른 숫자를 말하면 안 된다');
+  a.state.exerciseEdit = null;
+});
+
+test('종목 편집 — 운동 중에는 아직 안 한 세트만 다시 짜고, 쉬는시간이 화면과 타이머에 닿는다', () => {
+  const a = loadApp();
+  a.state.data.workoutLog = []; a.storage.set(a.KEYS.WORKOUT_LOG, []);
+  a.startSession('push');
+  const ex = a.state.activeSession.exercises[0];
+  ex.sets.filter((st) => !st.isWarmup)[0].completed = true;   // 한 세트는 이미 끝냈다
+  const doneWeight = ex.sets.filter((st) => !st.isWarmup)[0].weight;
+
+  a.openExerciseEdit('session', 0);
+  a.adjustExerciseEdit('rest', -30);
+  const rest = a.exerciseEditValues(ex).rest;
+  assert.ok(a.renderWorkoutSession().includes('휴식 ' + rest + '초'), '바꾼 쉬는시간이 화면에 안 뜬다');
+  const nextPending = ex.sets.filter((st) => !st.completed && !st.isWarmup)[0];
+  assert.equal(a.resolveRestSec(ex, nextPending), rest, '화면과 타이머가 다른 값을 본다');
+
+  assert.equal(ex.sets.filter((st) => !st.isWarmup)[0].weight, doneWeight, '끝낸 세트의 기록을 건드리면 안 된다');
+  a.state.exerciseEdit = null;
+});
+
+test('종목 편집 — 미리보기에서 정한 쉬는시간이 세션까지 살아서 간다', () => {
+  const a = loadApp();
+  a.state.data.workoutLog = []; a.storage.set(a.KEYS.WORKOUT_LOG, []);
+  a.state.generatedRoutine = { bodyPart: 'push', exercises: [
+    { name: '머신 체스트 프레스', type: '복합', isMain: true, sets: 3, reps: '8-10', weight: 60 }
+  ] };
+  a.openExerciseEdit('preview', 0);
+  a.adjustExerciseEdit('rest', -30);
+  const want = a.state.generatedRoutine.exercises[0].rest;
+  a.state.exerciseEdit = null;
+
+  a.startGeneratedRoutine();
+  const ex = a.state.activeSession.exercises[0];
+  // 세트법이 세트마다 rest 를 찍어 두는데 그게 종목 rest 보다 우선이라(resolveRestSec),
+  // 걷어내지 않으면 사용자가 정한 값이 조용히 무시된다.
+  assert.equal(a.exerciseEditValues(ex).rest, want, '미리보기에서 정한 쉬는시간이 세션에서 사라졌다');
+  if (a.state.activeSession.warmup) a.state.activeSession.warmup.done = true;
+  assert.ok(a.renderWorkoutSession().includes('휴식 ' + want + '초'), '화면 표기가 따라오지 않는다');
+
+  // 워밍업·드롭의 짧은 휴식은 그 세트법의 정의라 그대로 둔다
+  const warm = (ex.sets || []).filter((st) => st.isWarmup)[0];
+  if (warm) assert.equal(a.resolveRestSec(ex, warm), a.REST_WARMUP_SEC, '워밍업 휴식까지 덮으면 안 된다');
+});
+
+// ── 코치 제안 적용 (#2) ──
+// 코치 채팅은 글자만 돌려줄 뿐 앱을 전혀 못 건드렸다. "쉬는시간 줄여줘" 에 "줄였어요" 라고
+// 답해 놓고 실제 운동은 그대로였다.
+test('parseCoachApplyBlock — 응답 끝 숨김 블록만 떼어내고 이상한 값은 버린다', () => {
+  const p = app.parseCoachApplyBlock;
+  const ok = p('세트 사이가 길어 보여요. 90초로 줄여볼까요?\n```apply\n[{"action":"rest","exercise":"벤치","value":90}]\n```');
+  assert.equal(ok.clean, '세트 사이가 길어 보여요. 90초로 줄여볼까요?', '블록은 본문에서 사라져야 한다');
+  assert.equal(ok.actions.length, 1);
+  assert.deepEqual(plain(ok.actions[0]), { action: 'rest', exercise: '벤치', value: 90 });
+
+  assert.deepEqual(plain(p('블록 없는 답변').actions), [], '블록이 없으면 제안도 없다');
+  assert.deepEqual(plain(p('x\n```apply\n[{"action":"rest","value":5}]\n```').actions), [], '30초 미만은 버린다');
+  assert.deepEqual(plain(p('x\n```apply\n[{"action":"rest","value":9999}]\n```').actions), [], '상한을 넘으면 버린다');
+  assert.deepEqual(plain(p('x\n```apply\n[{"action":"종목삭제","value":1}]\n```').actions), [], '모르는 action 은 버린다');
+  assert.deepEqual(plain(p('x\n```apply\n[{"action":"reps","value":"많이"}]\n```').actions), [], '반복은 숫자·범위만');
+  assert.deepEqual(plain(p('x\n```apply\n망가진 json\n```').actions), [], '깨진 블록은 본문에서만 지운다');
+  assert.equal(p('x\n```apply\n망가진 json\n```').clean, 'x');
+
+  // 스트리밍 중에는 아직 안 닫힌 블록이 화면에 흘러나오면 안 된다
+  assert.equal(app.stripCoachApplyBlock('답변입니다\n```apply\n[{"acti'), '답변입니다');
+});
+
+test('코치 제안 — [적용] 을 눌러야 반영된다 (자동 적용 안 함)', () => {
+  const a = loadApp();
+  a.state.data.workoutLog = []; a.storage.set(a.KEYS.WORKOUT_LOG, []);
+  a.startSession('push');
+  const ex = a.state.activeSession.exercises[0];
+  const restBefore = a.exerciseEditValues(ex).rest;
+
+  a.state.coachMessages = [
+    { role: 'user', content: '쉬는시간 줄여줘' },
+    { role: 'assistant', content: '90초로 줄여볼까요?', apply: [{ action: 'rest', exercise: '', value: 90 }], applyStatus: 'pending' }
+  ];
+  const card = a.buildCoachApplyCardHtml(a.state.coachMessages[1], 1);
+  assert.ok(card.includes('approveCoachApply(1)'), '[적용] 버튼이 없다');
+  assert.ok(card.includes('쉬는시간 ' + restBefore + '초 → 90초'), '무엇이 어떻게 바뀌는지 안 적혀 있다: ' + card);
+  assert.equal(a.exerciseEditValues(ex).rest, restBefore, '누르기 전에 이미 바뀌면 안 된다');
+
+  a.approveCoachApply(1);
+  assert.equal(a.exerciseEditValues(ex).rest, 90, '눌렀는데도 안 바뀐다 — 이 PR 이 고치려던 바로 그 문제');
+  assert.equal(a.state.coachMessages[1].applyStatus, 'applied');
+  assert.ok(a.buildCoachApplyCardHtml(a.state.coachMessages[1], 1).includes('적용 완료'));
+
+  // 취소하면 아무것도 안 바뀐다
+  a.state.coachMessages.push({ role: 'assistant', content: 'x', apply: [{ action: 'rest', exercise: '', value: 200 }], applyStatus: 'pending' });
+  a.cancelCoachApply(2);
+  assert.equal(a.exerciseEditValues(ex).rest, 90);
+  assert.equal(a.state.coachMessages[2].applyStatus, 'cancelled');
+});
+
+test('코치 제안 — 적용할 곳이 없으면 버튼을 살려 두지 않는다', () => {
+  const a = loadApp();
+  a.state.activeSession = null;
+  a.state.generatedRoutine = null;
+  const msg = { role: 'assistant', content: 'x', apply: [{ action: 'rest', exercise: '', value: 90 }], applyStatus: 'pending' };
+  const card = a.buildCoachApplyCardHtml(msg, 0);
+  assert.ok(!card.includes('approveCoachApply'), '누를 수 없는 버튼을 남기지 않는다');
+  assert.ok(card.includes('진행 중인 운동이 없어요'));
+});
+
 // ── 자극 부위·지난 기록을 버튼+팝업으로 (#3) ──
 // 예전엔 자극 근육을 접이식으로, 지난 기록을 카드 안 한 줄로 화면에 늘 깔아 뒀다.
 // 둘 다 세트를 하는 동안 계속 보고 있을 정보가 아니라 궁금할 때 여는 정보다.
