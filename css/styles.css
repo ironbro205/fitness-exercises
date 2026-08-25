@@ -2306,6 +2306,20 @@ button {
 .step-line.active { background: rgba(var(--accent-rgb), 0.4); }
 
 /* 주간 기록 - 7일 막대그래프 */
+/* 운동 중 종목명 옆 상태 꼬리표 (건너뜀 · 운동 중 추가) — 이름과 같은 줄에 작게 */
+.ex-name-flag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--bg-3);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  vertical-align: middle;
+}
+
 /* 부위 선택 — 2열 그리드 + FREE 한 칸. 다섯 장이 스크롤 없이 한 화면에 들어와야
    "고르기"가 한 번에 끝난다. '추천'/'이번 주 N' 배지 계열은 화면에서 뺐다. */
 .body-part-grid {

@@ -844,9 +844,12 @@ function renderWorkoutStep2() {
   
   // 헤더 — '뒤로' 와 요약 한 줄만. 단계 표시(2단계 · 루틴 분석)와 진행 점은 걷었다:
   // 마법사가 3단계인 걸 화면이 설명할 이유가 없고, 그 자리만큼 종목 목록이 위로 올라온다.
+  // 종목을 편집 시트에서 다 빼면 exercises 가 빌 수 있다 — 그때 저장된 totalSets·duration 을
+  // 그대로 적으면 '0종목 · 18세트 · 55분' 처럼 화면이 거짓말을 한다.
+  var exCount = (routine && routine.exercises) ? routine.exercises.length : 0;
   var summaryLine = (state.routineLoading || !routine || routine.error) ? ''
-    : escapeHtml((routine.exercises || []).length) + '종목 · ' +
-      escapeHtml(routine.totalSets) + '세트 · ' + escapeHtml(routine.duration) + '분';
+    : (exCount === 0 ? '종목이 없어요'
+       : exCount + '종목 · ' + escapeHtml(routine.totalSets) + '세트 · ' + escapeHtml(routine.duration) + '분');
 
   var headerHtml =
     '<div class="px-5 pt-12 pb-2">' +
@@ -931,6 +934,16 @@ function renderWorkoutStep2() {
       '</div>';
   });
   
+  // 종목이 하나도 없으면 시작할 게 없다 — 3단계와 같은 규칙으로 [시작] 을 잠근다.
+  var isEmpty = exList.length === 0;
+  var startBtn = isEmpty
+    ? '<button class="routine-btn-start" disabled style="opacity: 0.4; cursor: not-allowed; box-shadow: none;">' +
+        icon('play', 16) + ' 종목을 먼저 추가하세요' +
+      '</button>'
+    : '<button class="routine-btn-start" onclick="startGeneratedRoutine()">' +
+        icon('play', 16) + ' 시작' +
+      '</button>';
+
   // 분석 헤더 카드(AI 분석 완료 배지 · 다시 분석 아이콘 · 큰 부위명 · 헤드라인)와 주의사항 박스는
   // 걷었다. 화면이 시작되자마자 **오늘 뭘 할지**가 보여야 하는데, 그 위를 설명이 덮고 있었다.
   // 종목 수·세트·시간은 헤더 오른쪽 한 줄로 옮겼다.
@@ -942,12 +955,15 @@ function renderWorkoutStep2() {
       '<button class="routine-btn-modify" onclick="goToStep3()">' +
         icon('msg', 16) + ' 수정하기' +
       '</button>' +
-      '<button class="routine-btn-start" onclick="startGeneratedRoutine()">' +
-        icon('play', 16) + ' 시작' +
-      '</button>' +
+      startBtn +
     '</div>' +
-    
-    '</div>';
+
+    '</div>' +
+    // 2단계 위에 뜨는 시트들 — 종목 줄을 누르면 여는 편집 시트와 그 안에서 이어지는 종목 고르기.
+    // **반환값에 안 붙이면 state 만 바뀌고 화면엔 아무것도 안 뜬다**(3단계에만 붙였다가 놓쳤다).
+    buildExerciseEditSheetHtml() +
+    buildPreviewSwapSheetHtml() +
+    buildMuscleMapZoomHtml();
 }
 
 // ═══════════════════════════════════════════════

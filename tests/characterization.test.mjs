@@ -1881,6 +1881,43 @@ test('volumeByPartCardHtml — 2주 미만은 판정 보류, 이후는 프롬프
 // ═══════════════════════════════════════════════
 // 오늘의 추천 (죽어 있던 일일 AI 추천 되살리기)
 // ═══════════════════════════════════════════════
+// 시트를 새로 만들 때마다 반복되는 사고: state 플래그만 켜고 **화면 반환값에 안 붙여서**
+// 눌러도 아무 일이 안 일어난다. 2단계에서 실제로 두 번 났다 — 그래서 화면별로 못박는다.
+test('2단계 — 종목 줄을 누르면 편집 시트가 화면에 실제로 뜬다', () => {
+  const a = loadApp();
+  a.state.currentTab = 'workout';
+  a.state.workoutWizardStep = 2;
+  a.state.selectedBodyPart = 'push';
+  a.state.routineLoading = false;
+  a.state.generatedRoutine = { bodyPart: 'push', headline: 'x', duration: 55, totalSets: 9,
+    exercises: [{ name: '머신 체스트 프레스', type: '복합', isMain: true, sets: 3, reps: '8-10', weight: 60 }] };
+
+  assert.ok(!a.renderWorkoutStep2().includes('sheet-overlay'), '닫혀 있을 땐 시트가 없다');
+  a.openExerciseEdit('preview', 0);
+  const html = a.renderWorkoutStep2();
+  assert.ok(html.includes('sheet-overlay'), '시트가 2단계 화면에 안 붙었다 — state 만 바뀌고 화면은 그대로다');
+  assert.ok(html.includes('쉬는시간'), '편집 시트 내용이 없다');
+  assert.equal(a.getTopLayer(), 'exerciseEdit', '뒤로가기가 시트를 먼저 닫아야 한다');
+
+  // 종목 고르기도 같은 화면에 붙어야 한다
+  a.exerciseEditSwap();
+  assert.ok(a.renderWorkoutStep2().includes('종목 바꾸기'), '종목 고르기 시트가 2단계에 안 붙었다');
+  a.closeExerciseSwap();
+});
+
+test('2단계 — 종목을 다 빼면 시작을 막고 요약이 거짓말하지 않는다', () => {
+  const a = loadApp();
+  a.state.workoutWizardStep = 2;
+  a.state.selectedBodyPart = 'push';
+  a.state.routineLoading = false;
+  a.state.generatedRoutine = { bodyPart: 'push', headline: 'x', duration: 55, totalSets: 18, exercises: [] };
+  const html = a.renderWorkoutStep2();
+  assert.ok(!html.includes('startGeneratedRoutine'), '종목이 없는데 시작할 수 있다');
+  assert.ok(html.includes('종목을 먼저 추가하세요'));
+  assert.ok(!html.includes('0종목 · 18세트'), '저장된 옛 숫자를 그대로 적으면 화면이 거짓말을 한다');
+  assert.ok(html.includes('종목이 없어요'));
+});
+
 // 오늘의 추천은 홈 카드와 운동 탭 '추천' 배지 양쪽에서 뺐다(사용자 결정).
 // 화면에 안 쓰는 값을 하루 한 번 API 로 받아 오면 요금만 나가므로 배경 로드도 멈췄다.
 test('오늘의 추천 — 홈·운동 탭 어디에도 남아 있지 않다', () => {
