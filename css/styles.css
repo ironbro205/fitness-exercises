@@ -85,6 +85,7 @@ button {
 .justify-center { justify-content: center; }
 .justify-between { justify-content: space-between; }
 .justify-end { justify-content: flex-end; }
+.text-left { text-align: left; }
 .text-center { text-align: center; }
 .text-right { text-align: right; }
 .relative { position: relative; }
@@ -97,6 +98,7 @@ button {
 .gap-3 { gap: 12px; }
 
 .grid { display: grid; }
+.grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
 .grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
 .grid-cols-7 { grid-template-columns: repeat(7, 1fr); }
@@ -104,7 +106,9 @@ button {
 /* ═══════════════════════════════════════════════
    SPACING
    ═══════════════════════════════════════════════ */
+.mb-0\.5 { margin-bottom: 2px; }
 .mb-1 { margin-bottom: 4px; }
+.mb-1\.5 { margin-bottom: 6px; }
 .mb-2 { margin-bottom: 8px; }
 .mb-3 { margin-bottom: 12px; }
 .mb-4 { margin-bottom: 16px; }
@@ -173,8 +177,10 @@ button {
 .text-xs { font-size: 11px; }
 .text-sm { font-size: 13px; }
 .text-base { font-size: 15px; }
+.text-lg { font-size: 16px; }
 .text-xl { font-size: 18px; }
 .text-2xl { font-size: 22px; }
+.text-3xl { font-size: 28px; }
 .text-4xl { font-size: 36px; }
 
 /* ═══════════════════════════════════════════════
@@ -191,8 +197,10 @@ button {
    STYLE HELPERS
    ═══════════════════════════════════════════════ */
 .uppercase { text-transform: uppercase; }
+.tracking-wider { letter-spacing: 0.05em; }
 .tracking-widest { letter-spacing: 0.1em; }
 .font-bold { font-weight: 700; }
+.leading-tight { line-height: 1.25; }
 .leading-relaxed { line-height: 1.625; }
 
 /* ═══════════════════════════════════════════════
@@ -201,6 +209,13 @@ button {
 .card {
   background: var(--bg-2);
   border: 1px solid var(--bg-3);
+  border-radius: 24px;
+  padding: 20px;
+}
+/* 경고 톤 카드 — 실패·주의 안내를 담는다. .card 와 같은 골격에 앰버 테두리만. */
+.card-warning {
+  background: rgba(var(--warn-rgb), 0.06);
+  border: 1px solid rgba(var(--warn-rgb), 0.25);
   border-radius: 24px;
   padding: 20px;
 }
@@ -367,10 +382,12 @@ button {
 }
 .screen-center-inner { width: 100%; margin-top: auto; margin-bottom: auto; }
 
-/* 헤더가 있는 화면에서 그 아래 남은 영역만 세로 가운데로. */
+/* 헤더가 있는 화면에서 그 아래 남은 영역만 세로 가운데로.
+   빼는 값 = 헤더(pt-12 48px + '뒤로' 44px + pb-3 12px = 104px) + 탭바(88px).
+   safe-area 는 .pt-12 가 헤더를 그만큼 밀어 내리므로 여기서도 같이 빼야 자리가 맞는다. */
 .screen-center-rest {
-  min-height: calc(100vh - 190px);
-  min-height: calc(100dvh - 190px);
+  min-height: calc(100vh - 192px);
+  min-height: calc(100dvh - 192px - env(safe-area-inset-top, 0px));
   display: flex;
   flex-direction: column;
 }
@@ -1515,14 +1532,6 @@ button {
   background: var(--bg-0);
 }
 
-.food-input-header {
-  padding: 48px 20px 16px;
-  border-bottom: 1px solid var(--bg-2);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
 .chat-area {
   flex: 1;
   padding: 20px;
@@ -2034,7 +2043,9 @@ button {
   background: var(--bg-0);
 }
 .coach-header {
-  padding: 48px 20px 16px;
+  /* .pt-12 와 같은 규칙 — 이 헤더도 화면 맨 위에서 시작하므로 상태바를 피해야 한다.
+     한쪽만 보정하면 탭 화면과 오버레이 화면 사이에서 상단이 튄다. */
+  padding: calc(48px + env(safe-area-inset-top, 0px)) 20px 16px;
   border-bottom: 1px solid var(--bg-2);
   display: flex;
   align-items: center;

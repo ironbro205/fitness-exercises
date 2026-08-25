@@ -89,7 +89,7 @@ function renderHome() {
     prCards += '<div class="pr-badge">' +
       '<div>' +
         '<p class="text-sm font-display font-bold">' + escapeHtml(pr.exerciseName) + '</p>' +
-        '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + daysAgo(pr.date) + (pr.weight ? ' · ' + pr.reps + '회' : '') + '</p>' +
+        '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + daysAgo(pr.date) + (pr.weight ? ' · ' + pr.reps + '회' : '') + '</p>' +
       '</div>' +
       '<div class="text-right">' +
         '<p class="font-bebas text-2xl accent">' +
@@ -116,7 +116,7 @@ function renderHome() {
             '<h2 class="font-bebas text-4xl">' + escapeHtml(profile.cyclePhase) + (isDeloadWeek ? '' : ' ' + escapeHtml(profile.currentWeek) + '주차') + '</h2>' +
             '<p class="text-xs text-stone-500 font-mono">' + phaseHint + '</p>' +
           '</div>' +
-          '<div class="flex items-center gap-1\\.5">' + weekDots + '</div>' +
+          '<div class="flex items-center gap-1.5">' + weekDots + '</div>' +
           '<div class="flex items-center justify-between mt-2">' +
             '<p class="text-[11px] text-stone-600 font-mono uppercase">빌드 1~4주</p>' +
             '<p class="text-[11px] text-stone-600 font-mono uppercase">디로드</p>' +
@@ -129,7 +129,7 @@ function renderHome() {
       //          여기는 "어느 요일에 했나"만 보여준다.
       '<div class="card mb-4">' +
         '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-3">이번 주</p>' +
-        '<div class="grid grid-cols-7 gap-1\\.5">' + weekBoxes + '</div>' +
+        '<div class="grid grid-cols-7 gap-1.5">' + weekBoxes + '</div>' +
 
         // 최근 운동 리스트 (있을 시) — 저장이 최신 먼저라 날짜 내림차순으로 다시 정렬해 자른다.
         (thisWeekWorkouts.length > 0 ?
@@ -143,7 +143,7 @@ function renderHome() {
                   '<div class="workout-history-dot"></div>' +
                   '<div>' +
                     '<p class="text-xs font-display font-bold">' + escapeHtml(w.sessionKr || w.sessionName) + '</p>' +
-                    '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + escapeHtml(String(w.date).substring(5)) + ' (' + dStr + ') · ' + escapeHtml(w.duration || 0) + '분 · ' + escapeHtml(w.sets || 0) + '세트</p>' +
+                    '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + escapeHtml(String(w.date).substring(5)) + ' (' + dStr + ') · ' + escapeHtml(w.duration || 0) + '분 · ' + escapeHtml(w.sets || 0) + '세트</p>' +
                   '</div>' +
                 '</div>' +
                 '<div style="color: var(--text-muted);">' + icon('chevron', 14) + '</div>' +
@@ -173,7 +173,7 @@ function renderHome() {
             '<div class="loading-spinner"></div>' +
             '<div>' +
               '<p class="text-sm font-display font-bold">주간 리뷰 분석 중</p>' +
-              '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">이번 주 데이터 종합 중...</p>' +
+              '<p class="text-[11px] font-mono text-stone-500 mt-0.5">이번 주 데이터 종합 중...</p>' +
             '</div>' +
           '</div>' +
         '</div>'
@@ -634,7 +634,7 @@ function renderWorkoutStep3() {
         
         var cardLabel = hasChanges ? '제안된 변경사항' : '새 루틴 준비됨';
         changesHtml = '<div class="routine-change-card">' +
-          '<p class="text-[11px] font-mono accent uppercase tracking-widest mb-1\\.5">' + cardLabel + '</p>' +
+          '<p class="text-[11px] font-mono accent uppercase tracking-widest mb-1.5">' + cardLabel + '</p>' +
           changeLines +
           actionHtml +
         '</div>';
@@ -682,7 +682,7 @@ function renderWorkoutStep3() {
           '<button onclick="backToStep2()" class="session-header-btn" title="뒤로">' + icon('arrowLeft', 18) + '</button>' +
           '<div class="text-center">' +
             '<p class="text-[11px] font-mono text-stone-500" style="letter-spacing: 0.2em;">' + (isFree ? '자유 구성' : '3단계 · 대화 수정') + '</p>' +
-            '<p class="text-[11px] font-mono text-stone-600 mt-0\\.5">' + escapeHtml(partName) + '</p>' +
+            '<p class="text-[11px] font-mono text-stone-600 mt-0.5">' + escapeHtml(partName) + '</p>' +
           '</div>' +
           '<div style="width: 36px;"></div>' +
         '</div>' +
@@ -879,9 +879,11 @@ function renderWorkoutStep2() {
     '<div class="px-5 pb-32">';
   
   // 로딩 화면 — 부위 선택 화면과 같은 기준으로, 헤더 아래 남은 영역의 세로 가운데에 둔다.
+  // 바깥 래퍼의 pb-32(128px)를 쓰면 화면 높이를 두 번 세게 되어(가운데 계산 + 아래 여백)
+  // 스크롤할 내용이 없는데도 42px 이 남는다 → 이 화면만 래퍼 없이 조립한다.
   if (state.routineLoading) {
-    return headerHtml +
-      '<div class="screen-center-rest">' +
+    return headerHtml.replace('<div class="px-5 pb-32">', '') +
+      '<div class="px-5 screen-center-rest">' +
       '<div class="routine-loading-card">' +
         '<div class="loading-spinner"></div>' +
         '<p class="font-bebas text-3xl mb-1" style="color: var(--accent);">' + partNames[part] + '</p>' +
@@ -2533,7 +2535,7 @@ function buildSwapListHtml(query) {
       '<div class="flex items-center justify-between gap-2">' +
         '<div>' +
           '<p class="font-display text-sm">' + name + '</p>' +
-          '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + (nq && part ? part + ' · ' : '') + tag + ' · ' + hint + '</p>' +
+          '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + (nq && part ? part + ' · ' : '') + tag + ' · ' + hint + '</p>' +
         '</div>' +
         actionMark +
       '</div>' +
@@ -2548,7 +2550,7 @@ function buildSwapListHtml(query) {
         '<div class="flex items-center justify-between gap-2">' +
           '<div>' +
             '<p class="font-display text-sm">“' + escapeHtml(q) + '”</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">목록에 없는 종목 — 이 이름 그대로 ' + (addMode ? '추가' : '교체') + '</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">목록에 없는 종목 — 이 이름 그대로 ' + (addMode ? '추가' : '교체') + '</p>' +
           '</div>' +
           actionMark +
         '</div>' +
@@ -3049,28 +3051,28 @@ function renderWorkoutSession() {
           // 순서는 운동 중 손이 가는 빈도순 — 위험한 건너뛰기는 맨 아래.
           '<button class="option-card" style="width:100%; margin-bottom:6px; text-align:left;" onclick="openSessionChatFromMenu()">' +
             '<p class="font-display text-sm">AI 코치 상담</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">세트 사이에 짧게 물어봐요</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">세트 사이에 짧게 물어봐요</p>' +
           '</button>' +
           '<button class="option-card" style="width:100%; margin-bottom:6px; text-align:left;" onclick="openSetSchemeFromMenu()">' +
             '<p class="font-display text-sm">세트법 바꾸기</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + escapeHtml((SET_SCHEMES[sessionSchemeOf(exercise)] || SET_SCHEMES.straight).kr) + '로 하는 중</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + escapeHtml((SET_SCHEMES[sessionSchemeOf(exercise)] || SET_SCHEMES.straight).kr) + '로 하는 중</p>' +
           '</button>' +
           '<button class="option-card" style="width:100%; margin-bottom:6px; text-align:left;" onclick="openExerciseSwap()">' +
             '<p class="font-display text-sm">종목 교체</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">지금 종목을 다른 종목으로 바꿔요</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">지금 종목을 다른 종목으로 바꿔요</p>' +
           '</button>' +
           '<button class="option-card" style="width:100%; margin-bottom:6px; text-align:left;" onclick="openExerciseAdd()">' +
             '<p class="font-display text-sm">종목 추가</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">새 종목을 지금 종목 <b>다음 차례</b>에 넣어요</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">새 종목을 지금 종목 <b>다음 차례</b>에 넣어요</p>' +
           '</button>' +
           (exercise.skipped
             ? '<button class="option-card" style="width:100%; text-align:left;" onclick="unskipExercise(' + session.currentExerciseIdx + ')">' +
                 '<p class="font-display text-sm">건너뛰기 되돌리기</p>' +
-                '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">건너뛴 세트를 다시 살려요</p>' +
+                '<p class="text-[11px] font-mono text-stone-500 mt-0.5">건너뛴 세트를 다시 살려요</p>' +
               '</button>'
             : '<button class="option-card" style="width:100%; text-align:left;" onclick="skipCurrentExercise()">' +
                 '<p class="font-display text-sm" style="color:var(--danger);">이 종목 건너뛰기</p>' +
-                '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">남은 ' + menuPending + '세트를 빼고 다음 종목으로 가요' +
+                '<p class="text-[11px] font-mono text-stone-500 mt-0.5">남은 ' + menuPending + '세트를 빼고 다음 종목으로 가요' +
                   (countWorkingSets(exercise.sets) > 0 ? ' (완료한 세트는 그대로 기록)' : '') + '</p>' +
               '</button>') +
         '</div>' +
@@ -3198,7 +3200,7 @@ function renderWorkoutSession() {
         '<button class="session-header-btn" onclick="endSession()">' + icon('close', 18) + '</button>' +
         '<div class="text-center">' +
           '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">' + escapeHtml(session.sessionName) + ' · 종목 ' + (session.currentExerciseIdx + 1) + '/' + totalExercises + '</p>' +
-          '<p class="text-xs font-mono accent mt-0\\.5" style="display:flex;align-items:center;justify-content:center;gap:4px;">' + icon('clock', 12) + elapsedStr + '</p>' +
+          '<p class="text-xs font-mono accent mt-0.5" style="display:flex;align-items:center;justify-content:center;gap:4px;">' + icon('clock', 12) + elapsedStr + '</p>' +
         '</div>' +
         // 버튼 하나로 모은다 — 코치·세트법도 이 안에 있다. 상단에 셋을 늘어놓으면
         // 정작 눌러야 할 세트 목록보다 위쪽이 시끄러워진다.
@@ -3665,8 +3667,8 @@ function buildSetSchemeSheetHtml(session, exercise) {
           '<div>' +
             '<p class="font-display text-sm">' + o.kr +
               (o.suggested ? ' <span class="text-[11px] accent">· 기본</span>' : '') + '</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + o.desc + '</p>' +
-            (o.warn ? '<p class="text-[11px] font-mono mt-0\\.5" style="color:var(--warn);">' + o.warn + '</p>' : '') +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + o.desc + '</p>' +
+            (o.warn ? '<p class="text-[11px] font-mono mt-0.5" style="color:var(--warn);">' + o.warn + '</p>' : '') +
           '</div>' +
           (o.current
             ? '<span class="text-xs accent" style="flex-shrink:0;">사용 중</span>'
@@ -3678,7 +3680,7 @@ function buildSetSchemeSheetHtml(session, exercise) {
   var supersetRow = (typeof exercise.supersetWith === 'number' && session.exercises[exercise.supersetWith])
     ? '<button class="option-card" style="width:100%; margin-top:8px; text-align:left;" onclick="releaseSuperset()">' +
         '<p class="font-display text-sm">슈퍼세트 풀기</p>' +
-        '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' +
+        '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' +
           escapeHtml(session.exercises[exercise.supersetWith].name) + '와 번갈아 하는 구성을 해제하고 따로 진행해요</p>' +
       '</button>'
     : '';
@@ -4004,9 +4006,9 @@ function renderWorkoutComplete() {
           '<div class="relative flex items-center gap-3">' +
             '<div class="pr-alert-icon">' + icon('trophy', 20) + '</div>' +
             '<div class="flex-1">' +
-              '<p class="text-[11px] font-mono accent uppercase tracking-widest mb-0\\.5">PR 갱신</p>' +
+              '<p class="text-[11px] font-mono accent uppercase tracking-widest mb-0.5">PR 갱신</p>' +
               '<p class="text-sm font-display font-bold">' + escapeHtml(pr.exerciseName) + '</p>' +
-              '<p class="text-[11px] font-mono text-stone-400 mt-0\\.5">' + prChange + '</p>' +
+              '<p class="text-[11px] font-mono text-stone-400 mt-0.5">' + prChange + '</p>' +
             '</div>' +
           '</div>' +
         '</div>';
@@ -4032,7 +4034,7 @@ function renderWorkoutComplete() {
           '<div class="ex-num" style="width: 30px; height: 30px; font-size: 10px;">' + String(i+1).padStart(2,'0') + '</div>' +
           '<div>' +
             '<p class="text-sm font-display font-bold">' + escapeHtml(ex.name) + '</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + detail + '</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + detail + '</p>' +
           '</div>' +
         '</div>' +
         (hasPR ? '<span class="pr-tag">PR</span>' : '') +
@@ -4127,7 +4129,7 @@ function renderWorkoutComplete() {
         '<div class="flex items-center justify-between">' +
           '<div style="text-align:left;">' +
             '<p class="text-sm font-display font-bold">정리 스트레칭 · 약 4분</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">오늘 쓴 부위 3~4동작 · 유연성 유지용 (선택)</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">오늘 쓴 부위 3~4동작 · 유연성 유지용 (선택)</p>' +
           '</div>' +
           '<p class="text-sm font-mono accent">시작</p>' +
         '</div>' +
@@ -4494,7 +4496,7 @@ function buildMobilityGuideHtml(kind) {
         '<button class="session-header-btn" onclick="' + (isWarmup ? 'endSession(false)' : 'closeStretchGuide()') + '">' + icon('close', 18) + '</button>' +
         '<div class="text-center">' +
           '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">' + (isWarmup ? '오늘의 웜업' : '정리 스트레칭') + '</p>' +
-          '<p class="text-xs font-mono accent mt-0\\.5">약 ' + totalMin + '분 · ' + (g.idx + 1) + ' / ' + segs.length + '</p>' +
+          '<p class="text-xs font-mono accent mt-0.5">약 ' + totalMin + '분 · ' + (g.idx + 1) + ' / ' + segs.length + '</p>' +
         '</div>' +
         '<button class="session-header-btn" onclick="toggleMobilitySound()" title="' + (g.soundOn === false ? '소리 켜기' : '소리 끄기') + '" style="' + (g.soundOn === false ? 'opacity:0.45;' : '') + '">' + icon('bell', 18) + '</button>' +
       '</div>' +
@@ -4754,7 +4756,7 @@ function renderOneRMList() {
       return '<div class="menu-row" style="cursor: default;">' +
         '<div class="flex-1">' +
           '<p class="text-sm font-display font-bold">' + escapeHtml(name) + '</p>' +
-          '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">작업 ' + escapeHtml(w75) + 'kg</p>' +
+          '<p class="text-[11px] font-mono text-stone-500 mt-0.5">작업 ' + escapeHtml(w75) + 'kg</p>' +
         '</div>' +
         '<p class="font-bebas text-xl' + (isTop ? ' accent' : '') + '">' + escapeHtml(rm) + '<span class="text-xs text-stone-400">kg</span></p>' +
       '</div>';
@@ -4960,7 +4962,7 @@ function renderMore() {
           '<div class="menu-icon-sm">' + icon('download', 18) + '</div>' +
           '<div class="menu-row-content">' +
             '<p class="text-sm font-display font-bold">백업 파일 저장 (내보내기)' + (backupStatus.stale ? ' <span class="backup-dot"></span>' : '') + '</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">기록 전체를 파일 하나(.json)로 내려받기</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">기록 전체를 파일 하나(.json)로 내려받기</p>' +
           '</div>' +
           '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
         '</div>' +
@@ -4968,7 +4970,7 @@ function renderMore() {
           '<div class="menu-icon-sm">' + icon('upload', 18) + '</div>' +
           '<div class="menu-row-content">' +
             '<p class="text-sm font-display font-bold">백업 파일 불러오기 (가져오기)</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">저장해 둔 파일로 되돌리기 · 지금 기록은 덮어써져요</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">저장해 둔 파일로 되돌리기 · 지금 기록은 덮어써져요</p>' +
           '</div>' +
           '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
         '</div>' +
@@ -4976,7 +4978,7 @@ function renderMore() {
           '<div class="menu-icon-sm">' + icon('calendar', 18) + '</div>' +
           '<div class="menu-row-content">' +
             '<p class="text-sm font-display font-bold">마지막 백업</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + escapeHtml(backupWhenText) + '</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + escapeHtml(backupWhenText) + '</p>' +
           '</div>' +
         '</div>';
   // 위 리마인더 카드가 이미 같은 말을 할 때는 문단을 두지 않는다(같은 설명 두 번 금지).
@@ -5054,7 +5056,7 @@ function renderMore() {
           '<div class="coach-chat-icon">' + icon('msg', 22) + '</div>' +
           '<div class="flex-1 text-left">' +
             '<p class="font-display font-bold text-base">코치와 대화</p>' +
-            '<p class="text-[11px] font-mono text-stone-400 mt-0\\.5">' + 
+            '<p class="text-[11px] font-mono text-stone-400 mt-0.5">' + 
               (apiKey ? '운동·식단·컨디션 질문하기' : 'API 키 설정 후 사용 가능') +
             '</p>' +
           '</div>' +
@@ -5071,7 +5073,7 @@ function renderMore() {
             '<div class="menu-icon-sm">' + icon('key', 18) + '</div>' +
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold">Anthropic API 키</p>' +
-              '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' +
+              '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' +
                 (apiKey ? escapeHtml(maskApiKey(apiKey)) : 'AI 코치·맞춤 루틴·주간 리뷰 켜기') +
               '</p>' +
             '</div>' +
@@ -5085,7 +5087,7 @@ function renderMore() {
               '<div class="menu-icon-sm">' + icon('chart', 18) + '</div>' +
               '<div class="menu-row-content">' +
                 '<p class="text-sm font-display font-bold">주간 리뷰</p>' +
-                '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + (state.weeklyReview ? '이번 주 ' + escapeHtml(state.weeklyReview.grade) + '등급 리뷰' : '이번 주 종합 분석') + '</p>' +
+                '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + (state.weeklyReview ? '이번 주 ' + escapeHtml(state.weeklyReview.grade) + '등급 리뷰' : '이번 주 종합 분석') + '</p>' +
               '</div>' +
               '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
             '</div>'
@@ -5096,7 +5098,7 @@ function renderMore() {
               '<div class="menu-icon-sm">' + icon('info', 18) + '</div>' +
               '<div class="menu-row-content">' +
                 '<p class="text-sm font-display font-bold">정체기 분석</p>' +
-                '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + (state.plateauCheck ? state.plateauCheck.signals.length + '개 신호' : '무게가 멈춘 종목 찾기') + '</p>' +
+                '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + (state.plateauCheck ? state.plateauCheck.signals.length + '개 신호' : '무게가 멈춘 종목 찾기') + '</p>' +
               '</div>' +
               (state.plateauCheck ? '<span class="api-status-badge" style="background: rgba(var(--warn-rgb), 0.15); color: var(--warn); border: 1px solid rgba(var(--warn-rgb), 0.4);">감지</span>' : '<div class="menu-arrow">' + icon('chevron', 16) + '</div>') +
             '</div>'
@@ -5106,7 +5108,7 @@ function renderMore() {
             '<div class="menu-icon-sm">' + icon('msg', 18) + '</div>' +
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold">기억 노트</p>' +
-              '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">코치가 기억할 부상·선호·목표·일정</p>' +
+              '<p class="text-[11px] font-mono text-stone-500 mt-0.5">코치가 기억할 부상·선호·목표·일정</p>' +
             '</div>' +
             '<div style="display:flex; align-items:center; gap:8px;">' +
               '<p class="text-[11px] font-mono text-stone-500">' + (state.coachMemory ? state.coachMemory.length : 0) + '개</p>' +
@@ -5125,14 +5127,14 @@ function renderMore() {
             '<div class="menu-icon-sm">' + icon('refresh', 18) + '</div>' +
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold">현재 사이클</p>' +
-              '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">Cycle ' + escapeHtml(profile.currentCycle) + ' · ' + escapeHtml(profile.cyclePhase) + ' · ' + escapeHtml(profile.currentWeek) + '/' + CYCLE_LENGTH + '주</p>' +
+              '<p class="text-[11px] font-mono text-stone-500 mt-0.5">Cycle ' + escapeHtml(profile.currentCycle) + ' · ' + escapeHtml(profile.cyclePhase) + ' · ' + escapeHtml(profile.currentWeek) + '/' + CYCLE_LENGTH + '주</p>' +
             '</div>' +
           '</div>' +
           '<div class="menu-row" onclick="openOneRMList()">' +
             '<div class="menu-icon-sm">' + icon('trophy', 18) + '</div>' +
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold">내 1RM</p>' +
-              '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + Object.keys(storage.get(KEYS.ONE_RM_DATA, {})).length + '개 종목 추적 중</p>' +
+              '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + Object.keys(storage.get(KEYS.ONE_RM_DATA, {})).length + '개 종목 추적 중</p>' +
             '</div>' +
             '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
           '</div>' +
@@ -5141,7 +5143,7 @@ function renderMore() {
             '<div class="menu-icon-sm danger-bg-soft">' + icon('trash', 18) + '</div>' +
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold" style="color: var(--danger);">전체 초기화</p>' +
-              '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">모든 데이터 삭제</p>' +
+              '<p class="text-[11px] font-mono text-stone-500 mt-0.5">모든 데이터 삭제</p>' +
             '</div>' +
             '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
           '</div>' +
@@ -5157,7 +5159,7 @@ function renderMore() {
             '<div class="menu-icon-sm">' + icon('download', 18) + '</div>' +
             '<div class="menu-row-content">' +
               '<p class="text-sm font-display font-bold">홈 화면에 설치</p>' +
-              '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">앱처럼 사용 · 오프라인 지원</p>' +
+              '<p class="text-[11px] font-mono text-stone-500 mt-0.5">앱처럼 사용 · 오프라인 지원</p>' +
             '</div>' +
             '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
           '</div>' +
@@ -5437,7 +5439,7 @@ function renderCoachMemory() {
       if (state.coachMemoryDeleteId === m.id) {
         return '<div class="menu-row" style="background: rgba(239,68,68,0.08);">' +
           '<div class="flex-1"><p class="text-sm">' + escapeHtml(m.text) + '</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">정말 삭제할까요?</p></div>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">정말 삭제할까요?</p></div>' +
           '<div style="display:flex; gap:6px;">' +
             '<button onclick="cancelMemoryDelete()" style="padding:6px 12px; border-radius:10px; background:transparent; border:1px solid var(--bg-4); color:var(--text-soft); font-size:12px;">취소</button>' +
             '<button class="btn-danger" style="padding:6px 12px; width:auto;" onclick="executeDeleteMemory(\'' + escapeHtml(m.id) + '\')">삭제</button>' +
@@ -5450,7 +5452,7 @@ function renderCoachMemory() {
       return '<div class="menu-row">' +
         '<div class="flex-1" onclick="editMemoryNote(\'' + escapeHtml(m.id) + '\')" style="cursor:pointer;">' +
           '<p class="text-sm">' + escapeHtml(m.text) + '</p>' +
-          '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + srcBadge + ' · ' + escapeHtml(m.date || '') + '</p>' +
+          '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + srcBadge + ' · ' + escapeHtml(m.date || '') + '</p>' +
         '</div>' +
         '<button class="session-header-btn" onclick="deleteMemoryNote(\'' + escapeHtml(m.id) + '\')">' + icon('trash', 16) + '</button>' +
       '</div>';
@@ -5573,7 +5575,7 @@ function buildCoachApplyCardHtml(msg, msgIdx) {
   }
 
   return '<div class="routine-change-card">' +
-      '<p class="text-[11px] font-mono accent uppercase tracking-widest mb-1\\.5">제안된 변경사항</p>' +
+      '<p class="text-[11px] font-mono accent uppercase tracking-widest mb-1.5">제안된 변경사항</p>' +
       lines + actionHtml +
     '</div>';
 }
@@ -5656,7 +5658,7 @@ function renderCoachChat() {
         '<div style="color: var(--warn); flex-shrink: 0;">' + icon('info', 18) + '</div>' +
         '<div class="flex-1">' +
           '<p class="text-xs font-display font-bold" style="color: var(--warn);">API 키 필요</p>' +
-          '<p class="text-[11px] font-mono text-stone-400 mt-0\\.5">더보기 → Anthropic API 키 설정</p>' +
+          '<p class="text-[11px] font-mono text-stone-400 mt-0.5">더보기 → Anthropic API 키 설정</p>' +
         '</div>' +
       '</div>';
   }
@@ -5867,7 +5869,7 @@ function renderWeeklyReviewDetail() {
             '<div class="flex items-start gap-3">' +
               '<div class="coach-icon accent">' + icon('msg', 18) + '</div>' +
               '<div class="flex-1">' +
-                '<p class="text-xs font-mono accent uppercase tracking-widest mb-1\\.5">코치 한마디</p>' +
+                '<p class="text-xs font-mono accent uppercase tracking-widest mb-1.5">코치 한마디</p>' +
                 '<p class="text-sm text-stone-200 leading-relaxed">' + escapeHtml(review.coachNote) + '</p>' +
               '</div>' +
             '</div>' +
@@ -5879,7 +5881,7 @@ function renderWeeklyReviewDetail() {
             '<div class="coach-chat-icon">' + icon('msg', 22) + '</div>' +
             '<div class="flex-1 text-left">' +
               '<p class="font-display font-bold text-sm">이번 주에 대해 코치와 상담</p>' +
-              '<p class="text-[11px] font-mono text-stone-400 mt-0\\.5">개선 전략 짜기</p>' +
+              '<p class="text-[11px] font-mono text-stone-400 mt-0.5">개선 전략 짜기</p>' +
             '</div>' +
             '<div style="color: var(--accent);">' + icon('chevron', 16) + '</div>' +
           '</div>' +
@@ -5991,7 +5993,7 @@ function renderPlateauDetail() {
             '<div class="flex items-start gap-3">' +
               '<div class="coach-icon accent">' + icon('msg', 18) + '</div>' +
               '<div class="flex-1">' +
-                '<p class="text-xs font-mono accent uppercase tracking-widest mb-1\\.5">코치 한마디</p>' +
+                '<p class="text-xs font-mono accent uppercase tracking-widest mb-1.5">코치 한마디</p>' +
                 '<p class="text-sm text-stone-200 leading-relaxed">' + escapeHtml(p.encouragement) + '</p>' +
               '</div>' +
             '</div>' +
@@ -6003,7 +6005,7 @@ function renderPlateauDetail() {
             '<div class="coach-chat-icon">' + icon('msg', 22) + '</div>' +
             '<div class="flex-1 text-left">' +
               '<p class="font-display font-bold text-sm">코치와 더 자세히 상담</p>' +
-              '<p class="text-[11px] font-mono text-stone-400 mt-0\\.5">맞춤 계획 세우기</p>' +
+              '<p class="text-[11px] font-mono text-stone-400 mt-0.5">맞춤 계획 세우기</p>' +
             '</div>' +
             '<div style="color: var(--accent);">' + icon('chevron', 16) + '</div>' +
           '</div>' +
@@ -6219,7 +6221,7 @@ function renderStats() {
           '<div class="workout-history-dot" style="background: var(--text-muted); box-shadow: 0 0 6px rgba(var(--muted-rgb), 0.45);"></div>' +
           '<div>' +
             '<p class="text-xs font-display font-bold">' + escapeHtml(b.weight) + 'kg</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + escapeHtml(b.date) + '</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + escapeHtml(b.date) + '</p>' +
           '</div>' +
         '</div>' +
         '<div style="color: var(--text-muted);">' + icon('chevron', 14) + '</div>' +
@@ -6340,7 +6342,7 @@ function renderStats() {
                   '<div class="workout-history-dot"></div>' +
                   '<div>' +
                     '<p class="text-xs font-display font-bold">' + escapeHtml(w.sessionKr || w.sessionName) + '</p>' +
-                    '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + escapeHtml(w.date) + ' (' + dStr + ') · ' + escapeHtml(w.duration || 0) + '분 · ' + escapeHtml(w.sets || 0) + '세트</p>' +
+                    '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + escapeHtml(w.date) + ' (' + dStr + ') · ' + escapeHtml(w.duration || 0) + '분 · ' + escapeHtml(w.sets || 0) + '세트</p>' +
                   '</div>' +
                 '</div>' +
                 '<div style="color: var(--text-muted);">' + icon('chevron', 14) + '</div>' +
@@ -7256,11 +7258,12 @@ function renderRunning() {
       (on ? 'border-color:' + accent + ';background:var(--bg-3);' : '') + '" onclick="setCardioMode(\'' + id + '\')">' +
       '<div style="display:flex;justify-content:center;' + (on ? 'color:var(--accent);' : 'color:var(--text-muted);') + '">' + icon(iconName, 20) + '</div>' +
       '<p class="text-xs font-display mt-1' + (on ? ' accent' : '') + '">' + title + '</p>' +
-      '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + sub + '</p>' +
+      '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + sub + '</p>' +
       '</button>';
   }
   var modeToggle =
-    '<div class="flex gap-2" style="margin-top:16px;">' +
+    // 아래 '운동 시간' 카드와 맞닿아 있었다 — 아래 여백을 준다.
+    '<div class="flex gap-2" style="margin:16px 0 10px;">' +
       modeCard('interval', 'running', '인터벌', '걷기·뛰기 반복') +
       modeCard('walk', 'treadmill', '경사 걷기', '정속 · 무릎 편함') +
     '</div>';
@@ -7397,7 +7400,7 @@ function renderCardioSession() {
         '<button class="session-header-btn" onclick="stopCardio(false)">' + icon('close', 18) + '</button>' +
         '<div class="text-center">' +
           '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">' + (isWalk ? '러닝 · 경사 걷기' : '러닝 · 인터벌') + '</p>' +
-          '<p class="text-xs font-mono accent mt-0\\.5">총 ' + cardioFmtClock(run.totalSec) + '</p>' +
+          '<p class="text-xs font-mono accent mt-0.5">총 ' + cardioFmtClock(run.totalSec) + '</p>' +
         '</div>' +
         '<button class="session-header-btn" onclick="toggleCardioSound()" title="' + (run.soundOn ? '소리 끄기' : '소리 켜기') + '" style="' + (run.soundOn ? '' : 'opacity:0.45;') + '">' + icon('bell', 18) + '</button>' +
       '</div>' +
@@ -7483,7 +7486,7 @@ function renderCardioRPE() {
       var on = (run.handrail === o.value);
       return '<button class="option-card" style="flex:1;padding:10px 4px;' + (on ? 'border-color:var(--accent);background:var(--bg-3);' : '') + '" onclick="setCardioHandrail(\'' + o.value + '\')">' +
         '<p class="text-xs font-display' + (on ? ' accent' : '') + '">' + o.label + '</p>' +
-        '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + o.desc + '</p>' +
+        '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + o.desc + '</p>' +
         '</button>';
     }).join('');
     handrailCard =
@@ -7573,7 +7576,7 @@ function cardioSummaryCardHtml(period) {
           '<div class="workout-history-dot"></div>' +
           '<div>' +
             '<p class="text-xs font-display font-bold">' + cardioFmtClock(x.totalSec || 0) + ' · ' + ((x.totalDistKm || 0).toFixed(2)) + 'km</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0\\.5">' + (isWalkRow ? '경사 걷기 · ' : '') + x.date + ' · ' + (x.completed ? '완주' : '중단') + (typeof x.rpe === 'number' ? (' · RPE ' + x.rpe) : '') + detail + '</p>' +
+            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + (isWalkRow ? '경사 걷기 · ' : '') + x.date + ' · ' + (x.completed ? '완주' : '중단') + (typeof x.rpe === 'number' ? (' · RPE ' + x.rpe) : '') + detail + '</p>' +
           '</div>' +
         '</div>' +
       '</div>';
