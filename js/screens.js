@@ -847,9 +847,21 @@ function renderWorkoutStep2() {
   // 종목을 편집 시트에서 다 빼면 exercises 가 빌 수 있다 — 그때 저장된 totalSets·duration 을
   // 그대로 적으면 '0종목 · 18세트 · 55분' 처럼 화면이 거짓말을 한다.
   var exCount = (routine && routine.exercises) ? routine.exercises.length : 0;
-  var summaryLine = (state.routineLoading || !routine || routine.error) ? ''
-    : (exCount === 0 ? '종목이 없어요'
-       : exCount + '종목 · ' + escapeHtml(routine.totalSets) + '세트 · ' + escapeHtml(routine.duration) + '분');
+  // 세트 합계는 **아래 목록이 실제로 적을 세트**에서 센다. 저장된 routine.totalSets 를 그대로
+  // 적으면, 같은 화면의 편집 시트에서 세트를 늘려도 헤더만 옛 숫자를 말한다(출처가 둘이면
+  // 반드시 어긋난다). 종목이 빈 경우도 여기서 정직하게 걸러진다.
+  var summaryLine = '';
+  if (!state.routineLoading && routine && !routine.error) {
+    if (exCount === 0) summaryLine = '종목이 없어요';
+    else {
+      var setSum = routine.exercises.reduce(function(n, e) {
+        var plan = getRoutinePreviewPlan(e);
+        var w = plan ? plan.sets.filter(function(st) { return st && !st.isWarmup && !isSetExtension(st); }).length : 0;
+        return n + (w || parseInt(e.sets, 10) || 0);
+      }, 0);
+      summaryLine = exCount + '종목 · ' + setSum + '세트 · ' + escapeHtml(routine.duration) + '분';
+    }
+  }
 
   var headerHtml =
     '<div class="px-5 pt-12 pb-2">' +
@@ -947,7 +959,14 @@ function renderWorkoutStep2() {
   // 분석 헤더 카드(AI 분석 완료 배지 · 다시 분석 아이콘 · 큰 부위명 · 헤드라인)와 주의사항 박스는
   // 걷었다. 화면이 시작되자마자 **오늘 뭘 할지**가 보여야 하는데, 그 위를 설명이 덮고 있었다.
   // 종목 수·세트·시간은 헤더 오른쪽 한 줄로 옮겼다.
+  // 앱이 부상·장비 때문에 종목을 바꿨다면 그 사실은 알린다. 걷어낸 건 AI 가 쓴 '주의사항'
+  // 산문이지, **앱이 사용자 루틴에 한 일**이 아니다(사용자 지시: 주의사항 삭제).
+  var swapNote = (routine.swaps && routine.swaps.length)
+    ? '<p class="routine-swap-note">' + icon('info', 13) + escapeHtml(routine.swaps.join(' · ')) + '</p>'
+    : '';
+
   return headerHtml +
+    swapNote +
     exercisesHtml +
 
     // 액션 버튼 (수정/시작)
@@ -2584,6 +2603,7 @@ function swapPreviewExercise(ctx, newName) {
   delete ex.note;
   delete ex.rir;
 
+  saveWizard();                        // 안 부르면 새로고침에 교체가 조용히 되돌아간다
   closeExerciseSwap();
   showToast(name + ' 으로 바꿨어요');
 }
@@ -3450,6 +3470,7 @@ window.exerciseEditRemove = function() {
     if (r && r.exercises && r.exercises[idx] && r.exercises[idx].name === name) {
       r.exercises.splice(idx, 1);
       r.totalSets = r.exercises.reduce(function(sum, e) { return sum + (parseInt(e.sets, 10) || 0); }, 0);
+      saveWizard();                    // 안 부르면 새로고침에 뺀 종목이 되살아난다
     }
     closeExerciseEditNow();
   }, { confirmLabel: '빼기', danger: true });
@@ -5177,31 +5198,6 @@ function renderMore() {
 }
 
 // AI 추천 새로고침
-window.refreshAIRecommendation = async function() {
-  if (!state.apiKey) {
-    showToast('API 키가 필요해요. 더보기에서 설정해주세요.', true);
-    return;
-  }
-  if (state.aiRecLoading) return;  // 연타 방지 (호출 2번 = 요금 2번)
-
-  // 캐시 무효화 + 실패 잠금 해제 (수동 새로고침은 항상 새로 부른다)
-  storage.set(KEYS.AI_RECOMMENDATION, null);
-  state.aiRecFailedDate = null;
-  
-  state.aiRecLoading = true;
-  state.aiRecommendation = null;
-  render();
-  
-  var rec = await fetchAIRecommendation();
-  state.aiRecommendation = rec;
-  state.aiRecLoading = false;
-  if (!rec) {
-    // 실패하면 오늘은 자동 재시도 잠금 (홈 렌더가 다시 부르지 않도록)
-    state.aiRecFailedDate = getTodayStr();
-    showToast('추천을 못 받았어요. 잠시 후 다시 시도해주세요.', true);
-  }
-  render();
-};
 
 // 주간 리뷰 새로고침
 window.refreshWeeklyReview = async function() {

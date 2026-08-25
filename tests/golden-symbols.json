@@ -1,5 +1,5 @@
 {
-  "functionCount": 501,
+  "functionCount": 500,
   "functions": [
     "_buildRecentSetsMap",
     "_recentChatSignals",
@@ -373,7 +373,6 @@
     "reconcile1RMFromLog",
     "recordChatSignal",
     "reduceWeight",
-    "refreshAIRecommendation",
     "refreshWeeklyReview",
     "regenerateRoutine",
     "releaseSuperset",

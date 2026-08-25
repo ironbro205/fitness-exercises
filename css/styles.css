@@ -2438,6 +2438,23 @@ button {
   border-color: rgba(var(--accent-rgb), 0.3);
   background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.04) 0%, var(--bg-2) 100%);
 }
+/* 앱이 부상·장비 때문에 종목을 바꿨다는 알림 (AI 가 쓴 '주의사항' 산문과는 다른 것) */
+.routine-swap-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 2px 10px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: rgba(var(--warn-rgb), 0.08);
+  border: 1px solid rgba(var(--warn-rgb), 0.25);
+  color: var(--warn);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+}
+.routine-swap-note svg { flex-shrink: 0; }
+
 /* 종목 한 줄 — 번호 + 이름. 옛 .routine-ex-header(두 열 배치)는 종목 성격·AI 설명 줄이
    같이 사라지면서 쓸 자리가 없어졌다. */
 .routine-ex-row {

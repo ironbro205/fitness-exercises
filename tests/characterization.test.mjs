@@ -1942,6 +1942,33 @@ test('오늘의 추천 — 홈·운동 탭 어디에도 남아 있지 않다', (
     assert.ok(workout.includes("selectBodyPart('" + k + "')"), k + ' 를 고를 수 없다');
   });
   assert.ok(workout.includes('body-part-grid'), '2열 그리드가 아니다');
+
+  // 이 변경의 근거는 '화면에 안 쓰는 값을 하루 한 번 API 로 받으면 요금만 나간다' 였다.
+  // 마크업만 보면 renderHome 이 다시 배경 로드를 부르기 시작해도 이 테스트가 조용히 통과한다.
+  const src = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
+  const homeSrc = src.slice(src.indexOf('function renderHome()'), src.indexOf('function renderWorkout()'));
+  assert.ok(!/^\s*[^/\n]*loadAIRecommendationIfNeeded\s*\(/m.test(homeSrc),
+    '홈이 다시 오늘의 추천을 배경에서 불러온다 — 화면에 안 쓰는 값이라 요금만 나간다');
+});
+
+// 앱이 부상·장비 때문에 종목을 바꿨다면 그 사실은 사용자에게 알려야 한다.
+// 사용자가 지운 건 AI 가 쓴 '주의사항' 산문이지, **앱이 루틴에 한 일**이 아니다.
+test('2단계 — 안전·장비 교체는 알리고, AI 주의사항 산문은 안 적는다', () => {
+  const a = loadApp();
+  a.state.workoutWizardStep = 2;
+  a.state.selectedBodyPart = 'push';
+  a.state.routineLoading = false;
+  a.state.generatedRoutine = { bodyPart: 'push', headline: 'x', duration: 50, totalSets: 3,
+    caution: '어깨가 아프면 무리하지 마세요',
+    swaps: ['안전 교체: 바벨 스쿼트 → 핵 스쿼트 (허리 보호)'],
+    exercises: [{ name: '머신 체스트 프레스', type: '복합', sets: 3, reps: '8-10', weight: 60 }] };
+  const html = a.renderWorkoutStep2();
+  assert.ok(html.includes('안전 교체: 바벨 스쿼트 → 핵 스쿼트'), '앱이 종목을 바꾼 사실이 화면에 없다');
+  assert.ok(!html.includes('어깨가 아프면 무리하지 마세요'), 'AI 주의사항 산문은 걷어 냈다');
+
+  // 바꾼 게 없으면 줄도 안 뜬다
+  a.state.generatedRoutine.swaps = [];
+  assert.ok(!a.renderWorkoutStep2().includes('routine-swap-note'));
 });
 
 // ── AI 종목 풀: 같은 운동이 두 이름으로 노출되면 AI가 둘 다 처방해 기록이 갈린다 ──
@@ -3007,7 +3034,12 @@ test('2단계 — 종목 목록 위에 설명 카드가 없다', () => {
   assert.ok(!html.includes('이번 주 인클라인만'), 'AI 가 왜 골랐는지(note)는 화면에 적지 않는다');
 
   // 남아야 하는 것: 요약 한 줄 · 종목명 · 처방 · 편집 입구
-  assert.ok(html.includes('1종목 · 12세트 · 55분'), '요약 한 줄이 없다');
+  // 세트 합계는 저장된 routine.totalSets 가 아니라 **아래 목록이 실제로 적을 세트**에서 온다 —
+  // 같은 화면의 편집 시트에서 세트를 늘려도 헤더가 따라오게 하려면 출처가 하나여야 한다.
+  const planSets = fresh.getRoutinePreviewPlan(fresh.state.generatedRoutine.exercises[0])
+    .sets.filter((st) => !st.isWarmup && !fresh.isSetExtension(st)).length;
+  assert.ok(html.includes('1종목 · ' + planSets + '세트 · 55분'),
+    '요약 한 줄이 실제 세트 수와 다르다: ' + (html.match(/\d+종목[^<]*/) || [])[0]);
   assert.ok(html.includes('머신 체스트 프레스'));
   assert.ok(/60kg × 8~10회 × 3세트/.test(html), '처방 줄이 없다: ' + (html.match(/routine-ex-prescription[^<]*<[^>]*>([^<]*)/) || [])[1]);
   assert.ok(html.includes("openExerciseEdit('preview', 0)"), '종목 줄이 편집 시트를 열지 않는다');

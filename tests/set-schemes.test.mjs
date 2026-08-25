@@ -1537,9 +1537,12 @@ test('[탑세트] 통증으로 잠긴 종목은 프리필이 처방을 넘지 �
   assert.equal(app.state.topSetSheet.weight, prog.weight, '처방(80)까지만 채운다');
   assert.ok(app.state.topSetSheet.weight < 95, '통증 이전 세션의 무게로 올라가지 않는다');
 
-  // 확인해도 기준 세트가 처방(80)을 넘지 않는다 — 통증 이전 세션의 95로 올라가면 안 된다
+  // 확인해도 **실제 세트 무게**가 처방(80)을 넘지 않는다 — 통증 이전 세션의 95로 올라가면 안 된다.
+  // (progOf() 는 workoutLog 만 읽는 순수 함수라 확인 전후로 값이 같다 → 행위를 검사하지 못한다)
   captureToast(() => app.confirmTopSetWeight());
-  assert.equal(progOf().painGated, true, '통증 게이트가 유지된다');
+  const after = [...weightsOf(ex)];
+  assert.equal(Math.max.apply(null, after), prog.weight, '가장 무거운 세트가 처방을 넘었다: ' + after.join('/'));
+  assert.ok(after.every((w) => w <= 95 && w <= prog.weight), '통증 이전 세션의 무게로 올라갔다: ' + after.join('/'));
   assert.equal(refWeight(), prog.weight, '기준 세트도 처방 그대로');
   endSession();
 });
