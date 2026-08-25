@@ -1808,6 +1808,39 @@ test('getVolumeThresholds — 큰/작은 근육 임계 (종아리는 의도적�
   assert.deepEqual(plain(app.getVolumeThresholds('calves')), { size: 'large', lackBelow: 4, optimalLow: 10, optimalTop: 20, target: 12 });
 });
 
+// ── 전완·요추는 볼륨 부위가 아니다 (#5·#6) ──
+// 두 부위는 직접 종목이 각각 1개·0개뿐이라 막대가 영구 '부족'으로 박혔고, 그 오탐이
+// buildUserContext 를 타고 모든 AI 프롬프트에 "권장 종목: 이지 바 리버스 컬" 을 실어 보냈다.
+// 그래서 이두를 물어도 코치가 리버스컬만 답했다. 세는 것만 멈추고, 인체도 표시는 그대로 둔다.
+test('볼륨 부위 — 전완·요추는 세지 않는다 (인체도 표시는 그대로)', () => {
+  const fresh = loadApp();
+  for (const k of ['forearms', 'lower_back']) {
+    assert.equal(fresh.BODY_PART_GROUPS[k], undefined, `BODY_PART_GROUPS 에 ${k} 가 남아 있다`);
+    assert.equal(fresh.WEAK_PART_EXERCISE_MAP[k], undefined, `WEAK_PART_EXERCISE_MAP 에 ${k} 가 남아 있다`);
+  }
+  // 컬(전완 secondary)·데드(요추 secondary)를 3주간 해도 두 부위가 화면·프롬프트에 안 나온다
+  fresh.state.data.workoutLog = [
+    { date: isoDaysAgo(12), completed: true, exercises: [{ name: '바벨 컬', setsCount: 3 }, { name: '랫 풀 다운', setsCount: 4 }] },
+    { date: isoDaysAgo(6),  completed: true, exercises: [{ name: '바벨 컬', setsCount: 3 }, { name: '바벨 루마니안 데드리프트', setsCount: 3 }] },
+    { date: isoDaysAgo(2),  completed: true, exercises: [{ name: '덤벨 해머 컬', setsCount: 3 }, { name: '데드리프트', setsCount: 3 }] }
+  ];
+  const card = fresh.volumeByPartCardHtml();
+  assert.ok(!card.includes('전완'), '볼륨 카드에 전완 줄이 남아 있다');
+  assert.ok(!card.includes('요추'), '볼륨 카드에 요추 줄이 남아 있다');
+
+  const ctx = fresh.buildUserContext();
+  assert.ok(!ctx.includes('전완'), 'AI 프롬프트에 전완 볼륨이 남아 있다');
+  assert.ok(!ctx.includes('요추'), 'AI 프롬프트에 요추 볼륨이 남아 있다');
+  assert.ok(!/권장 종목:[^\n]*리버스 컬/.test(ctx), '프롬프트가 아직 리버스 컬을 권장하고 있다');
+
+  // 세는 것만 멈춘 것이지 지운 게 아니다 — 자극 인체도·라벨·종목은 그대로 살아 있다
+  assert.equal(Array.from(fresh.getMuscleViews('forearms')).join(','), 'front,back');
+  assert.equal(Array.from(fresh.getMuscleViews('lower_back')).join(','), 'back');
+  assert.equal(fresh.BODY_PART_KR.forearms, '전완');
+  assert.equal(fresh.BODY_PART_KR.lower_back, '요추');
+  assert.ok(fresh.EXERCISE_BODY_PART_MAP['이지 바 리버스 컬'], '종목 자체는 남아 교체 목록에서 고를 수 있어야 한다');
+});
+
 // ── STATS 카드: 최소 표본 가드 + 프롬프트와 같은 숫자 + 정직한 문구 ──
 test('volumeByPartCardHtml — 2주 미만은 판정 보류, 이후는 프롬프트와 같은 수치/정직한 문구', () => {
   app.state.data.workoutLog = [];
@@ -2004,6 +2037,78 @@ test('종목 교체 검색 — 옛 별칭 이름으로 검색해도 표준명이
   assert.ok(pressHits.length > 0, "'프레스' 검색이 비면 이 테스트가 헛돈다");
   assert.equal(new Set(pressHits).size, pressHits.length, '같은 종목이 두 번 나오면 안 된다');
   assert.deepEqual(pressHits.filter((n) => a.isAliasExerciseName(n)), [], '별칭 표기가 그대로 노출되면 안 된다');
+});
+
+// ── 빠져 있던 유명 종목 (#7) ──
+// 삼두 고립이 전부 케이블이라 케이블이 붐비면 대체가 없었고, 가장 유명한 바벨 벤치·오버헤드 프레스도
+// 표에 없어 AI 가 추천하면 이름이 깨졌다. 종목을 넣을 땐 표 네 곳이 함께 움직여야 한다.
+test('종목 표 — 새로 넣은 유명 종목이 부위·장비·1RM 화면까지 이어져 있다', () => {
+  const a = loadApp();
+  const EXPECT = {
+    '라잉 트라이셉스 익스텐션':        { primary: 'triceps',          equipment: 'barbell',  stretched: true },
+    '덤벨 오버헤드 트라이셉스 익스텐션': { primary: 'triceps',          equipment: 'dumbbell', stretched: true },
+    '덤벨 컬':                       { primary: 'biceps',           equipment: 'dumbbell' },
+    '바벨 벤치 프레스':               { primary: 'chest',            equipment: 'barbell' },
+    '바벨 오버헤드 프레스':            { primary: 'shoulders_front',  equipment: 'barbell' },
+    '바벨 슈러그':                    { primary: 'traps',            equipment: 'barbell' }
+  };
+  // 1RM 화면은 카탈로그가 아니라 "내 1RM" 이라 기록이 있는 종목만 그린다.
+  // 그래서 값을 심어 두고 확인해야 renderOneRMList 의 카테고리 배선이 실제로 검사된다.
+  const seeded = {};
+  Object.keys(EXPECT).forEach((n) => { seeded[n] = 50; });
+  a.storage.set(a.KEYS.ONE_RM_DATA, seeded);
+  const rmScreen = a.renderOneRMList();
+  for (const [name, want] of Object.entries(EXPECT)) {
+    const info = a.EXERCISE_BODY_PART_MAP[name];
+    assert.ok(info, `${name} 이 EXERCISE_BODY_PART_MAP 에 없다`);
+    assert.equal(info.primary, want.primary, `${name} 부위`);
+    assert.equal(info.equipment, want.equipment, `${name} 장비`);
+    if (want.stretched) assert.equal(info.stretched, true, `${name} 신장강조 태그`);
+    assert.ok(a.isExerciseAvailable(name), `${name} 이 보유 장비로 불가 판정`);
+    assert.ok(rmScreen.includes(name), `${name} 이 1RM 화면 목록에 없다 (renderOneRMList 카테고리에도 넣어야 한다)`);
+  }
+
+  // 삼두에 프리웨이트 고립이 생겼다 — 케이블이 붐벼도 대체가 있다
+  const triceps = a.EXERCISES_BY_PRIMARY.triceps.filter((n) => !a.isAliasExerciseName(n));
+  const freeWeightIso = triceps.filter((n) => {
+    const i = a.EXERCISE_BODY_PART_MAP[n];
+    return !i.compound && (i.equipment === 'barbell' || i.equipment === 'dumbbell');
+  });
+  assert.ok(freeWeightIso.length >= 2, '삼두 프리웨이트 고립이 2개 미만이다: ' + freeWeightIso.join(', '));
+});
+
+test('종목 교체 검색 — 스컬크러셔로 찾으면 표준명이 나온다', () => {
+  const a = loadApp();
+  a.state.activeSession = { exercises: [{ name: '케이블 푸시 다운', sets: [] }], currentExerciseIdx: 0 };
+  const hits = (q) => (a.buildSwapListHtml(q).match(/swapCurrentExercise\('([^']+)'\)/g) || [])
+    .map((s) => s.slice(21, -2));
+  assert.deepEqual(hits('스컬크러셔'), ['라잉 트라이셉스 익스텐션'], '흔히 쓰는 이름으로 찾을 수 있어야 한다');
+});
+
+// ── 코치 프롬프트의 종목 목록 (#5) ──
+test('코치 프롬프트 — 부위별 종목 목록이 들어가고, 없는 종목은 이름조차 안 나온다', () => {
+  const a = loadApp();
+  const block = a.buildExerciseCatalogBlock();
+  assert.ok(a.buildCoachSystemParts().stable.includes(block.split('\n')[0]),
+    '종목 목록이 코치 시스템 프롬프트(캐시 블록)에 없다');
+
+  // 이두 줄에 회외 컬이 여러 개 보여야 한 종목에 갇히지 않는다
+  const bicepsLine = block.split('\n').find((l) => l.startsWith('- 이두:')) || '';
+  ['바벨 컬', '덤벨 컬', '인클라인 덤벨 컬', '이지 바 프리처 컬'].forEach((n) =>
+    assert.ok(bicepsLine.includes(n), `이두 줄에 ${n} 이 없다`));
+  assert.ok(!bicepsLine.includes('리버스 컬'), '리버스 컬은 이두가 아니라 전완 종목이다');
+
+  // 장비가 없는 종목과 별칭 표기는 목록에 오르지 않는다.
+  // includes() 로 보면 '덤벨 시티드 카프 레이즈' 안의 '시티드 카프 레이즈' 까지 걸리므로 항목 단위로 쪼갠다.
+  const listed = new Set(block.split('\n')
+    .filter((l) => l.startsWith('- ') && l.includes(': '))
+    .flatMap((l) => l.slice(l.indexOf(': ') + 2).split(', '))
+    .map((n) => n.replace('(신장강조)', '')));
+  Object.keys(a.EXERCISE_BODY_PART_MAP).forEach(function(n) {
+    if (!a.isExerciseAvailable(n)) assert.ok(!listed.has(n), `없는 기구 종목이 목록에 있다: ${n}`);
+    if (a.isAliasExerciseName(n)) assert.ok(!listed.has(n), `별칭 표기가 목록에 있다: ${n}`);
+  });
+  assert.ok(listed.has('라잉 트라이셉스 익스텐션') && !listed.has('스컬크러셔'), '별칭이 아니라 표준명으로 실린다');
 });
 
 // ── recalc1RMAfterEdit: 한 세션에 같은 운동이 두 표기로 있어도 1RM이 깎이지 않는다 ──
