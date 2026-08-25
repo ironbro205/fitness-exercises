@@ -1001,9 +1001,9 @@ window.startGeneratedRoutine = function() {
       warmup: !!ex.isMain   // 워밍업은 메인 종목만 (기존 동작 유지)
     }));
 
-    // 루틴이 휴식을 들고 왔으면(사용자가 편집 시트에서 정했거나 AI 가 처방) 세트법이 찍은
-    // 세트별 휴식을 걷어낸다. 안 걷으면 set.rest 가 우선이라 그 값이 조용히 무시된다.
-    if (parseInt(String(ex.rest || ''), 10) > 0) clearSchemeRestOverrides({ sets: plan.sets });
+    // 사용자가 편집 시트에서 정한 휴식만 세트법 기본값을 이긴다 — 세트법이 찍은 세트별 휴식을
+    // 걷어내야 그 값이 실제로 먹는다. AI 가 준 rest 는 건드리지 않는다(routineRestSec 주석 참고).
+    if (ex.restLocked && parseInt(String(ex.rest || ''), 10) > 0) clearSchemeRestOverrides({ sets: plan.sets });
 
     return {
       name: ex.name,
@@ -2811,6 +2811,7 @@ function swapPreviewExercise(ctx, newName) {
   ex.weight = plan.weight;
   delete ex.weightLocked;              // 새 종목의 무게는 사용자가 정한 값이 아니다
   delete ex.rest;                      // 종목이 바뀌면 휴식도 새 종목 기준으로
+  delete ex.restLocked;
   delete ex.note;
   delete ex.rir;
 
@@ -3587,27 +3588,67 @@ function exerciseEditTarget() {
   return (ex && ex.name === e.name) ? ex : null;
 }
 
-function isExerciseEditPreview() {
-  return !!state.exerciseEdit && state.exerciseEdit.scope === 'preview';
+// 이 종목이 '미리보기 루틴' 것인가 '진행 중 세션' 것인가.
+// **객체 모양으로 판별한다** — 미리보기는 sets 가 세트 '수'(숫자), 세션은 세트 배열이다.
+// 전역 state.exerciseEdit 으로 판별하면, 편집 시트를 열지 않고 들어오는 호출부
+// (코치 [적용] 카드)가 세션 갈래로 잘못 빠져 ex.sets.concat 에서 render() 가 통째로 죽는다.
+function isPreviewExercise(ex) {
+  return !!ex && !Array.isArray(ex.sets);
+}
+
+// 무게 칸에 적는 값 = **앞으로 들 세트 중 가장 무거운 것**(schemeBaseSet).
+// 스테퍼가 이 숫자를 움직이므로, 적용 쪽도 반드시 같은 양을 바꿔야 한다(applyExerciseChange 참고).
+function exerciseBaseWeight(ex) {
+  var ref = schemeBaseSet(ex);
+  return (ref && typeof ref.weight === 'number') ? ref.weight : null;
+}
+
+// 세트법 사다리의 **꼭대기(탑)** 무게 — rebuildPendingSets 의 baseWeight 가 뜻하는 그 값.
+// 탑을 이미 끝냈으면 남은 세트 중 최대는 백오프(탑의 90%)라, 그걸 baseWeight 로 넘기면
+// 사다리가 매번 한 단씩 내려앉는다. 끝낸 탑이 있으면 그 무게가 곧 꼭대기다.
+function exerciseLadderBase(ex) {
+  var doneTop = completedTopSet(ex);
+  if (doneTop && typeof doneTop.weight === 'number') return doneTop.weight;
+  return exerciseBaseWeight(ex);
+}
+
+// 반복·세트를 바꾸느라 세트를 다시 짤 때, 남은 세트의 무게는 그대로 물려준다.
+// 안 그러면 "반복만 만졌는데 무게가 조용히 한 단 떨어지는" 일이 생긴다.
+function rebuildKeepingPendingWeight(ex, opts) {
+  var keep = completedTopSet(ex) ? exerciseBaseWeight(ex) : null;
+  var plan = rebuildPendingSets(ex, opts);
+  if (typeof keep === 'number') {
+    (ex.sets || []).forEach(function(st) {
+      if (!st || st.completed || st.isWarmup || isSetExtension(st)) return;
+      st.weight = keep;
+    });
+  }
+  return plan;
+}
+
+// 이미 끝낸 본세트 수. 시트가 보여주는 '세트'는 완료분까지 포함한 **총 세트 수**인데
+// rebuildPendingSets 의 opts.sets 는 '앞으로 새로 만들 세트 수'다. 둘을 잇는 값이다.
+function completedWorkingSetCount(ex) {
+  return ((ex && ex.sets) || []).filter(function(st) {
+    return st && st.completed && !st.isWarmup && !isSetExtension(st);
+  }).length;
 }
 
 // 지금 화면에 적을 값들. 미리보기는 루틴 필드를, 세션은 실제 세트에서 읽는다.
 function exerciseEditValues(ex) {
-  if (isExerciseEditPreview()) {
-    var rest = parseInt(String(ex.rest || ''), 10);
+  if (isPreviewExercise(ex)) {
     return {
       weight: (ex.weight === undefined || ex.weight === null) ? null : Number(ex.weight),
       reps: String(ex.reps || '8-12'),
       sets: parseInt(ex.sets, 10) > 0 ? parseInt(ex.sets, 10) : 3,
-      rest: (rest > 0) ? rest : getExerciseRestSec(ex.name)
+      rest: routineRestSec(ex)                       // 처방 줄과 같은 규칙(사용자가 정한 값만 이긴다)
     };
   }
-  var refSet = schemeBaseSet(ex);                    // 세트법의 기준 세트(= 가장 무거운 워킹세트)
   var working = (ex.sets || []).filter(function(st) { return st && !st.isWarmup && !isSetExtension(st); });
   return {
-    weight: (refSet && typeof refSet.weight === 'number') ? refSet.weight : null,
+    weight: exerciseBaseWeight(ex),
     reps: String(ex.targetReps || '8-12'),
-    sets: working.length,
+    sets: working.length,                            // 완료분 포함 총 세트 수(사용자가 세는 단위)
     rest: exerciseRestLabelSec(ex)
   };
 }
@@ -3641,35 +3682,62 @@ function clearSchemeRestOverrides(ex) {
 // **편집 시트의 스텝 버튼과 코치의 [적용] 버튼이 같은 문을 쓴다** — 두 경로가 갈라지면
 // "코치는 바꿨다는데 화면은 그대로" 가 다시 생긴다(#2).
 // value 는 절대값이다(증감이 아니라). 반환값 = 실제로 바뀌었는가.
-function applyExerciseChange(ex, isPreview, field, value) {
+function applyExerciseChange(ex, field, value) {
   if (!ex) return false;
+  // 갈래는 **넘겨받은 종목 객체**로 정한다. 전역 state 를 보면 편집 시트를 안 거치는
+  // 호출부(코치 [적용])가 엉뚱한 갈래로 빠진다.
+  var isPreview = isPreviewExercise(ex);
   var v = exerciseEditValues(ex);
 
   if (field === 'weight') {
     var w = snapWeightToEquipment(Math.max(0, Number(value)), ex.name);
     if (!(w >= 0)) return false;
     if (isPreview) { ex.weight = w; ex.weightLocked = true; }
+    else if (completedTopSet(ex)) {
+      // 탑세트를 이미 끝냈으면 세트법 사다리는 이미 쓰였다. 이때 baseWeight(사다리 꼭대기)를
+      // 다시 매기면 남은 세트가 그 90% 로 내려앉아, 화면 숫자(남은 세트 중 최대)는 그대로인데
+      // 실제 무게만 한 단 떨어진다 — [+5] 를 눌러도 아무 일 없어 보인다.
+      // 남은 건 백오프뿐이므로 **남은 본세트 무게를 직접** 매긴다.
+      var touched = 0;
+      (ex.sets || []).forEach(function(st) {
+        if (!st || st.completed || st.isWarmup || isSetExtension(st)) return;
+        st.weight = w;
+        touched++;
+      });
+      if (!touched) return false;
+    }
     else rebuildPendingSets(ex, { baseWeight: w });
   } else if (field === 'reps') {
     var reps = String(value || '').trim();
     if (!/^\d+(\s*-\s*\d+)?$/.test(reps)) return false;
     if (isPreview) ex.reps = reps;
-    else { ex.targetReps = reps; rebuildPendingSets(ex, { baseWeight: v.weight }); }
+    else { ex.targetReps = reps; rebuildKeepingPendingWeight(ex, { baseWeight: exerciseLadderBase(ex) }); }
   } else if (field === 'sets') {
-    var n = Math.max(1, Math.min(10, parseInt(value, 10)));
-    if (!(n >= 1)) return false;
-    if (isPreview) ex.sets = n;
-    else rebuildPendingSets(ex, { sets: n, baseWeight: v.weight });
+    if (isPreview) {
+      var pn = Math.max(1, Math.min(10, parseInt(value, 10)));
+      if (!(pn >= 1)) return false;
+      ex.sets = pn;
+    } else {
+      // 시트의 '세트'는 완료분 포함 **총** 세트 수인데 rebuildPendingSets 는 '새로 만들 세트 수'를
+      // 받는다. 그대로 넘기면 완료 세트만큼 매번 더 붙어 [+1] 이 두 개씩 늘어난다.
+      var done = completedWorkingSetCount(ex);
+      var total = Math.max(Math.max(1, done), Math.min(10, parseInt(value, 10)));
+      if (!(total >= 1)) return false;
+      if (total === v.sets) return false;             // 하한에 걸려 그대로면 다시 짜지 않는다
+      rebuildKeepingPendingWeight(ex, { sets: total - done, baseWeight: exerciseLadderBase(ex) });
+    }
   } else if (field === 'rest') {
     var sec = Math.max(30, Math.min(REST_MAX_SEC, parseInt(value, 10)));
     if (!(sec >= 30)) return false;
     ex.rest = sec;
+    ex.restLocked = true;                            // 사용자가 정한 값 — AI 의 rest 와 구분한다
     if (!isPreview) clearSchemeRestOverrides(ex);
   } else {
     return false;
   }
 
-  if (isPreview) state.routinePreviewExpanded = true;
+  // 미리보기 루틴은 마법사 블롭으로만 저장된다 — 여기서 안 부르면 새로고침에 편집이 사라진다.
+  if (isPreview) { state.routinePreviewExpanded = true; saveWizard(); }
   else saveActiveSession();
   return true;
 }
@@ -3678,7 +3746,6 @@ window.adjustExerciseEdit = function(field, delta) {
   var ex = exerciseEditTarget();
   if (!ex) { closeExerciseEditNow(); return; }
   var v = exerciseEditValues(ex);
-  var preview = isExerciseEditPreview();
 
   var next;
   if (field === 'weight') next = (v.weight === null ? 0 : v.weight) + delta;
@@ -3687,7 +3754,7 @@ window.adjustExerciseEdit = function(field, delta) {
   else if (field === 'rest') next = v.rest + delta;
   else return;
 
-  applyExerciseChange(ex, preview, field, next);
+  applyExerciseChange(ex, field, next);
   render();
 };
 
@@ -3695,7 +3762,7 @@ window.adjustExerciseEdit = function(field, delta) {
 window.exerciseEditRemove = function() {
   var ex = exerciseEditTarget();
   if (!ex) { closeExerciseEditNow(); return; }
-  if (!isExerciseEditPreview()) { closeExerciseEditNow(); skipCurrentExercise(); return; }
+  if (!isPreviewExercise(ex)) { closeExerciseEditNow(); skipCurrentExercise(); return; }
 
   var idx = state.exerciseEdit.idx;
   var name = ex.name;
@@ -3741,7 +3808,7 @@ function buildExerciseEditSheetHtml() {
   var ex = exerciseEditTarget();
   if (!ex) return '';
   var v = exerciseEditValues(ex);
-  var preview = isExerciseEditPreview();
+  var preview = isPreviewExercise(ex);
   var inc = getWeightIncrement(ex.name);
   var reverse = isReverseProgression(ex.name);
 
@@ -5868,7 +5935,7 @@ window.approveCoachApply = function(msgIdx) {
   msg.apply.forEach(function(act) {
     var t = coachActionTarget(act);
     if (!t) return;
-    if (applyExerciseChange(t.ex, t.isPreview, act.action, act.value)) {
+    if (applyExerciseChange(t.ex, act.action, act.value)) {
       done.push(describeCoachAction({ action: act.action, exercise: '', value: act.value }));
     }
   });
@@ -8286,6 +8353,9 @@ function ensureBackTrap() {
     if (state.itemDetailSheet) return;
     if (state.resetConfirming) return;
     if (state.muscleMapZoom) return;   // 자극 근육 확대 중엔 스와이프로 종목이 넘어가면 안 된다
+    if (state.exerciseEdit) return;    // 종목 편집 시트가 가리키는 종목과 화면이 어긋나면 안 된다
+    if (state.lastRecordOpen) return;  // 지난 기록 시트도 마찬가지
+    if (state.sessionChatOpen) return; // 세트 사이 채팅 중에 뒤 종목이 조용히 넘어가면 안 된다
     if (state.stretchGuide) return;    // 웜업/스트레칭 가이드 위에서는 종목이 조용히 넘어가면 안 된다
     if (state.activeSession.warmup && !state.activeSession.warmup.done) return;
 
