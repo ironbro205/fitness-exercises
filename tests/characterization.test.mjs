@@ -1049,7 +1049,7 @@ test('묶음6-D 뒤로가기 배선 — popstate 리스너 + 부팅 트랩(ensur
 // ═══════════════════════════════════════════════
 
 // ── Cycle A: 지식 베이스 상수 (data.js) — 운동과학 전 영역 + 근거 표기 ──
-test('코치지식 COACH_KNOWLEDGE — 운동/부상/보충제/회복 전 영역 + 근거', () => {
+test('코치지식 COACH_KNOWLEDGE — 운동/부상/회복/유산소 전 영역 + 근거 (영양 없음)', () => {
   const app = loadApp();
   assert.equal(typeof app.COACH_KNOWLEDGE, 'string', 'COACH_KNOWLEDGE 문자열 상수 존재');
   assert.ok(app.COACH_KNOWLEDGE.length > 2500, '지식 베이스가 충분히 풍부 (기존 ~25줄 대비 대폭 확장)');
@@ -1057,7 +1057,8 @@ test('코치지식 COACH_KNOWLEDGE — 운동/부상/보충제/회복 전 영역
   const k = app.COACH_KNOWLEDGE;
   assert.ok(k.includes('자세') || k.includes('폼'), '종목 자세/폼 큐 포함');
   assert.ok(k.includes('부상') || k.includes('통증'), '부상·통증 대응 포함');
-  assert.ok(k.includes('크레아틴') && k.includes('카페인'), '보충제(크레아틴/카페인) 포함');
+  assert.ok(!k.includes('크레아틴') && !k.includes('g/kg') && !k.includes('칼로리') && !k.includes('단백질 섭취'), '영양·보충제는 다루지 않는다(2026-09-02 결정) — "단백질 합성"(근육 생리)은 허용');
+  assert.ok(k.includes('유산소'), '유산소 병행 섹션 포함');
   assert.ok(k.includes('워밍업') || k.includes('가동성'), '워밍업·가동성 포함');
   // 근거 표기(메타분석 저자/연도)는 유지
   assert.ok(/Pelland|Schoenfeld|Morton/.test(k), '메타분석 근거 표기 유지');
@@ -1071,7 +1072,7 @@ test('코치지식 buildCoachSystemParts — 고정 지식블록 / 가변 사용
   assert.equal(typeof parts.stable, 'string', 'stable(고정) 블록 존재');
   assert.equal(typeof parts.dynamic, 'string', 'dynamic(가변) 블록 존재');
   // 고정 블록: 지식 베이스 포함, 사용자 데이터는 없어야 캐시가 호출마다 적중
-  assert.ok(parts.stable.includes('크레아틴'), '고정 블록에 지식 베이스 주입');
+  assert.ok(parts.stable.includes('더블 프로그레션'), '고정 블록에 지식 베이스 주입');
   assert.ok(!parts.stable.includes('사용자 정보'), '고정 블록에 사용자 데이터 없음(캐시 적중 위해)');
   // 가변 블록: 사용자 컨텍스트 포함
   assert.ok(parts.dynamic.includes('사용자 정보') || parts.dynamic.includes('사용자 현재 데이터'), '가변 블록에 사용자 데이터');
@@ -1083,7 +1084,7 @@ test('코치지식 getCoachSystemPrompt — 질문 유형 분기 + 입막음 제
   const sys = app.getCoachSystemPrompt();
   // 새: 질문 유형별 답변 지시(일반 지식 질문 허용)
   assert.ok(sys.includes('질문 유형') || sys.includes('일반 운동'), '질문 유형별 답변 지시 주입');
-  assert.ok(sys.includes('지식 베이스') || sys.includes('크레아틴'), '지식 베이스가 프롬프트에 포함');
+  assert.ok(sys.includes('지식 베이스') || sys.includes('더블 프로그레션'), '지식 베이스가 프롬프트에 포함');
   // 옛 입막음 제약 제거
   assert.ok(!sys.includes('위 데이터 안에서만'), '"위 데이터 안에서만 답하기" 제약 제거');
   assert.ok(!sys.includes('데이터에 없는 추측 금지'), '"데이터에 없는 추측 금지" 제약 제거');
@@ -1114,7 +1115,7 @@ test('코치지식 callCoachAPI — system 배열 + cache_control ephemeral(고�
   // 고정 블록: 지식 + cache_control, 사용자 데이터 없음(호출마다 동일 → 캐시 적중)
   assert.equal(captured.system[0].type, 'text');
   assert.deepEqual(captured.system[0].cache_control, { type: 'ephemeral' }, '고정 블록에 cache_control ephemeral');
-  assert.ok(captured.system[0].text.includes('크레아틴'), '고정 블록 = 지식 베이스');
+  assert.ok(captured.system[0].text.includes('더블 프로그레션'), '고정 블록 = 지식 베이스');
   assert.ok(!captured.system[0].text.includes('사용자 정보'), '고정 블록에 사용자 데이터 없음');
   // 가변 블록: 사용자 데이터, 캐시 분기점 뒤라 cache_control 없음
   assert.ok(captured.system[1].text.includes('사용자 정보') || captured.system[1].text.includes('사용자 현재 데이터'), '두 번째 블록 = 사용자 데이터');
@@ -1138,7 +1139,7 @@ test('코치지식 generateFullRoutine — 지식 주입 + cache_control(캐싱)
   assert.ok(captured, 'fetch 호출됨');
   assert.ok(Array.isArray(captured.system), 'system 배열(캐싱 구조)');
   assert.deepEqual(captured.system[0].cache_control, { type: 'ephemeral' }, '고정 블록 cache_control ephemeral');
-  assert.ok(captured.system[0].text.includes('크레아틴'), '고정 블록 = 지식 베이스');
+  assert.ok(captured.system[0].text.includes('더블 프로그레션'), '고정 블록 = 지식 베이스');
   assert.ok(captured.system[1].text.includes('루틴'), '가변 블록 = 기존 루틴 프롬프트');
   assert.ok(!captured.system[1].cache_control, '가변 블록엔 cache_control 없음');
 });
@@ -1161,7 +1162,7 @@ test('코치지식 modifyRoutineWithAI — 지식 주입 + cache_control(캐싱)
   assert.ok(captured, 'fetch 호출됨');
   assert.ok(Array.isArray(captured.system), 'system 배열(캐싱 구조)');
   assert.deepEqual(captured.system[0].cache_control, { type: 'ephemeral' }, '고정 블록 cache_control ephemeral');
-  assert.ok(captured.system[0].text.includes('크레아틴'), '고정 블록 = 지식 베이스');
+  assert.ok(captured.system[0].text.includes('더블 프로그레션'), '고정 블록 = 지식 베이스');
   assert.ok(captured.system[1].text.includes('루틴'), '가변 블록 = 기존 수정 프롬프트');
   assert.ok(!captured.system[1].cache_control, '가변 블록엔 cache_control 없음');
 });
@@ -1182,7 +1183,7 @@ test('코치지식 generateWeeklyReview — 지식 주입(문자열 system), 캐
   await app.generateWeeklyReview(true);
   assert.ok(captured, 'fetch 호출됨');
   assert.equal(typeof captured.system, 'string', 'system 문자열(캐싱 미적용)');
-  assert.ok(captured.system.includes('크레아틴'), '지식 베이스 주입됨');
+  assert.ok(captured.system.includes('더블 프로그레션'), '지식 베이스 주입됨');
   assert.ok(captured.system.includes('등급') || captured.system.includes('주간 리뷰'), '기존 주간 리뷰 프롬프트 유지');
 });
 
@@ -1757,30 +1758,35 @@ test('getStalledLifts — 반복이 오르면 정체 아님, 표본·기간 부�
   assert.equal(app.detectPlateauSignals().indexOf('lift_stalled'), -1);
 });
 
-// ── 영양 섹션 복원 회귀: 섹션 번호가 다시 건너뛰지 않게 못 박는다 ──
-test('코치지식 COACH_KNOWLEDGE — 영양 섹션 4·5 복원 + 번호 연속 + 크레아틴 중복 없음', () => {
+// ── 영양 삭제 회귀(2026-09-02 결정): 영양 섹션이 다시 들어오지 않고, 섹션 번호는 1~7 연속 ──
+test('코치지식 COACH_KNOWLEDGE — 영양 섹션 없음 + 번호 1~7 연속', () => {
   const fresh = loadApp();
   const k = fresh.COACH_KNOWLEDGE;
-  // 예전엔 3 → 6으로 건너뛰었다. 1~9가 빠짐없이 이어져야 한다.
   const nums = (k.match(/### (\d+)\./g) || []).map((s) => parseInt(s.slice(4), 10));
-  assert.deepEqual(nums, [1, 2, 3, 4, 5, 6, 7, 8, 9], '섹션 번호 1~9 연속');
-  assert.ok(k.includes('### 4. 영양'), '4번 = 영양(단백질)');
-  assert.ok(k.includes('### 5. 영양'), '5번 = 영양(에너지 균형·리컴포지션)');
-  assert.ok(k.includes('단백질') && k.includes('리컴포지션'), '핵심 영양 용어 포함');
-  assert.ok(/Morton 2018/.test(k), '단백질 총량 근거(Morton 2018) 표기');
-  assert.ok(/Murphy & Koehler 2022/.test(k), '적자 상한 근거(Murphy & Koehler 2022) 표기');
-  assert.ok(/Maughan 2018/.test(k), 'IOC 보충제 합의(Maughan 2018) 표기');
-  // 크레아틴 용량은 6번 한 곳에만 (4·5번과 중복 금지)
-  assert.equal((k.match(/3~5g/g) || []).length, 1, '크레아틴 용량 표기는 1회');
+  assert.deepEqual(nums, [1, 2, 3, 4, 5, 6, 7], '섹션 번호 1~7 연속');
+  assert.ok(!/### \d+\. 영양/.test(k) && !/### \d+\. 보충제/.test(k), '영양·보충제 섹션 없음');
+  assert.ok(!k.includes('Morton 2018') && !k.includes('Maughan 2018'), '영양 출처 잔재 없음');
+  assert.ok(k.includes('### 7. 유산소 병행'), '유산소 병행 섹션이 7번');
+});
+
+// ── 2026-09 재검증 회귀: 정합성 버그가 되돌아오지 않게 못 박는다 (docs/research/v2-selection-plan.md A·C) ──
+test('코치지식·프롬프트 — 2026-09 재검증 정합성 (디로드 RIR 통일 · 오버트레이닝 라벨 없음 · 오타 없음)', () => {
+  const fresh = loadApp();
+  const k = fresh.COACH_KNOWLEDGE;
+  assert.ok(!k.includes('렉스트포즈') && k.includes('레스트포즈'), 'A8: 오타 수정');
+  assert.ok(k.includes('RIR 3~4') && !k.includes('RIR 3~5'), 'A3: 디로드 RIR 3~4로 통일');
+  assert.ok(!k.includes('간접자극을 받아 목표가 낮'), 'A7: 이중 차감 문장 없음');
+  assert.ok(k.includes('Pelland 2026') && !k.includes('Pelland 2024'), 'C1: 볼륨 출처 정식 출판본');
+  assert.ok(k.includes('ACSM 2026'), 'C2: ACSM 2026 포지션 스탠드 인용');
 });
 
 // ── 코치 원칙 5번: 없는 기능을 있다고 말하지 않는다 ──
-test('코치 프롬프트 — 영양 조언 단서가 실제 앱 기능과 일치', () => {
+test('코치 프롬프트 — 영양 질문은 훈련 외 주제로 넘긴다 (원칙 5)', () => {
   const fresh = loadApp();
   const sys = fresh.getCoachSystemPrompt();
-  assert.ok(!sys.includes('앱에 영양 추적 기능은 없으니'), '옛 단서 문구 제거');
-  assert.ok(sys.includes('식단·칼로리 기록 기능이 없다'), '식단 기록 없음은 정확히 명시');
-  assert.ok(sys.includes('체중'), '체중 기록은 존재하므로 언급 유지');
+  assert.ok(sys.includes('훈련 외 주제'), '원칙 5 = 훈련 외 주제 안내');
+  assert.ok(!sys.includes('지식 베이스 4·5번'), '옛 영양 섹션 참조 제거');
+  assert.ok(!sys.includes('식단·칼로리 기록 기능이 없다'), '옛 단서 문구 제거');
 });
 
 // ═══════════════════════════════════════════════

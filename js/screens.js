@@ -5668,7 +5668,7 @@ function renderCoachChat() {
   if (state.coachMessages.length <= 1) {
     quickQuestions = [
       '오늘 어떤 운동 해야 해?',
-      '단백질 어떻게 더 늘려?',
+      '디로드는 언제 해야 해?',
       '내 진행 상황 어때?',
       '정체기 같은데 어떻게?',
       '회복이 부족해'
