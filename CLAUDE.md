@@ -76,9 +76,11 @@ The app calls the Anthropic Messages API **directly from the browser**: `POST ht
 
 Model selection by task:
 - `claude-haiku-4-5` — fast/cheap signal extraction from the in-session chat (`extractWorkoutSignals`).
-- `claude-sonnet-5` — everything heavier: routine generation (`generateFullRoutine`, `modifyRoutineWithAI`), daily recommendation (`fetchAIRecommendation`), coach chat (`callCoachAPI`, built from `getCoachSystemPrompt` + `buildUserContext`), weekly review (`generateWeeklyReview`), plateau analysis (`analyzePlateauWithAI`), cardio plan generation.
+- `claude-sonnet-5` — everything heavier: routine generation (`generateFullRoutine`, `modifyRoutineWithAI`), coach chat (`callCoachAPI`, built from `getCoachSystemPrompt` + `buildUserContext`), weekly review (`generateWeeklyReview`), plateau analysis (`analyzePlateauWithAI`), cardio plan generation. (The daily-recommendation engine `fetchAIRecommendation` was deleted in #84 after being hidden from the UI — restore from git history before `0648697`'s successor if ever needed.)
 
-AI results are cached in `localStorage` and reused while fresh — daily recommendation (same `getTodayStr()`), weekly review (same `getWeekId()`), plateau check (within 3 days). The `load…IfNeeded` functions gate whether to hit the API again.
+AI results are cached in `localStorage` and reused while fresh — weekly review (same `getWeekId()`), plateau check (within 3 days). The `load…IfNeeded` functions gate whether to hit the API again.
+
+**Coach knowledge scope (2026-09-02):** `COACH_KNOWLEDGE` (7 sections) covers training variables only — volume, intensity/RIR, exercise selection, injury triage, recovery/deload, warm-up, concurrent cardio. **Nutrition (protein, calories, supplements) is deliberately excluded** (user decision); coach principle 5 deflects those questions as "훈련 외 주제". Every quantitative rule in the knowledge base, prompts, and `domain.js` constants was re-verified against 2024–2026 evidence in `docs/research/v2-*.md`; the approved change list with evidence grades is `docs/research/v2-selection-plan.md`. When changing a threshold (rep range, volume target, first-attempt %), grep for every place the old number is written in prompts, comments, `SESSIONS` templates, and screens — the 2026-09 review found five stale copies after the code constant had been updated.
 
 ## 디자인 규칙 (감사 후 확정 — docs/research/design-audit.md §5)
 
