@@ -358,7 +358,8 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
       return { weight: a0, source: 'rm_estimate', reverse: true, repRange: range, exClass: cls,
                note: '첫 시도 — 체중의 약 ' + Math.round(ASSIST_INITIAL_BW_RATIO * 100) + '%를 보조로. 한 세트 해보고 조절하세요' };
     }
-    var w = suggestWorkingWeight(exerciseName, 0.7);
+    // 클래스별 첫 시도 비율(FIRST_ATTEMPT_PCT) — 0.7 일괄은 고중량 복합에 한 클래스만큼 가벼웠다(선별안 B1).
+    var w = suggestWorkingWeight(exerciseName, firstAttemptPct(cls));
     // 라벨이 이미 "첫 시도 추천"이라 note 에 '(첫 시도)'를 또 붙이지 않는다.
     if (w) return { weight: w, source: 'rm_estimate', note: '1RM 추정 기반', repRange: range, exClass: cls };
     return null;
@@ -443,10 +444,15 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
         note: '보조 0kg · 상단 ' + topReps + '회 — 맨몸 졸업. 다음은 중량조끼·딥벨트로 무게를 더할 차례예요'
       };
     }
+    // 증량 폭 경고(선별안 B2): 한 칸이 현재 무게의 10%를 넘으면(가벼운 케이블·머신) 어시스트와 같은 방식으로
+    // 미리 알린다. 막지는 않는다 — 5kg 덤벨처럼 격자가 큰 경량 종목은 막으면 영영 증량이 없다.
     var newW = progressedWeight(exerciseName, maxW, inc);
+    var jumpPct = (!reverse && maxW > 0) ? (newW - maxW) / maxW : 0;
+    var jumpNote = jumpPct > WEIGHT_JUMP_MAX_PCT ? ' (+' + Math.round(jumpPct * 100) + '% — 반복이 떨어져도 정상이에요)' : '';
     return {
       weight: newW,
       source: 'progress',
+      jumpWarned: jumpPct > WEIGHT_JUMP_MAX_PCT,
       reverse: reverse,
       previousWeight: maxW,
       previousReps: lastReps,
@@ -454,7 +460,7 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
       exClass: cls,
       note: reverse
         ? (needSessions > 1 ? '2세션 연속 ' : '지난 ') + '보조 ' + maxW + 'kg × 상단 ' + topReps + '회 달성 → 보조 ' + newW + 'kg (−' + (maxW - newW) + 'kg = 더 어려워져요)' + assistJumpWarning(exerciseName, maxW, newW)
-        : (needSessions > 1 ? '2세션 연속 ' : '지난 ') + maxW + 'kg × 상단 ' + topReps + '회 달성 → ' + newW + 'kg'
+        : (needSessions > 1 ? '2세션 연속 ' : '지난 ') + maxW + 'kg × 상단 ' + topReps + '회 달성 → ' + newW + 'kg' + jumpNote
     };
   }
 
@@ -2207,8 +2213,25 @@ function getRecentVolumeSplitByPart(weeks) {
   var today = new Date();
   var since = new Date(today);
   since.setDate(today.getDate() - (weeks * 7));
-  
-  var sinceStr = getDateStr(since);
+  return getVolumeSplitSince(getDateStr(since));
+}
+
+// 이번 주(월요일, KST 기준) 시작일 'YYYY-MM-DD'. 볼륨 폐루프의 "이번 주 누적" 창(선별안 A6).
+function getThisWeekStartStr() {
+  var todayStr = getTodayStr();
+  var t = new Date(todayStr + 'T00:00:00Z');
+  var dow = t.getUTCDay() || 7;            // 월=1 … 일=7
+  t.setUTCDate(t.getUTCDate() - (dow - 1));
+  return t.toISOString().slice(0, 10);
+}
+
+// 이번 주 누적(월요일부터 오늘까지) 부위별 세트 — 직접/환산 두 벌.
+function getThisWeekVolumeSplitByPart() {
+  return getVolumeSplitSince(getThisWeekStartStr());
+}
+
+// sinceStr(포함) 이후 기록의 부위별 세트 합 — 직접(primary만) / 환산(간접 0.5 포함).
+function getVolumeSplitSince(sinceStr) {
   var workouts = state.data.workoutLog.filter(function(w) {
     return w.date >= sinceStr;
   });
@@ -2240,7 +2263,7 @@ function getRecentVolumeSplitByPart(weeks) {
       direct[info.primary] = (direct[info.primary] || 0) + setCount;
       fractional[info.primary] = (fractional[info.primary] || 0) + setCount;
       
-      // secondary(보조근) 부위에 0.5 세트 (Pelland 2025 분할세트 예측력 최고; 0.3~0.7 휴리스틱 중 0.5)
+      // secondary(보조근) 부위에 0.5 세트 — 세 방식(0/0.5/1.0) 중 통계적으로 예측력이 가장 높은 환산(Pelland 2026, Sports Med)
       if (info.secondary && info.secondary.length > 0) {
         info.secondary.forEach(function(s) {
           fractional[s] = (fractional[s] || 0) + setCount * 0.5;
@@ -2259,8 +2282,11 @@ function getRecentVolumeByPart(weeks) {
 
 // 부위 그룹 → 주간 볼륨 임계(세트). getVolumeDiagnosis와 STATS 화면이 같은 숫자를 쓰도록 한 곳에만 둔다.
 //   large: 부족<4 / 하한미달 4~10 / 적정 10~20 / 이득 완만 20+, 목표 12
-//   small: 부족<3 / 하한미달 3~8 / 적정 8~16 / 이득 완만 16+, 목표 8
+//   small: 부족<3 / 하한미달 3~8 / 적정 8~20 / 이득 완만 20+, 목표 10
 //   size는 BODY_PART_GROUPS[group].size, 없거나 'small'이 아니면 'large'로 안전 처리
+// 2026-09-02(선별안 B3): 작은 근육 목표 8→10, 수확 체감선 16→20. 옛 값은 "간접자극을 받으니 목표를 낮춘다"였는데
+// 간접 세트는 이미 0.5로 환산해 더해져 있어 이중 차감이었다. Pelland 2026(67연구)은 근육 크기별 곡선을 나누지 않고,
+// RP 랜드마크도 측면삼각·이두가 가슴보다 낮지 않다. 하한(8)·부족선(3)은 시간 예산 우선순위로 유지.
 function getVolumeThresholds(group) {
   var g = BODY_PART_GROUPS[group];
   var size = (g && g.size === 'small') ? 'small' : 'large';
@@ -2268,27 +2294,40 @@ function getVolumeThresholds(group) {
     size: size,
     lackBelow:  size === 'small' ? 3 : 4,
     optimalLow: size === 'small' ? 8 : 10,
-    optimalTop: size === 'small' ? 16 : 20,
-    target:     size === 'small' ? 8 : 12
+    optimalTop: 20,
+    target:     size === 'small' ? 10 : 12
   };
+}
+
+// 직접 세트 하한(선별안 B4): 복합운동에서 0.5씩만 쌓이는 부위는 환산 볼륨이 🟢여도 직접 고립이 0~2세트일 수 있다.
+// Pelland 2026 direct/fractional 구분 · Mannarino 2021(컬 > 로우 약 2배) · Kassiano 2024(종아리 12 > 6세트).
+var DIRECT_MIN_SETS = 4;
+var DIRECT_MIN_GROUPS = ['shoulders_side', 'shoulders_rear', 'biceps', 'triceps', 'calves'];
+
+// 신규 종목 첫 시도 비율 — 클래스 미상이면 중강도 복합 값.
+function firstAttemptPct(cls) {
+  return FIRST_ATTEMPT_PCT[cls] || FIRST_ATTEMPT_PCT.compound_moderate;
 }
 
 
 // 부족/과잉 부위 식별 (그룹 합산 기반)
 // volumeByPart는 세부 부위 단위 → 가슴(chest+chest_upper+chest_lower) 합산해서 진단
-function getVolumeDiagnosis(volumeByPart, weeks) {
+// directByPart(선택): 직접 세트(primary만) 맵. 주면 DIRECT_MIN_GROUPS 부위의 직접 세트 하한 미달을 directShort로 따로 돌려준다.
+function getVolumeDiagnosis(volumeByPart, weeks, directByPart) {
   var lacking = [];
   var optimal = [];
   var excessive = [];
   var belowOptimal = []; // MEV 통과·최적 하한(주10세트) 미달 (🟡)
   var untouched = []; // 주0세트 미접촉 (저우선 참고 — '최우선' 도배 방지)
+  var directShort = []; // 환산은 찼는데 직접 세트가 주 4세트 미만 (팔·측면/후면 어깨·종아리)
   
   // 그룹 합산
   var groupedVol = groupVolumeBy(volumeByPart);
+  var groupedDirect = directByPart ? groupVolumeBy(directByPart) : null;
   
-  // 모든 그룹 평가 — 부위 크기(size)별 임계 적용 (조사 C: 작은 근육은 복합운동 간접자극으로 목표 낮음)
+  // 모든 그룹 평가 — 부위 크기(size)별 임계 적용 (임계·목표는 getVolumeThresholds 주석 참조)
   //   large(가슴·등·대퇴사두·햄스트링·둔근): 부족<4 / 하한미달 4~10 / 적정 10~20 / 수확체감 20+, 목표 12
-  //   small(어깨·이두·삼두·종아리·복근·내전근): 부족<3 / 하한미달 3~8 / 적정 8~16 / 수확체감 16+, 목표 8
+  //   small(어깨·이두·삼두·복근·내전근): 부족<3 / 하한미달 3~8 / 적정 8~20 / 수확체감 20+, 목표 10
   //   size는 BODY_PART_GROUPS[group].size, 없거나 'small'이 아니면 'large'로 안전 처리
   Object.keys(BODY_PART_GROUPS).forEach(function(g) {
     var weeklyVol = (groupedVol[g] || 0) / weeks;
@@ -2317,9 +2356,17 @@ function getVolumeDiagnosis(volumeByPart, weeks) {
       entry.label += ' (주' + weeklyVol.toFixed(1) + '세트)';
       excessive.push(entry);
     }
+
+    // 직접 세트 하한 — 환산 버킷과 별개로 판정(환산이 🟢여도 잡는다). 0세트(미접촉)는 위 버킷이 이미 말한다.
+    if (groupedDirect && weeklyVol > 0 && DIRECT_MIN_GROUPS.indexOf(g) !== -1) {
+      var directWeekly = (groupedDirect[g] || 0) / weeks;
+      if (directWeekly < DIRECT_MIN_SETS) {
+        directShort.push({ group: g, label: BODY_PART_GROUPS[g].kr, direct: directWeekly, min: DIRECT_MIN_SETS });
+      }
+    }
   });
   
-  return { lacking: lacking, belowOptimal: belowOptimal, untouched: untouched, optimal: optimal, excessive: excessive };
+  return { lacking: lacking, belowOptimal: belowOptimal, untouched: untouched, optimal: optimal, excessive: excessive, directShort: directShort };
 }
 
 // SVG path 생성 (선 그래프)
@@ -2785,7 +2832,7 @@ function cardioWalkNextIncline(log, injuryAreas) {
 
   // 하향 게이트(§4-2)는 "가장 최근 세션"의 결과로 판정한다(기준 경사를 어디서 가져왔든).
   // 여러 조건에 걸려도 한 세션에 한 번만 내린다(과하향 방지).
-  if (last.handrail === 'hold') inc -= 2;                                  // 손잡이 계속 잡음 = 강도가 이미 샌 상태(§5-2)
+  if (last.handrail === 'hold_lean' || last.handrail === 'hold') inc -= 2; // 잡고 뒤로 기댐 = 강도가 이미 샌 상태(§5-2 · Hofmann 2014). 'hold'는 옛 기록 호환
   else if (!last.completed) inc -= 2;                                      // 미완주
   else if (typeof last.rpe === 'number' && last.rpe >= 9) inc -= 2;        // RPE 9 이상
 
@@ -2843,14 +2890,39 @@ function cardioWalkBodyWeight() {
 function cardioWalkContext() {
   var log = (state.data && Array.isArray(state.data.cardioLog)) ? state.data.cardioLog : [];
   var areas = (typeof getUserInjuryAreas === 'function') ? getUserInjuryAreas() : [];
+  var legs = cardioLegsAdjacency();
   return {
     log: log,
     areas: areas,
     back: areas.indexOf('lower_back') !== -1,
     sessions: cardioWalkSessions(log),
     cap: cardioWalkInclineCap(areas),
-    anchorIncline: cardioWalkNextIncline(log, areas)
+    anchorIncline: cardioWalkNextIncline(log, areas),
+    legsToday: legs.today,
+    legsYesterday: legs.yesterday
   };
+}
+
+// 하체 웨이트와의 인접(선별안 D4): 걷기 엔진이 웨이트 기록을 전혀 안 봐서 "하체 다음 날 한 단계 낮춤"이
+// 문서에만 있고 사용자에게 한 번도 전달되지 않았다. 근비대 간섭은 없지만(Schumann 2022·Held 2026) 하체 세션
+// 뒤 48시간은 급성 피로로 하지 수행이 떨어진다(Doma 2019). 판정만 하고 처방은 프롬프트가 한다.
+function cardioLegsAdjacency() {
+  var out = { today: false, yesterday: false };
+  var log = (state.data && Array.isArray(state.data.workoutLog)) ? state.data.workoutLog : [];
+  if (!log.length) return out;
+  var todayStr = getTodayStr();
+  var yStr = getDateStr(new Date(Date.now() - 86400000));
+  function isLegs(w) {
+    var k = String(w.sessionKr || w.sessionName || w.sessionType || '').toUpperCase();
+    return k.indexOf('LEGS') !== -1 || k.indexOf('하체') !== -1;
+  }
+  for (var i = 0; i < log.length; i++) {
+    var w = log[i];
+    if (!w || !w.date || !isLegs(w)) continue;
+    if (w.date === todayStr) out.today = true;
+    else if (w.date === yStr) out.yesterday = true;
+  }
+  return out;
 }
 
 // 걷기 세션 총시간 상한(§4-1) — 본 구간 33분을 넘기지 않도록 총시간 자체를 자른다.

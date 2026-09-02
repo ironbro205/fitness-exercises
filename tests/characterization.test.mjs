@@ -331,7 +331,8 @@ test('복원 — 악성 백업이 화면에서 실행되지 않고, 사용자 �
     app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
     data: {
       fitness_profile: { age: '<img src=x onerror=alert(1)>', height: 175, weight: 80, workoutFreq: 4, cyclePhase: '"><script>bad()</script>' },
-      fitness_workout_log: [{ id: "&#39;);alert(1);//", sessionKr: '<img src=x onerror=steal()>', date: '2026-08-01', duration: 30, sets: 10 }],
+      // 날짜는 오늘 — 기록 탭 목록은 기간 필터(최근 30일)를 타므로 옛 날짜면 화면에 안 실려 검사가 비어 버린다
+      fitness_workout_log: [{ id: "&#39;);alert(1);//", sessionKr: '<img src=x onerror=steal()>', date: fresh.getTodayStr(), duration: 30, sets: 10 }],
       fitness_body_log: [{ date: "&#39;);alert(2);//", weight: '<script>x</script>' }],
       fitness_coach_memory: [{ id: 'mem_1', category: 'injury', text: memoText }],
       fitness_one_rm_data: { '레그 프레스': 200, '벤치프레스': '<img src=x onerror=alert(1)>' },
@@ -1810,7 +1811,7 @@ test('getRecentVolumeSplitByPart — 직접과 분할환산을 분리, getRecent
 // ── 임계 단일 출처: getVolumeThresholds ↔ getVolumeDiagnosis ──
 test('getVolumeThresholds — 큰/작은 근육 임계 (종아리는 의도적으로 large)', () => {
   assert.deepEqual(plain(app.getVolumeThresholds('chest')),  { size: 'large', lackBelow: 4, optimalLow: 10, optimalTop: 20, target: 12 });
-  assert.deepEqual(plain(app.getVolumeThresholds('biceps')), { size: 'small', lackBelow: 3, optimalLow: 8,  optimalTop: 16, target: 8 });
+  assert.deepEqual(plain(app.getVolumeThresholds('biceps')), { size: 'small', lackBelow: 3, optimalLow: 8,  optimalTop: 20, target: 10 });
   assert.deepEqual(plain(app.getVolumeThresholds('calves')), { size: 'large', lackBelow: 4, optimalLow: 10, optimalTop: 20, target: 12 });
 });
 
@@ -2644,24 +2645,6 @@ test('정체기 화면 — 새 신호 키가 전부 한글 라벨을 갖는다',
   assert.ok(!html.includes('PR 갱신 정체 (2주)'), '옛 2주 표기가 남으면 안 된다');
 });
 
-// ── 오늘의 추천 실패 잠금은 새로고침을 넘어 살아남아야 한다 ──
-// 메모리에만 두면 하드 리로드마다 잠금이 풀려, 실패가 반복될 때 앱을 열 때마다 유료 호출이 나간다.
-test('오늘의 추천 — 실패 잠금이 localStorage에 남아 재부팅 후에도 유지된다', () => {
-  const today = loadApp().getTodayStr();
-
-  const a = loadApp();
-  a.localStorage.setItem('fitness_ai_rec_failed_date', JSON.stringify(today));
-  a.init();
-  assert.equal(a.state.aiRecFailedDate, today, '재부팅 후 잠금이 복원돼야 자동 재호출이 막힌다');
-
-  const b = loadApp();
-  b.localStorage.setItem('fitness_ai_rec_failed_date', JSON.stringify('2020-01-01'));
-  b.init();
-  assert.equal(b.state.aiRecFailedDate, null, '어제 잠금은 버려야 오늘 다시 시도한다');
-
-  assert.ok(a.KEYS.AI_REC_FAILED_DATE, '전용 KEY 존재');
-  assert.ok(a.BACKUP_EXCLUDE_KEYS.indexOf(a.KEYS.AI_REC_FAILED_DATE) !== -1, '하루짜리 임시값은 백업에서 제외');
-});
 
 // ── 휴식 타이머: 종목표에 없는 복합 종목도 150초를 받아야 한다 ──
 test('휴식 타이머 — 미등록 복합 종목도 부위 판정으로 150초', () => {
@@ -3349,4 +3332,90 @@ test('대화 미리보기 — 종목 줄에 세트 수와 세트법이 있다', 
   assert.equal((html.match(/3세트/g) || []).length, 3, '종목 줄마다 세트 수가 있어야 한다');
   // 자유 구성은 2단계를 건너뛰므로 세트법을 알 자리가 여기뿐이다
   assert.ok(html.includes(fresh.SET_SCHEMES.top_backoff.short), '고중량 복합의 세트법 표시가 없다');
+});
+
+// ═══ 2026-09-02 재검증 회귀 가드 (docs/research/v2-selection-plan.md A1·A6·B4·B5·D4·D5) ═══
+test('경사걷기 손잡이 — 뒤로 기댐만 경사 −2%, 세우고 잡음은 유지 (B5 · Hofmann 2014)', () => {
+  const mk = (over) => [Object.assign({
+    date: '2026-08-01', mode: 'walk', completed: true, rpe: 5,
+    segments: [{ type: 'warmup', sec: 300, incline: 0 }, { type: 'walk', sec: 1200, incline: 8 }]
+  }, over)];
+  assert.equal(app.cardioWalkNextIncline(mk({ handrail: 'hold_lean' }), []), 6);
+  assert.equal(app.cardioWalkNextIncline(mk({ handrail: 'hold_upright' }), []), 8);
+  assert.equal(app.cardioWalkNextIncline(mk({ handrail: 'hold' }), []), 6, '옛 기록 호환');
+  assert.deepEqual(plain(app.WALK_HANDRAIL_OPTIONS.map((o) => o.value)), ['none', 'light', 'hold_upright', 'hold_lean']);
+});
+
+test('볼륨 진단 — 직접 세트 하한: 환산이 적정이어도 팔·측면/후면 어깨·종아리 직접 4세트 미만이면 directShort (B4)', () => {
+  const fresh = loadApp();
+  const d1 = fresh.getVolumeDiagnosis({ biceps: 12 }, 1, { biceps: 2 });
+  assert.equal(d1.directShort.length, 1);
+  assert.equal(d1.directShort[0].group, 'biceps');
+  assert.equal(d1.directShort[0].direct, 2);
+  assert.equal(fresh.getVolumeDiagnosis({ biceps: 12 }, 1, { biceps: 5 }).directShort.length, 0);
+  assert.equal(fresh.getVolumeDiagnosis({ chest: 12 }, 1, { chest: 1 }).directShort.length, 0, '가슴은 대상 아님');
+  assert.equal(fresh.getVolumeDiagnosis({ biceps: 12 }, 1).directShort.length, 0, '직접 맵 없으면 판정 안 함');
+  assert.equal(fresh.getVolumeThresholds('biceps').target, 10);
+  assert.equal(fresh.getVolumeThresholds('biceps').optimalTop, 20);
+});
+
+test('걷기 엔진 — 하체 웨이트 인접(오늘/어제)을 읽어 컨텍스트에 싣는다 (D4)', () => {
+  const fresh = loadApp();
+  const today = fresh.getTodayStr();
+  const yday = fresh.getDateStr(new Date(Date.now() - 86400000));
+  fresh.state.data.workoutLog = [{ id: 'a', date: today, sessionKr: 'LEGS', exercises: [] }];
+  assert.deepEqual(plain(fresh.cardioLegsAdjacency()), { today: true, yesterday: false });
+  fresh.state.data.workoutLog = [{ id: 'b', date: yday, sessionKr: 'LEGS', exercises: [] }];
+  assert.deepEqual(plain(fresh.cardioLegsAdjacency()), { today: false, yesterday: true });
+  // 걷기 기록이 하나는 있어야 이력 컨텍스트가 만들어진다(없으면 '첫 회' 안내로 끝난다)
+  fresh.state.data.cardioLog = [{ date: yday, mode: 'walk', completed: true, rpe: 5, segments: [{ type: 'warmup', sec: 300, incline: 0 }, { type: 'walk', sec: 1200, incline: 6 }] }];
+  assert.ok(fresh.cardioWalkHistoryContext().includes('어제 하체 세션'), '프롬프트 컨텍스트에 실린다');
+  fresh.state.data.workoutLog = [{ id: 'c', date: yday, sessionKr: 'PUSH', exercises: [] }];
+  assert.ok(fresh.cardioWalkHistoryContext().includes('하체 인접 조정 불필요'));
+});
+
+test('코치 컨텍스트 — 정체 마커는 정체 엔진(4세션·28일)만 따른다: 3세션 같은 무게로는 🔥가 안 뜬다 (A1)', () => {
+  const fresh = loadApp();
+  fresh.state.apiKey = 'sk-test';
+  const d = (n) => fresh.getDateStr(new Date(Date.now() - n * 86400000));
+  const w = (n) => ({ id: 'w' + n, date: d(n), sessionKr: 'PUSH', sessionType: 'push',
+    exercises: [{ name: '벤치 프레스', maxWeight: 60, setsCount: 3, setsDetail: [{ weight: 60, reps: 8, completed: true }, { weight: 60, reps: 8, completed: true }, { weight: 60, reps: 8, completed: true }] }] });
+  fresh.state.data.workoutLog = [w(2), w(9), w(16)];
+  const ctx = fresh.buildUserContext();
+  assert.ok(!ctx.includes('## 🔥 정체'), '표본 3세션은 정체로 부르지 않는다');
+  assert.ok(ctx.includes('벤치 프레스') && !/벤치 프레스[^\n]*🔥/.test(ctx), '종목 줄에도 🔥 마커 없음');
+  // 엔진이 정체라고 하면 그대로 따른다
+  const key = fresh.canonicalExerciseName('벤치 프레스');
+  fresh.getStalledLifts = () => [key];
+  const ctx2 = fresh.buildUserContext();
+  assert.ok(ctx2.includes('## 🔥 정체') && ctx2.includes(key + ' 60kg'), ctx2.match(/## 🔥 정체[^\n]*\n[^\n]*/) + '');
+});
+
+test('코치 컨텍스트 — 볼륨 폐루프는 이번 주 누적을 함께 싣는다 (A6)', () => {
+  const fresh = loadApp();
+  fresh.state.apiKey = 'sk-test';
+  const today = fresh.getTodayStr();
+  fresh.state.data.workoutLog = [{ id: 'x', date: today, sessionKr: 'PUSH', sessionType: 'push',
+    exercises: [{ name: '벤치 프레스', setsCount: 3 }] }];
+  const ctx = fresh.buildUserContext();
+  assert.ok(ctx.includes('괄호 안은 이번 주 누적'), ctx.slice(0, 200));
+  assert.ok(/가슴 [0-9.]+\(이번 주 3\)/.test(ctx), '가슴 이번 주 3세트');
+  assert.ok(ctx.includes('이번 주 3세트, 목표 12세트까지 9세트 더'), '격차는 이번 주 누적 기준');
+});
+
+test('코치 컨텍스트 — RPE는 개인 기준선 대비로 판정하고 "오버트레이닝" 라벨을 쓰지 않는다 (D5)', () => {
+  const fresh = loadApp();
+  fresh.state.apiKey = 'sk-test';
+  const d = (n) => fresh.getDateStr(new Date(Date.now() - n * 86400000));
+  const log = [];
+  for (let i = 0; i < 5; i++) log.push({ date: d(i), rpe: 9, condition: 3 });
+  for (let i = 5; i < 15; i++) log.push({ date: d(i), rpe: 7, condition: 3 });
+  fresh.state.data.conditionLog = log;
+  const ctx = fresh.buildUserContext();
+  assert.ok(ctx.includes('평소보다 크게 높음') && ctx.includes('개인 기준선 7.0'), ctx.match(/RPE[^\n]*/)[0]);
+  assert.ok(!ctx.includes('오버트레이닝'));
+  // 기준선 없이 RPE 9 → 절대값 참고 표기, 오버트레이닝 아님
+  fresh.state.data.conditionLog = log.slice(0, 5);
+  const ctx2 = fresh.buildUserContext();
+  assert.ok(ctx2.includes('기준선 없음') && !ctx2.includes('오버트레이닝'));
 });

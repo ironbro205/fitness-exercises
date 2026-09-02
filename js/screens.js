@@ -23,8 +23,8 @@ function renderHome() {
 
   // 오늘의 추천은 화면에서 뺐다(홈 카드·부위 배지 모두). 그래서 배경 로드도 멈춘다 —
   // 아무 데도 안 쓰는 값을 하루 한 번 API 로 받아 오면 요금만 나간다.
-  // 엔진(fetchAIRecommendation·loadAIRecommendationIfNeeded)은 그대로 두었다: 다시 켤 때
-  // 이 두 줄을 되살리면 된다.
+  // 엔진(fetchAIRecommendation·loadAIRecommendationIfNeeded)은 2026-09-02에 삭제했다(죽은 코드 유지 비용).
+  // 되살리려면 git 기록(PR #83 이전)에서 복원한다.
 
   var monday = new Date(today);
   monday.setDate(today.getDate() - (dayOfWeek - 1));
@@ -57,6 +57,15 @@ function renderHome() {
   // 사이클 단계 안내 + 이번 주 진행
   var isDeloadWeek = profile.currentWeek >= CYCLE_LENGTH;
   var phaseHint = isDeloadWeek ? '가볍게 · 건너뛰기 가능' : '조금씩 늘리기';
+  // 디로드 앞당기기 제안(선별안 D2): 정체 엔진(4세션·28일 가드)을 통과한 종목이 2개 이상이면 달력을 기다리지 않아도
+  // 되게 "제안"만 한다(강제 아님 — Rogerson 2024 실측 트리거). 디로드 주에는 뜨지 않는다.
+  var stalledForDeload = (!isDeloadWeek && typeof getStalledLifts === 'function') ? getStalledLifts() : [];
+  var earlyDeloadHtml = (stalledForDeload.length >= 2)
+    ? '<div class="flex items-center justify-between mt-3">' +
+        '<p class="text-[11px] font-mono text-stone-400">정체 ' + stalledForDeload.length + '종목 · 디로드를 앞당길 수 있어요</p>' +
+        '<button class="session-fact-btn" style="min-height:32px;padding:6px 10px;" onclick="startEarlyDeload()">디로드 시작</button>' +
+      '</div>'
+    : '';
   var weekGoal = profile.workoutFreq || 4;
   var doneTowardWeek = profile.weekSessionsDone || 0; // 이번 주차 완료 수(캘린더 아님)
   var idleMsg = getIdleComebackMessage(data.workoutLog, getTodayStr());
@@ -122,6 +131,7 @@ function renderHome() {
             '<p class="text-[11px] text-stone-600 font-mono uppercase">디로드</p>' +
           '</div>' +
           '<p class="text-[11px] font-mono mt-3 ' + (idleMsg ? 'text-amber-400' : 'text-stone-400') + '">' + cycleStatusLine + '</p>' +
+          earlyDeloadHtml +
         '</div>' +
       '</div>' +
       
@@ -1342,6 +1352,19 @@ function advanceCycleIfWeekComplete() {
     showToast(updated.currentWeek + '주차로 진행 · ' + updated.cyclePhase);
   }
 }
+
+// 디로드 앞당기기(선별안 D2): 사용자가 홈 카드의 제안을 눌렀을 때만. 현재 사이클의 디로드 주차로 바로 넘긴다.
+// 디로드는 근성장을 늘리지도 깎지도 않으므로(Coleman 2024·Pancar 2026) 앞당겨도 손해가 없고, 잦은 디로드만 피한다.
+window.startEarlyDeload = function() {
+  var profile = state.profile;
+  if (!profile || (profile.currentWeek || 1) >= CYCLE_LENGTH) return;
+  profile.currentWeek = CYCLE_LENGTH;
+  profile.cyclePhase = getPhaseByWeek(CYCLE_LENGTH);
+  profile.weekSessionsDone = 0;
+  storage.set(KEYS.PROFILE, profile);
+  showToast('디로드 주간으로 넘어갔어요');
+  render();
+};
 
 // 세션 마무리: 통계 계산 + 저장 + 완료 화면
 function finalizeSession() {
@@ -7203,7 +7226,7 @@ function applyStopCardio() {
 // 손잡이 문항(걷기 모드 전용, §5-2) — 이 한 문항이 다음 세션 경사를 정한다.
 window.setCardioHandrail = function(v) {
   var run = state.cardio && state.cardio.run; if (!run) return;
-  run.handrail = (v === 'none' || v === 'light' || v === 'hold') ? v : null;
+  run.handrail = (v === 'none' || v === 'light' || v === 'hold_upright' || v === 'hold_lean') ? v : null;
   saveActiveCardio();          // RPE 입력 중 회수돼도 답이 남도록
   render();
 };

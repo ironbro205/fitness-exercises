@@ -725,10 +725,10 @@ test('[리뷰] 처방 표 반복 열이 클래스 범위 밖 목표를 감추지
     const plan = app.getRoutinePreviewPlan({ name: '핵 스쿼트', reps: '5-8', sets: 3 });
     return { shown: app.buildPrescriptionValues({ name: '핵 스쿼트' }, plan).reps, plan: plan };
   };
-  // 클래스 범위(5-8) 안에서 끝나는 스킴은 기존 표기 그대로
-  assert.equal(repsCol('straight').shown, '5-8');
-  assert.equal(repsCol('top_backoff').shown, '5-8');
-  // 피라미드(+4)는 5-8 이라 써 놓으면 실제 세트를 하나도 안 담는다
+  // 클래스 범위(6-10, 2026-09 통일) 안에서 끝나는 스킴은 클램프된 표기(5-8 → 6-8) 그대로
+  assert.equal(repsCol('straight').shown, '6-8');
+  assert.equal(repsCol('top_backoff').shown, '6-8');
+  // 피라미드(+4)는 6-8 이라 써 놓으면 실제 세트(10·8·6)를 다 담지 못한다
   assert.equal(repsCol('pyramid').shown, '8-12');
   assert.equal(repsCol('rpt').shown, '8-12');
 
@@ -1491,7 +1491,7 @@ test('[탑세트] 손수 올린 무게·증량일의 새 무게가 프리필에 
   endSession();
 
   // (b) 증량일 — 무게만 지난 세션 값으로 되돌아가면 더블 프로그레션 게이트가 얼어붙는다
-  seedRecalc([session('핵 스쿼트', 100, 8, 3), session('핵 스쿼트', 100, 8, 10)]);
+  seedRecalc([session('핵 스쿼트', 100, 10, 3), session('핵 스쿼트', 100, 10, 10)]);   // 상단 = 10 (2026-09)
   app.setSetSchemeOverride('핵 스쿼트', 'straight');
   ex = startSession('핵 스쿼트');
   assert.equal(app.hardestWeight('핵 스쿼트', weightsOf(ex)), 105, '전제: 2세션 상단 달성 → 105');
@@ -1733,7 +1733,7 @@ test('[탑세트] 입력 무게는 그 세션에만 남는다 (저장 키를 새
 // ── C. 표시·가드·되돌리기 ─────────────────────────────────
 
 test('[표시] 탑세트를 끝내도 카드가 "무게 낮추기"로 뒤집히지 않는다 (2차 #1)', () => {
-  seedRecalc([session('핵 스쿼트', 90, 8, 3), session('핵 스쿼트', 90, 8, 10)]);
+  seedRecalc([session('핵 스쿼트', 90, 10, 3), session('핵 스쿼트', 90, 10, 10)]);  // 상단 = 10 (2026-09 반복 범위 통일)
   const ex = startSession('핵 스쿼트');                   // 증량일 → [95, 85, 85]
   app.state.setSchemeOpen = false;
   assert.deepEqual([...weightsOf(ex)], [95, 85, 85]);
@@ -1997,7 +1997,7 @@ test('[교체] 기록 없는 종목으로 바꾸면 옛 종목 무게가 따라�
 test('[교체] 완료한 탑·자동 디로드가 새 종목에 물려지지 않는다 (3차 H4-b)', () => {
   const day = (d) => ({
     date: daysAgo(d), sessionType: 'legs', exercises: [
-      { name: '핵 스쿼트', setsDetail: [set(100, 8), set(90, 8), set(90, 8)] },
+      { name: '핵 스쿼트', setsDetail: [set(100, 10), set(90, 10), set(90, 10)] },   // 상단 = 10 (2026-09)
       { name: '바벨 데드리프트', setsDetail: [set(140, 6), set(125, 6), set(125, 6)] }
     ]
   });
@@ -2102,11 +2102,11 @@ test('[문구] 남은 세트 기준으로 토스트를 만든다 (3차 M2)', () 
 });
 
 test('[수정] 끝낸 탑보다 무거운 값은 그 탑까지만 반영된다 (3차 M1)', () => {
-  seedRecalc([session('핵 스쿼트', 100, 5, 3)]);
+  seedRecalc([session('핵 스쿼트', 100, 6, 3)]);   // 하단 = 6 (2026-09 반복 범위 통일)
   const ex = startSession('핵 스쿼트');
   app.state.setSchemeOpen = false;
   workingSets(ex)[0].completed = true;
-  workingSets(ex)[0].reps = 5;                             // 탑 100 완료
+  workingSets(ex)[0].reps = 6;                             // 탑 100 완료
 
   const toast = tapTopSet(120);                            // 재탭 후 120 입력
   assert.deepEqual([...weightsOf(ex)], [100, 90, 90],
