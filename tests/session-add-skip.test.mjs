@@ -49,14 +49,14 @@ function completeFirstWorkingSets(ex, n) {
 test('추가 종목의 반복범위·세트법·휴식은 그 종목 클래스 규칙을 그대로 따른다', () => {
   resetLog();
   const heavy = app.buildSessionExercise('핵 스쿼트');       // compound_heavy 5-8, 탑+백오프
-  assert.equal(heavy.targetReps, '5-8');
+  assert.equal(heavy.targetReps, '6-10');
   assert.equal(heavy.scheme, 'top_backoff');
   assert.equal(heavy.type, '복합');
   assert.ok(heavy.sets.some((s) => s.role === 'top'));
   assert.ok(heavy.sets.some((s) => s.role === 'backoff'));
 
   const light = app.buildSessionExercise('덤벨 사이드 레터럴 레이즈'); // light_isolation 15-25
-  assert.equal(light.targetReps, '15-25');
+  assert.equal(light.targetReps, '12-25');
   assert.equal(light.scheme, 'straight');
   assert.equal(light.type, '고립');
   // 고립 이하는 첫 워킹세트가 자체 워밍업이라 워밍업 세트를 넣지 않는다

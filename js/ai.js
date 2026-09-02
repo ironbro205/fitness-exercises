@@ -251,8 +251,8 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
     '7. **횟수 (type별 필수 가이드 — 루틴 생성 규칙과 동일)**:\n' +
     '   - 메인 복합 (isMain:true): "6-10"\n' +
     '   - 보조 복합 (compound, isMain:false): "8-12"\n' +
-    '   - 고립 일반: "10-15"\n' +
-    '   - 소근육 고립 (사이드/리어 레터럴 레이즈, 페이스 풀, 푸시다운, 컬류, 카프 레이즈, 힙 어덕션 등): "12-25" (중간~가벼운 무게로 반동 없이 실패 2~3회 전까지)\n' +
+    '   - 고립 일반: "10-15" (이두·삼두 등 팔 고립 포함)\n' +
+    '   - 소근육 고립 (사이드/리어 레터럴 레이즈, 카프 레이즈, 힙 어덕션 등 측면/후면 어깨·종아리·복근·내전근): "12-25" (중간~가벼운 무게로 반동 없이 실패 2~3회 전까지)\n' +
     '   ※ 가벼운 무게 다회수 운동을 무겁게 적은 횟수로 추천하지 말 것\n\n' +
     
     '## ❌ 절대 금지\n' +
@@ -500,21 +500,11 @@ function buildUserContext(options) {
     });
   });
   
-  // 정체기 감지: 최근 3회 무게 동일 AND 본세트 최고 반복도 안 늚 → plateau
-  //   (무게가 같아도 반복이 오르는 중이면 더블 프로그레션 정상 진행이므로 plateau=false)
-  Object.keys(recentLifts).forEach(function(name) {
-    var hist = recentLifts[name].history.slice(0, 3);  // [0]=최근, [2]=3회 전
-    if (hist.length < 3) return;
-    var weightSame = hist[0].weight === hist[1].weight && hist[1].weight === hist[2].weight;
-    if (!weightSame) return;
-    function maxReps(h) {
-      return (h.reps && h.reps.length) ? Math.max.apply(null, h.reps) : null;
-    }
-    var repsNew = maxReps(hist[0]);  // 최근 세션 본세트 최고 반복
-    var repsOld = maxReps(hist[2]);  // 3회 전 세션
-    // 반복이 오르는 중(최근 > 3회 전)이면 정체 아님. 반복 데이터가 없으면 무게 기준만으로 정체 처리(보수적).
-    var repsRising = (repsNew !== null && repsOld !== null && repsNew > repsOld);
-    if (!repsRising) recentLifts[name].plateau = true;
+  // 정체 마커는 정체 엔진(getStalledLifts: 종목당 4세션·28일 표본, 무게·반복 모두 비상승)과 같은 판정을 쓴다.
+  // 옛 "최근 3회 무게 동일" 규칙은 측정 잡음 안이라 3주만 정체해도 🔥가 떠 엔진 가드를 우회했다(선별안 A1).
+  var stalledNames = (typeof getStalledLifts === 'function') ? getStalledLifts() : [];
+  stalledNames.forEach(function(name) {
+    if (recentLifts[name]) recentLifts[name].plateau = true;
   });
   
   // 컨텍스트 문자열 구성
@@ -565,14 +555,17 @@ function buildUserContext(options) {
   ctx += '\n';
   
   // ⭐ 부위별 주간 볼륨 분석 (가장 중요)
-  var volumeByPart = getRecentVolumeByPart(2);  // 2주 기준
+  var volumeSplit = getRecentVolumeSplitByPart(2);  // 2주 기준 (직접/환산)
+  var volumeByPart = volumeSplit.fractional;
   var volumeKeys = Object.keys(volumeByPart);
   if (volumeKeys.length > 0) {
-    var diagnosis = getVolumeDiagnosis(volumeByPart, 2);
+    var diagnosis = getVolumeDiagnosis(volumeByPart, 2, volumeSplit.direct);
     var groupedVol = groupVolumeBy(volumeByPart);
+    // 이번 주 누적(월요일부터) — 폐루프는 "이번 주에 이미 한 세트"를 빼야 주 초반 과소·후반 과대 처방이 안 난다(선별안 A6)
+    var thisWeekGrouped = groupVolumeBy(getThisWeekVolumeSplitByPart().fractional);
     
-    ctx += '## 부위별 주간 볼륨 분석 (최근 2주 평균, 세트/주, 그룹 합산)\n';
-    ctx += '※ 큰 근육(가슴·등·대퇴사두·햄스트링·둔근) 주 10~20세트 / 작은 근육(어깨·이두·삼두·복근) 주 8~16세트가 적정(간접 세트는 이미 0.5로 환산돼 있으니 "복합으로 충분"이라 결론 내리지 말 것 — 팔·측면/후면 어깨·종아리는 직접 세트가 주 4세트 이상 필요). 큰 근육 20+·작은 근육 16+는 수확 체감. 간접(보조근) 세트는 0.5로 합산\n';
+    ctx += '## 부위별 주간 볼륨 분석 (최근 2주 평균, 세트/주, 그룹 합산 · 괄호 안은 이번 주 누적)\n';
+    ctx += '※ 큰 근육(가슴·등·대퇴사두·햄스트링·둔근) 주 10~20세트 / 작은 근육(어깨·이두·삼두·복근) 주 8~20세트가 적정(간접 세트는 이미 0.5로 환산돼 있으니 "복합으로 충분"이라 결론 내리지 말 것 — 팔·측면/후면 어깨·종아리는 직접 세트가 주 4세트 이상 필요). 20+는 수확 체감(금지선 아님). 간접(보조근) 세트는 0.5로 합산\n';
     ctx += '※ 가슴 = chest+chest_upper+chest_lower 합산. 어깨 측면/전면/후면 별도. 등 중부 = upper_back+traps.\n';
     
     // 그룹 단위로 표시 (가슴 합산)
@@ -580,22 +573,24 @@ function buildUserContext(options) {
     Object.keys(BODY_PART_GROUPS).forEach(function(g) {
       var vol = (groupedVol[g] || 0) / 2;
       if (vol > 0) {
-        var isSmall = (BODY_PART_GROUPS[g] && BODY_PART_GROUPS[g].size === 'small');
-        var status = isSmall
-          ? (vol < 3 ? '🔴' : (vol < 8 ? '🟡' : (vol <= 16 ? '🟢' : '🔥')))
-          : (vol < 4 ? '🔴' : (vol < 10 ? '🟡' : (vol <= 20 ? '🟢' : '🔥')));
-        partVolStrs.push(status + ' ' + BODY_PART_GROUPS[g].kr + ' ' + vol.toFixed(1));
+        var th = getVolumeThresholds(g);
+        var status = vol < th.lackBelow ? '🔴' : (vol < th.optimalLow ? '🟡' : (vol <= th.optimalTop ? '🟢' : '🔥'));
+        var tw = (thisWeekGrouped[g] || 0);
+        partVolStrs.push(status + ' ' + BODY_PART_GROUPS[g].kr + ' ' + vol.toFixed(1) + '(이번 주 ' + (Math.round(tw * 10) / 10) + ')');
       }
     });
     if (partVolStrs.length > 0) {
       ctx += partVolStrs.join(' / ') + '\n';
     }
     
-    // 폐루프: 부위별 목표(큰 근육 12 / 작은 근육 8, domain diagnosis의 item.target)까지 남은 직접 세트를 함께 제시 → AI가 이번 세션 크기를 격차에 맞춤
-    function volNeedNote(v, target) {
+    // 폐루프: 부위별 목표(큰 근육 12 / 작은 근육 10, domain diagnosis의 item.target)까지 남은 세트를 "이번 주 누적" 기준으로 제시 → AI가 이번 세션 크기를 격차에 맞춤
+    function volNeedNote(target, group) {
       target = target || 12;
-      var need = target - v;
-      return need > 0 ? (' — 목표 ' + target + '세트까지 ' + (Math.round(need * 10) / 10) + '세트 더') : '';
+      var tw = (thisWeekGrouped[group] || 0);
+      var need = target - tw;
+      return need > 0
+        ? (' — 이번 주 ' + (Math.round(tw * 10) / 10) + '세트, 목표 ' + target + '세트까지 ' + (Math.round(need * 10) / 10) + '세트 더' + (need > 8 ? ' (한 세션엔 최대 8세트)' : ''))
+        : (' — 이번 주 ' + (Math.round(tw * 10) / 10) + '세트로 목표 ' + target + ' 도달');
     }
     if (diagnosis.lacking.length > 0) {
       ctx += '⚠️ **부족 부위 (최우선 보충)**:\n';
@@ -608,7 +603,7 @@ function buildUserContext(options) {
         }).filter(function(n) {
           return isExerciseAvailable(n);
         });
-        ctx += '- ' + item.label + volNeedNote(item.vol, item.target);
+        ctx += '- ' + item.label + volNeedNote(item.target, item.group);
         if (recs.length > 0) {
           ctx += ' → 권장 종목: ' + recs.slice(0, 3).join(', ');
         }
@@ -618,8 +613,12 @@ function buildUserContext(options) {
     if (diagnosis.belowOptimal && diagnosis.belowOptimal.length > 0) {
       ctx += '🟡 **최적 하한 미달 (여유 있으면 보충)**:\n';
       diagnosis.belowOptimal.forEach(function(item) {
-        ctx += '- ' + item.label + volNeedNote(item.vol, item.target) + '\n';
+        ctx += '- ' + item.label + volNeedNote(item.target, item.group) + '\n';
       });
+    }
+    if (diagnosis.directShort && diagnosis.directShort.length > 0) {
+      ctx += '🟠 **직접 세트 부족 (환산은 찼어도 직접 고립이 주 ' + DIRECT_MIN_SETS + '세트 미만 — 고립 종목을 넣을 것)**: ' +
+        diagnosis.directShort.map(function(e) { return e.label + ' 직접 ' + (Math.round(e.direct * 10) / 10) + '세트'; }).join(', ') + '\n';
     }
     if (diagnosis.untouched && diagnosis.untouched.length > 0) {
       ctx += '◽ 미접촉(주 0세트, 저우선 참고 — 필요시만 고려): ' + diagnosis.untouched.map(function(e) { return e.label; }).join(', ') + '\n';
@@ -653,7 +652,7 @@ function buildUserContext(options) {
     });
     
     if (plateauList.length > 0) {
-      ctx += '## 🔥 정체기 감지 (최근 3회 무게 동일 + 최고 반복도 비상승 — 반복이 오르는 중이면 정상 진행이라 제외)\n';
+      ctx += '## 🔥 정체 (엔진 판정: 종목당 4세션·28일 이상 표본에서 무게·반복 모두 비상승 — 표본 부족 종목은 정체로 부르지 않는다)\n';
       ctx += '- ' + plateauList.join(', ') + '\n';
       ctx += '- 권장: +한 칸(덤벨 2kg·그 외 5kg) 도전 또는 종목 변경 / 더블 프로그레션 적용\n\n';
     }
@@ -695,7 +694,7 @@ function buildUserContext(options) {
     }
     
     ctx += '## 🏋️ 사용자 1RM + 추천 작업 무게' + (focusBodyPart ? ' (' + focusBodyPart.toUpperCase() + ' 부위만)' : ' (부위별)') + '\n';
-    ctx += '※ 반복 목표에 맞춘 추정 작업무게(메인 ~75% / 보조 ~68% / 고립 ~62% 1RM), 그 종목 장비 단위로 스냅됨(덤벨 2kg·그 외 5kg). 집단 평균이라 상체·고립은 편차 큼 → 실제로는 목표 RIR로 재보정. **신규 종목에만 사용**, "최근 실제 수행" 있으면 그쪽 우선.\n\n';
+    ctx += '※ 반복 목표에 맞춘 추정 작업무게(고중량 복합 ' + Math.round(FIRST_ATTEMPT_PCT.compound_heavy * 100) + '% / 중강도 복합 ' + Math.round(FIRST_ATTEMPT_PCT.compound_moderate * 100) + '% / 고립 ' + Math.round(FIRST_ATTEMPT_PCT.isolation * 100) + '% 1RM — 고립 열은 고립(' + Math.round(FIRST_ATTEMPT_PCT.isolation * 100) + '%) 기준이고 경량 고립은 세션 화면에서 ' + Math.round(FIRST_ATTEMPT_PCT.light_isolation * 100) + '%를 쓴다), 그 종목 장비 단위로 스냅됨(덤벨 2kg·그 외 5kg). RIR 2~3을 남기는 기준의 집단 평균이라 상체·고립은 편차 큼 → 첫 세션 후 RIR로 재보정. **신규 종목에만 사용**, "최근 실제 수행" 있으면 그쪽 우선.\n\n';
     
     // 부위별 자동 그룹화
     var byPart = {};
@@ -720,9 +719,9 @@ function buildUserContext(options) {
       byPart[partKr].forEach(function(name) {
         var rm = oneRMData[name];
         var rmDisplay = Math.round(rm);
-        var main = snapWeightToEquipment(rm * 0.75, name);
-        var sub = snapWeightToEquipment(rm * 0.68, name);
-        var iso = snapWeightToEquipment(rm * 0.62, name);
+        var main = snapWeightToEquipment(rm * FIRST_ATTEMPT_PCT.compound_heavy, name);
+        var sub = snapWeightToEquipment(rm * FIRST_ATTEMPT_PCT.compound_moderate, name);
+        var iso = snapWeightToEquipment(rm * FIRST_ATTEMPT_PCT.isolation, name);
         ctx += '- ' + name + ': 1RM ' + rmDisplay + 'kg → 메인 ' + main + 'kg / 보조 ' + sub + 'kg / 고립 ' + iso + 'kg\n';
       });
     });
@@ -733,6 +732,11 @@ function buildUserContext(options) {
   var conditionLog = state.data.conditionLog || [];
   if (conditionLog.length > 0) {
     var recent5 = conditionLog.slice(0, 5);
+    // 개인 기준선(선별안 D5): 최근 5회를 뺀 그 이전 기록의 평균 RPE. RIR 1~3 훈련자의 RPE 8~9는 정상값이라
+    // 절대값 8.5 문턱은 정상 훈련을 매주 "회복 모드"로 떨어뜨린다 → 평소 대비 +1.5 이상일 때만 신호.
+    var baseRpeSum = 0, baseRpeCnt = 0;
+    conditionLog.slice(5, 30).forEach(function(c) { if (c.rpe) { baseRpeSum += c.rpe; baseRpeCnt++; } });
+    var baselineRpe = baseRpeCnt >= 5 ? baseRpeSum / baseRpeCnt : null;
     var avgRpe = 0, avgCond = 0, rpeCnt = 0, condCnt = 0;
     recent5.forEach(function(c) {
       if (c.rpe) { avgRpe += c.rpe; rpeCnt++; }
@@ -747,8 +751,14 @@ function buildUserContext(options) {
       var rpeStatus;
       if (recent5.length < 3) {
         rpeStatus = '(참고)';
+      } else if (baselineRpe !== null) {
+        var rpeDelta = avgRpeNum - baselineRpe;
+        rpeStatus = rpeDelta >= 1.5 ? '🔥 평소보다 크게 높음 (+' + rpeDelta.toFixed(1) + ' — 회복 모드 신호)' :
+                    rpeDelta >= 0.8 ? '🟡 평소보다 높음 (+' + rpeDelta.toFixed(1) + ')' :
+                    rpeDelta <= -1.0 ? '🔵 평소보다 가벼움 (' + rpeDelta.toFixed(1) + ')' : '🟢 평소 수준';
+        rpeStatus += ' · 개인 기준선 ' + baselineRpe.toFixed(1);
       } else {
-        rpeStatus = avgRpeNum >= 8.5 ? '🔥 매우 높음 (오버트레이닝 위험)' :
+        rpeStatus = avgRpeNum >= 8.5 ? '🔥 매우 높음 (기준선 없음 — 절대값 참고, RIR 1~3 훈련이면 정상 범위일 수 있음)' :
                     avgRpeNum >= 7 ? '🟡 도전적' :
                     avgRpeNum >= 5 ? '🟢 적정' : '🔵 가벼움';
       }
@@ -931,136 +941,7 @@ async function callCoachAPI(messages) {
 // AI 운동 추천 (Sonnet 4.6)
 // ═══════════════════════════════════════════════
 
-async function fetchAIRecommendation() {
-  if (!state.apiKey) return null;
-  
-  // 캐시 확인 (오늘 이미 요청했으면 재사용)
-  var todayStr = getTodayStr();
-  var cached = storage.get(KEYS.AI_RECOMMENDATION);
-  if (cached && cached.date === todayStr) {
-    return cached;
-  }
-  
-  var context = buildUserContext();
-
-  // 다양성용: 최근 추천 기록 (묶음3)
-  var recHistory = storage.get(KEYS.AI_RECOMMENDATION_HISTORY, []);
-  var recentRecsNote = recHistory.length
-    ? recHistory.slice(-5).map(function(r) { return r.date + ' ' + r.session; }).join(', ')
-    : '없음';
-
-  var systemPrompt = '당신은 사용자의 피트니스 코치입니다. 사용자 데이터를 분석해서 오늘 어떤 부위를 운동해야 하는지 추천하세요. ' +
-    '반드시 JSON 형식으로만 응답하세요. 추가 설명 없이 JSON만.\n\n' +
-    
-    '## 🧬 과학적 근거\n' +
-    '- 주간 총 세트가 같으면 빈도(주 1회 vs 2회)는 근비대에 무관 (Schoenfeld 2019). 주 2회는 세트를 나눠 담는 수단\n' +
-    '- 부위당 주 10~20세트 최적 (Pelland 2024)\n' +
-    '- 48~72시간 회복 보장 (큰 근육)\n\n' +
-    
-    '## 🎯 추천 로직 (이 순서대로 판단)\n' +
-    '1. **부족 부위 확인**: 사용자 데이터의 "부족 부위" 리스트 보기\n' +
-    '   - 가슴/어깨/삼두 부족 → push 추천\n' +
-    '   - 광배/등/이두 부족 → pull 추천\n' +
-    '   - 하체/햄스트링/둔근 부족 → legs 추천\n' +
-    '2. **이번 주 운동 부위**: 24시간 이내 같은 부위 운동했으면 다른 부위\n' +
-    '3. **컨디션 반영** (3회 이상 데이터가 있으면 우선): 평균 RPE ≥ 8.5 또는 컨디션 ≤ 2 → intensity:"light" + caution에 회복 권유\n' +
-    '4. **사이클 단계 반영**: 컨텍스트 "사이클 단계"가 "디로드"면 intensity를 "light"로 낮추고 caution에 "회복·부상 예방용 주간"임을 적는다. "빌드" 단계면 컨디션에 따라 moderate~challenging.\n' +
-    '5. **수면/회복 신호**: 데이터 부족하면 moderate 안전 권장\n\n' +
-    
-    '## 응답 형식\n' +
-    '{\n' +
-    '  "session": "push" | "pull" | "legs" | "upper" | "free",\n' +
-    '  "title": "추천 한 줄 (예: 오늘은 PULL이 적절합니다)",\n' +
-    '  "reason": "왜 이 부위인지 - 사용자 부족 부위 데이터 인용 필수 (2~3문장)",\n' +
-    '  "caution": "주의사항 (1문장, 없으면 빈 문자열)",\n' +
-    '  "suggestion": "메인 종목 무게/횟수 제안 (1문장, 사용자의 1RM 기반)",\n' +
-    '  "intensity": "light" | "moderate" | "challenging"\n' +
-    '}\n\n' +
-
-    '## 🔄 다양성 (최근 추천 회피)\n' +
-    '- 최근 추천 기록: ' + recentRecsNote + '\n' +
-    '- 위 최근 추천과 같은 부위를 반복하지 마라. 단, 데이터상 부족 부위가 그것뿐이면 재추천 가능(reason에 이유 명시).\n\n' +
-
-    (function() { var sb = buildSafetyPromptBlock(); return sb ? sb + '(suggestion에 금기 종목을 제안하지 말 것)\n\n' : ''; })() +
-    '## 사용자 데이터\n' + context;
-  
-  try {
-    var response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': state.apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-5',
-        thinking: { type: 'disabled' }, // Sonnet 5 기본 생각모드가 max_tokens를 소진해 빈 응답이 오는 사고 방지 (+생각 토큰 요금 절감)
-        max_tokens: 512,
-        system: systemPrompt,
-        messages: [
-          { role: 'user', content: '오늘 어떤 운동을 해야 할까요? 사용자 데이터 기반으로 분석해서 JSON으로만 답하세요.' }
-        ]
-      })
-    });
-    
-    if (!response.ok) {
-      console.error('AI 추천 실패:', response.status);
-      return null;
-    }
-    
-    var data = await response.json();
-    if (!getResponseText(data)) {
-      return null;
-    }
-    var content = getResponseText(data);
-    
-    // JSON 추출
-    var cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    var parsed;
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch (e) {
-      var match = cleaned.match(/\{[\s\S]*\}/);
-      if (match) {
-        parsed = JSON.parse(match[0]);
-      } else {
-        return null;
-      }
-    }
-    
-    // 유효성 검증
-    var validSessions = ['push', 'pull', 'legs', 'upper', 'free'];
-    if (!validSessions.includes(parsed.session)) {
-      console.error('잘못된 session:', parsed.session);
-      return null;
-    }
-    
-    var result = {
-      session: parsed.session,
-      title: aiText(parsed.title),
-      reason: aiText(parsed.reason),
-      caution: aiText(parsed.caution),
-      suggestion: aiText(parsed.suggestion),
-      intensity: aiEnum(parsed.intensity, AI_INTENSITY_LEVELS, 'moderate'),
-      date: todayStr,
-      aiGenerated: true
-    };
-    
-    // 캐시 저장
-    storage.set(KEYS.AI_RECOMMENDATION, result);
-
-    // 추천 이력 갱신 (다양성용): 오늘 항목 교체, 최근 7개 유지
-    var hist = storage.get(KEYS.AI_RECOMMENDATION_HISTORY, []).filter(function(r) { return r.date !== todayStr; });
-    hist.push({ date: todayStr, session: result.session });
-    storage.set(KEYS.AI_RECOMMENDATION_HISTORY, hist.slice(-7));
-
-    return result;
-  } catch (error) {
-    console.error('AI 추천 호출 실패:', error);
-    return null;
-  }
-}
+// (오늘의 추천 엔진 fetchAIRecommendation은 2026-09-02 삭제 — 화면에서 뺀 뒤 죽은 코드였다. 필요하면 git 기록에서 복원.)
 
 // ═══════════════════════════════════════════════
 // 전체 루틴 생성 (STEP 2 - 부위 선택 후)
@@ -1185,9 +1066,9 @@ async function generateFullRoutine(bodyPart) {
 
 **2. 부족 부위 우선 + 주간 볼륨 폐루프 (세트 수를 격차에 맞춤)**
 - 컨텍스트 "부족 부위(최우선 보충)"와 "🟡 최적 하한 미달"에 나온 부위를 이번 루틴에 우선 포함한다.
-- 각 항목 옆의 "목표 N세트까지 N세트 더"를 읽고, 이번 세션의 그 부위 세트 수를 그 격차에 맞춰 정한다(많이 부족할수록 세트를 더, 거의 찼으면 적게). 주간 목표는 부위 크기별로 다르다 — 큰 근육(가슴·등·대퇴사두·햄스트링·둔근) 약 12세트, 작은 근육(어깨·이두·삼두·복근) 약 8세트(목표 차이는 시간 예산 우선순위 때문이지 "복합으로 충분"해서가 아니다 — 간접 세트는 이미 0.5로 환산돼 있다. 측면/후면 어깨·이두·삼두·종아리는 직접 세트가 주 4세트 이상 필요하다).
+- 각 항목 옆의 "목표 N세트까지 N세트 더"를 읽고, 이번 세션의 그 부위 세트 수를 그 격차에 맞춰 정한다(많이 부족할수록 세트를 더, 거의 찼으면 적게). 주간 목표는 부위 크기별로 다르다 — 큰 근육(가슴·등·대퇴사두·햄스트링·둔근) 약 12세트, 작은 근육(어깨·이두·삼두·복근) 약 10세트(목표 차이는 시간 예산 우선순위 때문이지 "복합으로 충분"해서가 아니다 — 간접 세트는 이미 0.5로 환산돼 있다. 측면/후면 어깨·이두·삼두·종아리는 직접 세트가 주 4세트 이상 필요하다).
 - 세션당 한 부위 직접 세트는 약 8세트 이하로 둔다(소프트 상한 — 정밀 근거는 아직 약함). 격차가 커서 한 세션에 다 못 넣으면 초과분은 그 주 두 번째 세션으로 분할한다.
-- 컨텍스트 "🔥 수확 체감 구간"으로 표시된 부위는 더 늘리지 않는다. 단 이는 절대 상한이 아니라 수확 체감 지점이다(큰 근육 20+·작은 근육 16+, 넘어도 성장이 멈추는 건 아님) — "금지선"처럼 단정하지 말 것.
+- 컨텍스트 "🔥 수확 체감 구간"으로 표시된 부위는 더 늘리지 않는다. 단 이는 절대 상한이 아니라 수확 체감 지점이다(큰 근육·작은 근육 모두 20+, 넘어도 성장이 멈추는 건 아님) — "금지선"처럼 단정하지 말 것.
 
 **3. 다양성 (같은 주 중복 회피)**
 - 컨텍스트 "이번 주 이미 수행한 종목"에 있는 종목은 이번 루틴에 다시 넣지 않는다 — 같은 부위라도 다른 종목·각도로 새 자극을 준다. "최근 종목별 실제 수행"과도 가능하면 안 겹치게. (단, 부족 부위 보충·점진적 과부하가 우선)
@@ -1217,18 +1098,18 @@ async function generateFullRoutine(bodyPart) {
 **6. 반복 범위 (근비대 중심)**
 - 메인 복합: 6~10
 - 보조 복합: 8~12
-- 고립: 10~15 (사이드/리어 레터럴 레이즈, 페이스풀, 푸시다운, 컬, 카프 레이즈 등 소근육 고립은 12~25 — 아래 6-1)
+- 고립: 10~15 (이두·삼두 등 팔 고립 포함). 사이드/리어 레터럴 레이즈·카프 레이즈 등 측면/후면 어깨·종아리·복근·내전근 소근육 고립은 12~25 — 아래 6-1
 - 근력 편향 5~8은 쓰지 않는다.
 
 **6-1. 소근육 고립 = 고반복 통제 (실용 권장)**
-- 측면·후면 어깨, 종아리, 이두 등 **소근육 고립**은 중간~가벼운 무게로 **12~25회**, 반동 없이 통제해서 실패 2~3회 전까지 수행한다.
+- 측면·후면 어깨, 종아리, 복근, 내전근 등 **소근육 고립**은 중간~가벼운 무게로 **12~25회**, 반동 없이 통제해서 실패 2~3회 전까지 수행한다. 이두·삼두 등 팔 고립은 이 규칙 대상이 아니며 10~15회를 쓴다.
 - 이유: 근비대는 반복수와 거의 무관하지만, 소근육 고립을 무겁게 실으면 관절·힘줄 부담·승모근 개입·반동으로 타깃 자극이 줄고 부상 위험이 커지므로, 실용적으로 고반복을 기본값으로 둔다("저중량 고반복이 근비대에 더 우월"이라서가 아니다).
 - 너무 가볍게(약 30회 초과) 가지 말 것 — 가벼운 세트일수록 반드시 실패 근처까지 민다.
 - 이 규칙은 소근육 고립에만 적용한다. 복합운동(스쿼트·벤치 등)엔 적용하지 않는다.
 
 **7. 무게 — 더블 프로그레션 + 실제 수행 우선**
 - "최근 종목별 실제 수행" 표가 있으면 그 무게가 시작점이다(1RM 표보다 우선). 사용자가 낮춘 무게가 있으면 그 낮춘 값을 새 기준선으로 쓴다.
-- 더블 프로그레션: 먼저 반복을 목표 범위 안에서 올리고, 목표 범위 상단을 종목 종류별 요구 세션 수만큼 연속 달성했을 때만 무게를 장비 단위 한 칸 올린다(8번) — 고중량 복합·경량 고립은 2세션 연속, 중강도 복합·고립은 1세션(앱 계산과 동일). 한 칸이 현재 무게의 10%를 넘는 가벼운 케이블·머신은 무게 대신 반복으로 진행한다.
+- 더블 프로그레션: 먼저 반복을 목표 범위 안에서 올리고, 목표 범위 상단을 종목 종류별 요구 세션 수만큼 연속 달성했을 때만 무게를 장비 단위 한 칸 올린다(8번) — 고중량 복합·경량 고립은 2세션 연속, 중강도 복합·고립은 1세션(앱 계산과 동일). 한 칸이 현재 무게의 10%를 넘는 가벼운 케이블·머신도 증량은 하되, 다음 세션 반복이 떨어지는 게 정상임을 note에 적는다(앱의 진행 추천과 동일).
 - 목표 미달이면 같은 무게 유지.
 - 신규 종목(실제 수행 기록 없음)만 컨텍스트 "1RM + 추천 작업 무게"의 메인/보조/고립 값을 그대로 쓴다(이미 장비 단위로 스냅됨). 특정 반복 목표로 추정이 필요하면 근사표: 6회≈82% · 8회≈77% · 10회≈73% · 12회≈68% · 15회≈65% (RIR 2~3을 남기고 끝내는 기준의 집단 평균 추정치이지 실패 기준이 아니다. 하체 머신(레그프레스·핵스쿼트·레그컬/익스텐션)은 같은 %에서 반복이 훨씬 많이 나오므로 +8%p — 예: 10회≈81%. 상체·고립은 편차가 커서 첫 세션 후 RIR로 재보정. Nuzzo 2024).
 - 1RM도 실제 수행도 없으면 weight: null (사용자가 측정).
@@ -1263,9 +1144,9 @@ async function generateFullRoutine(bodyPart) {
 
 **12. 컨디션 반영 (자동 조절)**
 - 컨텍스트 "컨디션 추이"로 강도를 조절한다:
-  - 평균 RPE ≥ 8.5 또는 컨디션 ≤ 2 = 회복 모드: 볼륨 -20%, RIR을 한두 칸 위로(복합 3~4), intensity "light".
-  - 평균 RPE 7~8.4 또는 컨디션 3 = 평상시(위 5번 밴드 그대로), intensity "moderate".
-  - 평균 RPE < 7 + 컨디션 4~5 = 도전 가능(밴드 하단까지 밀기), intensity "challenging".
+  - 컨텍스트 RPE가 "평소보다 크게 높음"(개인 기준선 대비 +1.5 이상; 기준선이 없으면 절대값 ≥ 8.5) 또는 컨디션 ≤ 2 = 회복 모드(옵션): 볼륨 -20%, RIR을 한두 칸 위로(복합 3~4), intensity "light". RIR 1~3 훈련에서 RPE 8~9 자체는 정상값이라 절대값만으로 회복 모드를 걸지 않는다.
+  - 그 외 = 평상시(위 5번 밴드 그대로), intensity "moderate".
+  - RPE가 평소 수준 이하 + 컨디션 4~5 = 도전 가능(밴드 하단까지 밀기), intensity "challenging".
   - 컨디션 데이터 3회 미만 = 표본 부족, 평상시 처리.
 
 **13. 디로드 (주기화 — 피로·부상 관리용)**
@@ -1286,7 +1167,7 @@ async function generateFullRoutine(bodyPart) {
 - 한 부위 4개 이상 / 동일 부위·각도 중복 / 메인 0개.
 - 실행 불가능한 무게(장비 단위 안 맞는 .5kg 등) 출력 금지.
 - 부족 부위 무시 금지.
-- RIR·주간 볼륨 상한(큰 근육 20·작은 근육 16)·세션당 8세트를 "탈락 게이트"처럼 단정하지 말 것 — 전부 소프트 기준이다.
+- RIR·주간 볼륨 상한(20)·세션당 8세트를 "탈락 게이트"처럼 단정하지 말 것 — 전부 소프트 기준이다.
 
 ## 응답 형식 (JSON만)
 {
@@ -1417,47 +1298,6 @@ async function generateFullRoutine(bodyPart) {
   }
 }
 
-// 홈 화면 진입 시 오늘의 추천 로드 (백그라운드) — 캐시가 KST 날짜 기준이라 자동 호출은 하루 1회
-async function loadAIRecommendationIfNeeded() {
-  if (!state.apiKey) {
-    state.aiRecommendation = null;
-    return;
-  }
-  
-  // 이미 로딩 중이거나 오늘 캐시 있으면 스킵
-  if (state.aiRecLoading) return;
-  
-  var todayStr = getTodayStr();
-  var cached = storage.get(KEYS.AI_RECOMMENDATION);
-  if (cached && cached.date === todayStr) {
-    state.aiRecommendation = cached;
-    return;
-  }
-
-  // 오늘 이미 실패했으면 자동 재시도하지 않는다.
-  // fetchAIRecommendation은 실패 시 null만 돌려주고 아무것도 캐시하지 않으므로,
-  // 이 잠금이 없으면 render()마다 API를 다시 부른다. 재시도는 새로고침 버튼으로만.
-  if (state.aiRecFailedDate === todayStr) return;
-
-  // 앱을 켜둔 채 KST 자정을 넘겼으면 어제 추천은 버린다
-  if (state.aiRecommendation && state.aiRecommendation.date !== todayStr) {
-    state.aiRecommendation = null;
-  }
-  
-  state.aiRecLoading = true;
-  render();
-  
-  var rec = await fetchAIRecommendation();
-  state.aiRecommendation = rec;
-  // 실패(null)면 오늘은 자동 재시도 금지 — 성공하면 잠금 해제.
-  // localStorage에도 남긴다: 메모리에만 두면 새로고침·서비스워커 갱신 때마다 잠금이 풀려
-  // 실패가 반복될 때 앱을 열 때마다 유료 호출이 한 번씩 더 나간다.
-  state.aiRecFailedDate = rec ? null : todayStr;
-  storage.set(KEYS.AI_REC_FAILED_DATE, state.aiRecFailedDate);
-  state.aiRecLoading = false;
-  render();
-}
-
 // 이번 주 데이터 수집
 function collectWeekData() {
   var today = new Date();
@@ -1579,11 +1419,11 @@ async function generateWeeklyReview(forceRefresh) {
     var groupKeys = Object.keys(weekGrouped).sort(function(a, b) { return weekGrouped[b] - weekGrouped[a]; });
     groupKeys.forEach(function(g) {
       var vol = weekGrouped[g];
-      // 부위 크기별 임계 (큰 근육 10~20 / 작은 근육 8~16) — buildUserContext와 동일 기준
-      var isSmallG = BODY_PART_GROUPS[g] && BODY_PART_GROUPS[g].size === 'small';
-      var loV = isSmallG ? 3 : 4;
-      var mevV = isSmallG ? 8 : 10;
-      var optV = isSmallG ? 16 : 20;
+      // 부위 크기별 임계 — getVolumeThresholds 단일 기준
+      var th = getVolumeThresholds(g);
+      var loV = th.lackBelow;
+      var mevV = th.optimalLow;
+      var optV = th.optimalTop;
       // 라벨은 buildUserContext(:451, :460)와 같은 말을 쓴다 — 같은 앱의 두 프롬프트가 다른 말을 하면 안 된다.
       // 'MEV'는 검증된 용어가 아니고(Israetel 외 자비출판 휴리스틱, 경계값을 검증한 동료심사 연구 없음),
       // 상한 초과도 "손해"가 아니라 이득 증가폭이 완만해지는 구간이다(Pelland 2025 — 꺾이는 지점 미확인).
@@ -1613,7 +1453,7 @@ async function generateWeeklyReview(forceRefresh) {
     
     '## 🧬 평가 기준 (과학 근거)\n' +
     '- **운동 빈도**: 주간 총 세트가 같으면 빈도는 근비대에 무관 (Schoenfeld 2019, 25개 연구; Pelland 2026), 근력에는 유의. 주 2회 분할은 세트를 나눠 담는 수단이므로, 주 1회로 몰렸을 때만 세션당 부위 세트 수를 지적한다. 사용자의 주 5일 습관을 깎는 방향으로 쓰지 않는다\n' +
-    '- **부위 볼륨**: 큰 근육(가슴·등·다리·둔근) 주 10~20세트 / 작은 근육(팔·어깨) 주 8~16세트 적정 (Pelland 2026, 간접세트 0.5 환산). 간접 세트는 이미 환산돼 있으니 "팔은 복합으로 충분"이라고 쓰지 말 것 — 팔·측면/후면 어깨·종아리는 직접 세트가 주 4세트 이상 필요. 하한 미만 = 부족, 상한 초과 = 수확 체감(금지선 아님)\n' +
+    '- **부위 볼륨**: 큰 근육(가슴·등·다리·둔근) 주 10~20세트 / 작은 근육(팔·어깨) 주 8~20세트 적정 (Pelland 2026, 간접세트 0.5 환산). 간접 세트는 이미 환산돼 있으니 "팔은 복합으로 충분"이라고 쓰지 말 것 — 팔·측면/후면 어깨·종아리는 직접 세트가 주 4세트 이상 필요. 하한 미만 = 부족, 상한 초과 = 수확 체감(금지선 아님)\n' +
     '- **부위 균형**: PUSH/PULL/LEGS 골고루. 한 부위에만 몰리지 않게.\n' +
     '- **PR 갱신**: 점진적 과부하 성과 지표. 어시스트(보조) 종목의 PR은 **보조 무게가 줄어든 것**이다(보조 40kg→35kg = 신기록). 숫자가 내려갔다고 퇴보로 쓰지 말 것\n\n' +
     
@@ -2385,7 +2225,7 @@ function cardioWalkHistoryContext(ctx) {
       'km/h 로 시작하고 본 구간은 15~20분을 넘기지 마세요. 경사 욕심 없이 완주가 목표입니다.';
   }
 
-  var HANDRAIL_KR = { none: '손잡이 안 잡음', light: '손가락만 가볍게', hold: '★손잡이 계속 잡음' };
+  var HANDRAIL_KR = { none: '손잡이 안 잡음', light: '손가락만 가볍게', hold_upright: '손잡이 잡되 상체 세움', hold_lean: '★손잡이 잡고 뒤로 기댐', hold: '★손잡이 계속 잡음(옛 기록)' };
   var recent = sessions.slice(0, 3);
   var lines = [];
   recent.forEach(function(s, idx) {
@@ -2416,14 +2256,17 @@ function cardioWalkHistoryContext(ctx) {
   // 코드가 지난 기록으로 1차 판정(참고). 최종 축·폭은 프롬프트 규칙대로.
   var last = recent[0] || {};
   var gate;
-  if (last.handrail === 'hold') gate = '지난 회 손잡이를 계속 잡음 → 경사가 너무 높았다는 신호. 이번엔 경사 −2%(무조건).';
+  if (last.handrail === 'hold_lean' || last.handrail === 'hold') gate = '지난 회 손잡이를 잡고 뒤로 기댐 → 경사 이득이 사라진 상태(Hofmann 2014: −32%). 이번엔 경사 −2%(무조건).';
+  else if (last.handrail === 'hold_upright') gate = '지난 회 손잡이를 잡았지만 상체를 세움 → 강도 손실은 작다(−12%, 유의차 없음). 경사 유지, note에 "손잡이는 균형용으로만, 체중을 싣지 않기" 자세 안내.';
   else if (!last.completed) gate = '지난 회 미완주 → 하향(경사 −2% + 본 구간 −5분).';
   else if (typeof last.rpe === 'number' && last.rpe >= 9) gate = '지난 회 RPE 9 이상 → 하향(경사 −2%).';
   else if (typeof last.rpe === 'number' && last.rpe >= 7) gate = '지난 회 RPE 7~8 → 유지(그대로 반복).';
   else if (typeof last.rpe === 'number' && last.rpe <= 6) gate = '지난 회 완주 + RPE ≤ 6 → 우선순위(시간 → 빈도 → 경사 → 속도)에서 "한 축만" 소폭 상향.';
   else gate = '지난 회 완주(RPE 미기록) → 유지하거나 시간 축만 아주 소폭 상향(보수적).';
 
-  return lines.join('\n') +
+  var legsLine = c.legsToday ? '\n하체 웨이트: 오늘 하체 세션 기록 있음 → 걷기는 웨이트 뒤에, 본 구간 −5분 또는 경사 −2%(급성 피로).'
+    : (c.legsYesterday ? '\n하체 웨이트: 어제 하체 세션 → 오늘 걷기는 경사 −2% 또는 본 구간 −5분으로 한 단계 낮춘다(Doma 2019 잔여 피로).' : '\n하체 웨이트: 어제·오늘 하체 세션 없음 → 하체 인접 조정 불필요.');
+  return lines.join('\n') + legsLine +
     '\n\n최근 7일 걷기 세션 수: ' + weekCount + '회 (상한 주 4회)' +
     '\n코드 판정(참고): ' + gate +
     '\n코드가 계산한 안전 경사(하향 게이트 반영, 상향은 미포함): ' + c.anchorIncline + '%';
@@ -2522,7 +2365,7 @@ async function generateCardioWalk(totalMinutes) {
 - 완주 O + RPE 7~8 → 유지(그대로 반복).
 - 완주 O + RPE ≥ 9 → 하향(경사 −2% 또는 본 구간 −5분).
 - 미완주 → 하향(경사 −2% + 본 구간 −5분).
-- ★**손잡이 "계속 잡음" 기록이면 무조건 경사 −2%.** 잡고 뒤로 기대면 강도의 3분의 1이 사라지므로, 실제로는 기록보다 낮은 경사를 한 것이다.
+- ★**손잡이 "잡고 뒤로 기댐" 기록이면 무조건 경사 −2%.** 기대면 열량이 3분의 1 사라져(Hofmann 2014) 실제로는 기록보다 낮은 경사를 한 것이다. "잡되 상체 세움"은 손실이 작으니(−12%) 경사를 유지하고 자세만 안내한다.
 ${backBlock}
 ## 🗣️ 강도 지표
 - 대화 테스트가 1순위: "문장은 말할 수 있는데 노래는 안 되는" 정도가 딱 맞다.

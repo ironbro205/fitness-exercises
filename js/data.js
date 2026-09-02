@@ -166,8 +166,8 @@ var SESSIONS = {
       { name: '머신 체스트 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 60 },
       { name: '덤벨 인클라인 벤치 프레스', type: '덤벨', sets: 3, reps: '10-12', lastWeight: 20 },
       { name: '머신 시티드 숄더 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 40 },
-      { name: '덤벨 사이드 레터럴 레이즈', type: '덤벨', sets: 3, reps: '12-15', lastWeight: 8 },
-      { name: '머신 펙 덱 플라이', type: '머신', sets: 3, reps: '12-15', lastWeight: 35 },
+      { name: '덤벨 사이드 레터럴 레이즈', type: '덤벨', sets: 3, reps: '12-25', lastWeight: 8 },
+      { name: '머신 펙 덱 플라이', type: '머신', sets: 3, reps: '10-15', lastWeight: 35 },
       { name: '케이블 푸시 다운', type: '케이블', sets: 3, reps: '10-15', lastWeight: 25 }
     ]
   },
@@ -181,7 +181,7 @@ var SESSIONS = {
       { name: '풀업', type: '체중', sets: 3, reps: '본인 최대', lastWeight: null, reps_done: 7 },
       { name: '랫 풀 다운', type: '머신', sets: 3, reps: '8-12', lastWeight: 50 },
       { name: '머신 시티드 로우', type: '머신', sets: 3, reps: '8-12', lastWeight: 55 },
-      { name: '페이스 풀', type: '케이블', sets: 3, reps: '12-15', lastWeight: 20 },
+      { name: '페이스 풀', type: '케이블', sets: 3, reps: '15-20', lastWeight: 20 },
       { name: '인클라인 덤벨 컬', type: '덤벨', sets: 3, reps: '10-12', lastWeight: 10 },
       { name: '덤벨 해머 컬', type: '덤벨', sets: 3, reps: '10-15', lastWeight: 12 }
     ]
@@ -194,7 +194,7 @@ var SESSIONS = {
     setCount: 18,
     exercises: [
       { name: '레그 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 120 },
-      { name: '머신 레그 익스텐션', type: '머신', sets: 3, reps: '12-15', lastWeight: 45 },
+      { name: '머신 레그 익스텐션', type: '머신', sets: 3, reps: '10-15', lastWeight: 45 },
       // 종목명은 EXERCISE_BODY_PART_MAP의 정확 키를 쓴다 — 퍼지 매칭에 의존하면 부위·장비 판정이 어긋난다.
       // ('시티드 햄스트링 컬'·'카프 레이즈 머신'은 맵에 없는 이름이었고, 후자는 이 헬스장에 없는 전용 카프 머신을 가리켰다)
       { name: '시티드 레그 컬', type: '머신', sets: 3, reps: '10-12', lastWeight: 35 },
@@ -219,7 +219,7 @@ var SESSIONS = {
       { name: '머신 체스트 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 60 },
       { name: '랫 풀 다운', type: '머신', sets: 3, reps: '8-12', lastWeight: 50 },
       { name: '머신 시티드 로우', type: '머신', sets: 3, reps: '8-12', lastWeight: 55 },
-      { name: '덤벨 사이드 레터럴 레이즈', type: '덤벨', sets: 3, reps: '12-15', lastWeight: 8 },
+      { name: '덤벨 사이드 레터럴 레이즈', type: '덤벨', sets: 3, reps: '12-25', lastWeight: 8 },
       { name: '인클라인 덤벨 컬', type: '덤벨', sets: 3, reps: '10-12', lastWeight: 10 },
       { name: '케이블 푸시 다운', type: '케이블', sets: 3, reps: '10-15', lastWeight: 25 }
     ]
@@ -328,7 +328,7 @@ var EXERCISE_BODY_PART_MAP = {
   '덤벨 아놀드 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: true, equipment: 'dumbbell' },
   '덤벨 사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'dumbbell' },
   '사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'dumbbell' },
-  '케이블 원 암 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'cable' },
+  '케이블 원 암 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'cable' },
   '리버스 펙 덱 플라이': { primary: 'shoulders_rear', secondary: ['upper_back'], compound: false, mainEligible: false, equipment: 'rear_pec_deck' },
   '원암 리버스 펙 덱 플라이': { primary: 'shoulders_rear', secondary: [], compound: false, mainEligible: false, equipment: 'rear_pec_deck' },
   '페이스 풀': { primary: 'shoulders_rear', secondary: ['upper_back'], compound: false, mainEligible: false, equipment: 'cable' },
@@ -427,7 +427,7 @@ var EXERCISE_BODY_PART_MAP = {
   
   // 종아리
   '카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'bodyweight' },
-  '시티드 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'calf_machine' },
+  '시티드 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, equipment: 'calf_machine' },
   '카프 레이즈 머신': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'calf_machine' },  // 옛 LEGS 템플릿 이름 (저장된 세션에 남아 있음) — 전용 카프 머신은 이 헬스장에 없다
   '스탠딩 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'smith' },
   '레그 프레스 카프 레이즈': { primary: 'calves', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'leg_press' },
@@ -441,7 +441,7 @@ var EXERCISE_BODY_PART_MAP = {
   '플랭크': { primary: 'abs', secondary: ['obliques'], compound: false, mainEligible: false, equipment: 'bodyweight' },
   '케이블 크런치': { primary: 'abs', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'cable' },
   '케이블 팔로프 프레스': { primary: 'obliques', secondary: ['abs'], compound: false, mainEligible: false, equipment: 'cable' },
-  '행잉 니 레이즈': { primary: 'abs', secondary: ['obliques'], compound: false, mainEligible: false, stretched: true, equipment: 'assist_machine' },
+  '행잉 니 레이즈': { primary: 'abs', secondary: ['obliques'], compound: false, mainEligible: false, equipment: 'assist_machine' },
   '인클라인 덤벨 와이 레이즈': { primary: 'shoulders_rear', secondary: ['traps'], compound: false, mainEligible: false, equipment: 'dumbbell' },
 
   // 재활 (부상 부위 강화 목적 — 무게 진행 없음, 진행 지표 = 통증 감소)
@@ -489,12 +489,24 @@ var EXERCISES_BY_PRIMARY = (function() {
 // restSec = 세트 간 기본 휴식 (같은 문서 §3-B). 훈련자에서 3분 > 1분(Schoenfeld 2016 JSCR),
 //           고립 ≥1.5분(Helms), 재활은 비피로 목적이라 길게 쉴 이유가 없다.
 var EXERCISE_CLASS_RULES = {
-  compound_heavy:    { repMin: 5,  repMax: 8,  doubleSessions: 2, kr: '고중량 복합', scheme: 'top_backoff', restSec: 180 },
+// 반복 범위(2026-09-02, 선별안 A5): 프롬프트가 지시하던 메인 6~10·고립 10~15·경량 고립 12~25를 코드 클램프가
+// 5-8·12-15·15-25로 잘라 무효화하고 있었다 → 코드와 프롬프트를 같은 값으로 통일. 근비대에는 5~30회 동등(ACSM 2026).
+  compound_heavy:    { repMin: 6,  repMax: 10, doubleSessions: 2, kr: '고중량 복합', scheme: 'top_backoff', restSec: 180 },
   compound_moderate: { repMin: 8,  repMax: 12, doubleSessions: 1, kr: '중강도 복합', scheme: 'straight',    restSec: 150 },
-  isolation:         { repMin: 12, repMax: 15, doubleSessions: 1, kr: '고립',        scheme: 'straight',    restSec: 120 },
-  light_isolation:   { repMin: 15, repMax: 25, doubleSessions: 2, kr: '경량 고립',   scheme: 'straight',    restSec: 90  },
+  isolation:         { repMin: 10, repMax: 15, doubleSessions: 1, kr: '고립',        scheme: 'straight',    restSec: 120 },
+  light_isolation:   { repMin: 12, repMax: 25, doubleSessions: 2, kr: '경량 고립',   scheme: 'straight',    restSec: 90  },
   rehab:             { repMin: 15, repMax: 20, doubleSessions: 0, kr: '재활',        scheme: 'straight',    restSec: 60, lockScheme: true }
 };
+
+// 신규 종목 첫 시도 무게 = 1RM × 이 비율 (선별안 B1, docs/research/v2-intensity-progression.md §4-1).
+// 옛 값 0.7 일괄은 실패까지 가면 평균 ~15회 나오는 무게라(Nuzzo 2024 메타회귀, 269편) 6~10회 처방엔 한 클래스만큼
+// 가벼웠다. 값은 "목표 반복 중간값을 RIR 2로 끝내는 무게"에서 2~4%p 낮춘 보수적 채택값. 재활은 부하 진행이 없어 유지.
+var FIRST_ATTEMPT_PCT = {
+  compound_heavy: 0.78, compound_moderate: 0.72, isolation: 0.66, light_isolation: 0.60, rehab: 0.70
+};
+// 한 칸 증량이 현재 무게의 이 비율을 넘으면 무게 대신 반복으로 진행 (선별안 B2, ACSM 권고 증량 폭 2~10%).
+// 절대값 격자(그 외 5kg)는 20kg 케이블에서 +25%가 돼 다음 세션 반복이 무너진다.
+var WEIGHT_JUMP_MAX_PCT = 0.10;
 
 // ─── 세트법(세트 스킴) ────────────────────────────────────────
 // 근거 요약(docs/research/set-schemes.md §0·§1-G): 볼륨을 맞추면 세트법 간 근비대 차이는 없다
@@ -685,7 +697,7 @@ var EXERCISE_CLASS_OVERRIDES = {
   '터미널 니 익스텐션': 'rehab',
   '페이스 풀': 'rehab',
   // 이름에 '벤치 프레스'가 들어가 HEAVY_COMPOUND_KEYWORDS에 걸리지만 실제 처방은 10~12회다.
-  // 지정하지 않으면 '고중량 복합'(5~8회)으로 잡혀, SESSIONS PUSH/UPPER 템플릿이 적어 둔
+  // 지정하지 않으면 '고중량 복합'(6~10회)으로 잡혀, SESSIONS PUSH/UPPER 템플릿이 적어 둔
   // 10-12와 화면에 뜨는 목표 반복이 어긋난다(20kg 덤벨 인클라인 프레스는 대형 리프트가 아니다).
   // 바벨/스미스 인클라인·평벤치는 진짜 고중량 복합이라 그대로 둔다.
   '덤벨 인클라인 벤치 프레스': 'compound_moderate'
@@ -1493,7 +1505,10 @@ var WALK_COACH_TIPS = [
 var WALK_HANDRAIL_OPTIONS = [
   { value: 'none',  label: '안 잡음',        desc: '가장 좋아요' },
   { value: 'light', label: '가볍게 얹음',    desc: '손실 거의 없음' },
-  { value: 'hold',  label: '계속 잡음',      desc: '다음엔 경사 −2%' }
+  // 손잡이는 자세로 갈린다(선별안 B5 · Hofmann 2014): 상체를 세우고 잡으면 열량 −12%로 유의차 없음,
+  // 뒤로 기대면 −32%(경사 이득 소멸). 그래서 '기댐'만 경사를 내린다.
+  { value: 'hold_upright', label: '잡고 상체 세움', desc: '경사 유지' },
+  { value: 'hold_lean',    label: '잡고 뒤로 기댐', desc: '다음엔 경사 −2%' }
 ];
 
 // ═══════════════════════════════════════════════

@@ -363,13 +363,6 @@ test('정체기 분석 — 심각도는 정해진 목록만', async () => {
   assert.deepEqual(plain(r.recommendations), ['r']);
 });
 
-test('오늘의 추천 — 강도는 정해진 목록만, 글자 칸에 객체가 새지 않는다', async () => {
-  const a = appWithAIResponse({ session: 'push', title: { a: 1 }, reason: 'r', caution: '', suggestion: 's', intensity: 'HARD' });
-  const r = await a.fetchAIRecommendation();
-  assert.equal(r.intensity, 'moderate');
-  assert.equal(r.title, '', '객체는 "[object Object]" 로 새지 않고 빈 칸이 된다');
-});
-
 test('유산소 — 속도·경사·시간에 단위가 붙어도 구간을 버리지 않는다', () => {
   // ★기본값과 다른 속도를 일부러 쓴다 — 기본값과 같으면 "강제했는지"와 "폴백으로 떨어졌는지"를 구분할 수 없다.
   const segs = app.cardioFitToTotal(

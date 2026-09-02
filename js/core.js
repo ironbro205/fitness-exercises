@@ -15,7 +15,6 @@ var KEYS = {
   API_KEY: 'fitness_api_key',
   SETTINGS: 'fitness_settings',
   COACH_HISTORY: 'fitness_coach_history',
-  AI_RECOMMENDATION: 'fitness_ai_recommendation',
   WEEKLY_REVIEW: 'fitness_weekly_review',
   PLATEAU_CHECK: 'fitness_plateau_check',
   ONE_RM_DATA: 'fitness_one_rm_data',
@@ -27,8 +26,6 @@ var KEYS = {
   WORKOUT_WIZARD: 'fitness_workout_wizard',
   CYCLE_HISTORY: 'fitness_cycle_history',
   COACH_MEMORY: 'fitness_coach_memory',
-  AI_RECOMMENDATION_HISTORY: 'fitness_ai_recommendation_history',
-  AI_REC_FAILED_DATE: 'fitness_ai_rec_failed_date',
   CHAT_SIGNALS: 'fitness_chat_signals',
   LAST_BACKUP: 'fitness_last_backup',
   // 종목별 사용자 지정 세트법 { "핵 스쿼트": "straight", ... }. 없으면 클래스 기본값(EXERCISE_CLASS_RULES.scheme).
@@ -147,7 +144,7 @@ function clearWizard() {
 // 유산소(러닝머신 인터벌 / 경사 걷기) 세션 저장 — 2단계 RUNNING 탭.
 // session = { id, date, mode:'interval'|'walk', totalSec, totalDistKm,
 //             segments:[{type,targetSpeed,actualSpeed,incline,sec}], completed(bool), rpe(1~10|null),
-//             handrail:'none'|'light'|'hold'|null (걷기 모드 전용) }
+//             handrail:'none'|'light'|'hold_upright'|'hold_lean'|null (걷기 모드 전용, 옛 값 'hold' 호환) }
 // ★옛 기록에는 mode·incline·handrail 이 없다 → 읽는 쪽에서 mode||'interval', incline||0 으로 폴백한다.
 // cardioLog 에 push → localStorage 저장 → 화면 재렌더.
 // CARDIO_LOG 는 BACKUP_EXCLUDE_KEYS 에 없으므로 KEYS 순회 백업/복원에 자동 포함된다(운동 데이터).
@@ -183,9 +180,6 @@ var BACKUP_TRANSIENT_KEYS = [
   KEYS.WORKOUT_WIZARD,
   KEYS.EXERCISES_CACHE,    // 재생성 가능
   KEYS.EXERCISES_VERSION,
-  KEYS.AI_RECOMMENDATION,  // AI 캐시 (새 데이터 기준으로 재생성)
-  KEYS.AI_RECOMMENDATION_HISTORY, // 추천 다양성용 이력 (재생성 가능)
-  KEYS.AI_REC_FAILED_DATE, // 오늘 추천 실패 잠금 (하루짜리 임시값)
   KEYS.WEEKLY_REVIEW,
   KEYS.PLATEAU_CHECK
 ];
@@ -648,10 +642,6 @@ var state = {
   sessionChatPending: null,     // 확인 대기 중인 추출 신호 {pain, painNote, feel, rpe, exIdx}
   _sessionChatStreaming: false,
   _sessionChatDraft: '',        // 입력 초안 (전체 렌더에도 살아남게 DOM 밖 보존)
-  // AI 추천
-  aiRecommendation: null,
-  aiRecLoading: false,
-  aiRecFailedDate: null,   // 오늘 자동 로드가 실패한 날짜(YYYY-MM-DD). 렌더마다 재호출되는 무한 재시도 방지용 잠금.
   // 주간 리뷰
   weeklyReview: null,
   weeklyReviewLoading: false,
@@ -922,16 +912,8 @@ function init() {
   // 1RM 초기 데이터 로드 (첫 실행 시 INITIAL_1RM 자동 입력)
   initializeOneRMData();
   
-  // 캐시된 AI 추천 로드 (오늘 것만)
-  var cachedRec = storage.get(KEYS.AI_RECOMMENDATION);
-  if (cachedRec && cachedRec.date === getTodayStr()) {
-    state.aiRecommendation = cachedRec;
-  }
-  // 오늘 추천 실패 잠금 복원 — 메모리에만 두면 새로고침마다 잠금이 풀려
-  // 실패할 때마다 유료 API가 다시 나간다(앱을 열 때마다 1회). 어제 것은 버린다.
-  var failedDate = storage.get(KEYS.AI_REC_FAILED_DATE);
-  state.aiRecFailedDate = (failedDate === getTodayStr()) ? failedDate : null;
-  
+  // (오늘의 추천 캐시·실패 잠금 복원은 2026-09-02 엔진 삭제와 함께 제거. 옛 localStorage 키는 무시된다.)
+
   // 캐시된 주간 리뷰 로드 (이번 주 것만)
   var cachedReview = storage.get(KEYS.WEEKLY_REVIEW);
   if (cachedReview && cachedReview.weekId === getWeekId(new Date())) {

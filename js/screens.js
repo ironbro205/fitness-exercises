@@ -23,8 +23,8 @@ function renderHome() {
 
   // 오늘의 추천은 화면에서 뺐다(홈 카드·부위 배지 모두). 그래서 배경 로드도 멈춘다 —
   // 아무 데도 안 쓰는 값을 하루 한 번 API 로 받아 오면 요금만 나간다.
-  // 엔진(fetchAIRecommendation·loadAIRecommendationIfNeeded)은 그대로 두었다: 다시 켤 때
-  // 이 두 줄을 되살리면 된다.
+  // 엔진(fetchAIRecommendation·loadAIRecommendationIfNeeded)은 2026-09-02에 삭제했다(죽은 코드 유지 비용).
+  // 되살리려면 git 기록(PR #84 이전(main 커밋 0648697 이전))에서 복원한다.
 
   var monday = new Date(today);
   monday.setDate(today.getDate() - (dayOfWeek - 1));
@@ -57,6 +57,25 @@ function renderHome() {
   // 사이클 단계 안내 + 이번 주 진행
   var isDeloadWeek = profile.currentWeek >= CYCLE_LENGTH;
   var phaseHint = isDeloadWeek ? '가볍게 · 건너뛰기 가능' : '조금씩 늘리기';
+  // 디로드 앞당기기 제안(선별안 D2): 정체 엔진(4세션·28일 가드)을 통과한 종목이 2개 이상이면 달력을 기다리지 않아도
+  // 되게 "제안"만 한다(강제 아님 — Rogerson 2024 실측 트리거). 디로드 주에는 뜨지 않는다.
+  // 마지막 디로드 후 21일 안에는 다시 뜨지 않는다 — 디로드 주는 정체 판정이 그대로 남기 때문(F4).
+  var recentlyDeloaded = false;
+  if (profile.lastDeloadAt) {
+    var daysSinceProfileDeload = Math.floor((new Date(tdStr) - new Date(profile.lastDeloadAt)) / 86400000);
+    if (daysSinceProfileDeload < 21) recentlyDeloaded = true;
+  }
+  if (!recentlyDeloaded && data.cycleHistory && data.cycleHistory[0] && data.cycleHistory[0].endedAt) {
+    var daysSinceCycleEnd = Math.floor((new Date(tdStr) - new Date(data.cycleHistory[0].endedAt)) / 86400000);
+    if (daysSinceCycleEnd < 21) recentlyDeloaded = true;
+  }
+  var stalledForDeload = (!isDeloadWeek && !recentlyDeloaded && typeof getStalledLifts === 'function') ? getStalledLifts() : [];
+  var earlyDeloadHtml = (stalledForDeload.length >= 2)
+    ? '<div class="flex items-center justify-between mt-3">' +
+        '<p class="text-[11px] font-mono text-stone-400">정체 ' + stalledForDeload.length + '종목 · 디로드를 앞당길 수 있어요</p>' +
+        '<button class="session-fact-btn" style="min-height:32px;padding:6px 10px;" onclick="startEarlyDeload()">디로드 시작</button>' +
+      '</div>'
+    : '';
   var weekGoal = profile.workoutFreq || 4;
   var doneTowardWeek = profile.weekSessionsDone || 0; // 이번 주차 완료 수(캘린더 아님)
   var idleMsg = getIdleComebackMessage(data.workoutLog, getTodayStr());
@@ -122,6 +141,7 @@ function renderHome() {
             '<p class="text-[11px] text-stone-600 font-mono uppercase">디로드</p>' +
           '</div>' +
           '<p class="text-[11px] font-mono mt-3 ' + (idleMsg ? 'text-amber-400' : 'text-stone-400') + '">' + cycleStatusLine + '</p>' +
+          earlyDeloadHtml +
         '</div>' +
       '</div>' +
       
@@ -1332,6 +1352,7 @@ function advanceCycleIfWeekComplete() {
   profile.currentWeek = updated.currentWeek;
   profile.cyclePhase = updated.cyclePhase;
   profile.weekSessionsDone = 0;
+  if (newCycleStarted) profile.lastDeloadAt = getTodayStr();
   storage.set(KEYS.PROFILE, profile);
   if (newCycleStarted) {
     state.data.cycleHistory = state.data.cycleHistory || [];
@@ -1342,6 +1363,20 @@ function advanceCycleIfWeekComplete() {
     showToast(updated.currentWeek + '주차로 진행 · ' + updated.cyclePhase);
   }
 }
+
+// 디로드 앞당기기(선별안 D2): 사용자가 홈 카드의 제안을 눌렀을 때만. 현재 사이클의 디로드 주차로 바로 넘긴다.
+// 디로드는 근성장을 늘리지도 깎지도 않으므로(Coleman 2024·Pancar 2026) 앞당겨도 손해가 없고, 잦은 디로드만 피한다.
+window.startEarlyDeload = function() {
+  var profile = state.profile;
+  if (!profile || (profile.currentWeek || 1) >= CYCLE_LENGTH) return;
+  profile.currentWeek = CYCLE_LENGTH;
+  profile.cyclePhase = getPhaseByWeek(CYCLE_LENGTH);
+  profile.weekSessionsDone = 0;
+  profile.lastDeloadAt = getTodayStr();
+  storage.set(KEYS.PROFILE, profile);
+  showToast('디로드 주간으로 넘어갔어요');
+  render();
+};
 
 // 세션 마무리: 통계 계산 + 저장 + 완료 화면
 function finalizeSession() {
@@ -2687,7 +2722,7 @@ function warnExerciseSafety(name) {
 function buildSessionExercise(name) {
   var info = EXERCISE_BODY_PART_MAP[name] || getExercisePart(name);
   // 목표 반복은 그 종목 **클래스의 권장 범위 전체**로 시작한다. 루틴 템플릿처럼 정해진 값이 없기 때문이다.
-  // (빈 값을 넘기면 parseRepRange가 '8-10'으로 기본값을 잡아, 고중량 복합이 5-8이 아니라 8로 좁혀진다)
+  // (빈 값을 넘기면 parseRepRange가 '8-10'으로 기본값을 잡아, 고중량 복합이 6-10이 아니라 8로 좁혀진다)
   var rules = EXERCISE_CLASS_RULES[getExerciseClass(name)];
   var plan = getSessionSetPlan(name, null, rules.repMin + '-' + rules.repMax, {});
   return {
@@ -4751,7 +4786,7 @@ function renderOneRMList() {
     var itemsHtml = items.map(function(name) {
       // 헬스장에서 0.33kg 을 맞출 방법은 없다 → 정수로 반올림해 보여준다(저장값은 그대로).
       var rm = Math.round(Number(data[name]) || 0);
-      var w75 = snapWeightToEquipment(data[name] * 0.75, name);
+      var w75 = snapWeightToEquipment(data[name] * firstAttemptPct(getExerciseClass(name)), name);
       var isTop = !!topFive[name];
       return '<div class="menu-row" style="cursor: default;">' +
         '<div class="flex-1">' +
@@ -4793,7 +4828,7 @@ function renderOneRMList() {
           '최근 운동 중 최고 기록 기준이에요.<br>' +
           '신기록은 바로 오르고 한동안 못 들면 천천히 내려가요. 컨디션 난조 한 번으로 폭락하진 않아요.<br>' +
           '실제로 1회 들어본 값이 아니라 종목마다 10~15% 차이가 나요.<br>' +
-          '<b>작업</b>은 1RM의 75% — 보통 8~12회를 낼 수 있는 무게예요.') +
+          '<b>작업</b>은 첫 시도 무게예요 — 종목 종류별로 60~78%를 써요.') +
         
         categoriesHtml +
         
@@ -6404,7 +6439,7 @@ function volumeByPartCardHtml() {
   var groupedDirect = groupVolumeBy(split.direct);
 
   // 판정은 도메인의 getVolumeDiagnosis 한 곳에서만 — 프롬프트와 같은 버킷을 쓴다
-  var diag = getVolumeDiagnosis(split.fractional, WEEKS);
+  var diag = getVolumeDiagnosis(split.fractional, WEEKS, split.direct);
   var verdictOf = {};
   var buckets = [
     ['lacking',      '부족',      'var(--danger)',  'var(--danger-rgb)'],
@@ -6494,9 +6529,22 @@ function volumeByPartCardHtml() {
     noteBlock('아직 판단하기 일러요 — 세트 수만 보여줘요',
       '부족·적정 판정은 기록 2주치부터예요.');
 
+  // 직접 세트 부족(환산은 찼지만 직접 고립이 부족한 부위) — 코치 프롬프트와 같은 diag.directShort 사용(M1)
+  var directShortHtml = '';
+  if (enoughData && diag.directShort && diag.directShort.length > 0) {
+    var dsText = '직접 세트 부족: ' + diag.directShort.map(function(e) {
+      return e.label + ' ' + e.direct.toFixed(1);
+    }).join(' · ');
+    if (dsText.length > 40) {
+      dsText = '직접 세트 부족: ' + diag.directShort.map(function(e) { return e.label; }).join(' · ');
+    }
+    directShortHtml = '<p class="text-[11px] font-mono mt-2" style="color:var(--warn)">' + dsText + '</p>';
+  }
+
   return '<div class="card mb-4">' + head +
       guardHtml +
       rows.map(volRow).join('') +
+      directShortHtml +
       (untouched.length > 0 ? '<p class="text-[11px] font-mono text-stone-600 mt-2">주 0세트: ' + untouched.join(' · ') + '</p>' : '') +
       noteBlock('이 범위는 어디서 왔나요?',
         '기준은 평균이라 본인 반응은 다를 수 있어요. 간접 세트에서 보조근은 0.5세트로 쳐요.') +
@@ -7203,7 +7251,7 @@ function applyStopCardio() {
 // 손잡이 문항(걷기 모드 전용, §5-2) — 이 한 문항이 다음 세션 경사를 정한다.
 window.setCardioHandrail = function(v) {
   var run = state.cardio && state.cardio.run; if (!run) return;
-  run.handrail = (v === 'none' || v === 'light' || v === 'hold') ? v : null;
+  run.handrail = (v === 'none' || v === 'light' || v === 'hold_upright' || v === 'hold_lean') ? v : null;
   saveActiveCardio();          // RPE 입력 중 회수돼도 답이 남도록
   render();
 };
@@ -7483,7 +7531,7 @@ function renderCardioRPE() {
   if (isWalk) {
     var opts = (typeof WALK_HANDRAIL_OPTIONS !== 'undefined') ? WALK_HANDRAIL_OPTIONS : [];
     var hbtns = opts.map(function(o) {
-      var on = (run.handrail === o.value);
+      var on = (run.handrail === o.value) || (run.handrail === 'hold' && o.value === 'hold_lean');
       return '<button class="option-card" style="flex:1;padding:10px 4px;' + (on ? 'border-color:var(--accent);background:var(--bg-3);' : '') + '" onclick="setCardioHandrail(\'' + o.value + '\')">' +
         '<p class="text-xs font-display' + (on ? ' accent' : '') + '">' + o.label + '</p>' +
         '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + o.desc + '</p>' +
@@ -7493,7 +7541,7 @@ function renderCardioRPE() {
       '<div class="card" style="margin-top:16px;">' +
         '<p class="text-sm font-display text-center mb-1">손잡이, 잡고 있었나요?</p>' +
         '<p class="text-[11px] font-mono text-stone-500 text-center mb-3" style="line-height:1.6;">잡고 뒤로 기대면 경사 10%가 5%가 돼요.</p>' +
-        '<div class="flex gap-2">' + hbtns + '</div>' +
+        '<div class="grid grid-cols-2 gap-2">' + hbtns + '</div>' +
       '</div>';
   }
 

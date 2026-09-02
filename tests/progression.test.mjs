@@ -60,9 +60,9 @@ test('클래스: 미등록 무명 종목은 isolation 폴백', () => {
 });
 
 // ═══ 2. 반복범위 가드레일 (클램프) ═══
-test('클램프: 경량 고립에 8-10 지시 → 클래스 범위(15-25)로 교정', () => {
+test('클램프: 경량 고립에 8-10 지시 → 클래스 범위(12-25)로 교정', () => {
   const r = app.clampRepsToClass('사이드 레터럴 레이즈', '8-10');
-  assert.equal(r.low, 15);
+  assert.equal(r.low, 12);
   assert.equal(r.high, 25);
 });
 
@@ -70,9 +70,9 @@ test('클램프: 범위 안이면 그대로, 걸치면 교집합', () => {
   const ok = app.clampRepsToClass('레그 프레스', '8-10'); // moderate 8-12 안
   assert.equal(ok.low, 8);
   assert.equal(ok.high, 10);
-  const cut = app.clampRepsToClass('덤벨 벤치 프레스', '8-12'); // heavy 5-8과 교집합 = 8
+  const cut = app.clampRepsToClass('덤벨 벤치 프레스', '8-12'); // heavy 6-10과 교집합 = 8-10 (2026-09 반복 범위 통일)
   assert.equal(cut.low, 8);
-  assert.equal(cut.high, 8);
+  assert.equal(cut.high, 10);
 });
 
 // ═══ 3. md 필수 테스트: 사이드 레터럴 파괴 금지 ═══
@@ -82,7 +82,7 @@ test('경량 고립: 5kg×25 한 세션 → 증량 금지 + 저반복 제안 금
   assert.ok(rec, '추천이 나와야 함');
   assert.equal(rec.weight, 5, '한 세션 상단 달성으로는 증량 금지');
   assert.notEqual(rec.source, 'progress');
-  assert.ok(rec.repRange.low >= 15, '15회 미만 제안 금지 (10회 제안 = md 실패 케이스)');
+  assert.ok(rec.repRange.low >= 12, '12회 미만 제안 금지 (10회 제안 = md 실패 케이스; 경량 고립 12-25)');
 });
 
 test('경량 고립: 상단 2세션 연속 달성 → 그때만 최소 단위 증량', () => {
@@ -306,4 +306,35 @@ test('별칭: 종목 인덱스·SESSIONS 템플릿에 별칭 표기가 남아 �
 test('별칭: 표준명이 종목표에 없는 별칭도 부위가 잡힌다 (볼륨 누락 방지)', () => {
   assert.equal(app.getExercisePart('레그프레스').primary, 'quads');
   assert.equal(app.getExercisePart('인클라인 덤벨 벤치 프레스').primary, 'chest_upper');
+});
+
+// ── 2026-09-02 재검증(선별안 B1·B2): 첫 시도 무게 클래스별 · 증량 폭 경고 ──
+test('첫 시도 무게 — 클래스별 비율(FIRST_ATTEMPT_PCT)을 쓰고, 고중량 복합 > 중강도 복합 > 고립 순', () => {
+  const fresh = loadApp();                 // 데모 1RM 표가 있는 새 앱, 기록만 비운다
+  fresh.state.data.workoutLog = [];
+  const pct = fresh.FIRST_ATTEMPT_PCT;
+  assert.ok(pct.compound_heavy > pct.compound_moderate && pct.compound_moderate > pct.isolation && pct.isolation > pct.light_isolation);
+  const rm = fresh.get1RM('레그 프레스');
+  assert.ok(rm > 0, '데모 1RM 존재');
+  const cls = fresh.getExerciseClass('레그 프레스');
+  const rec = fresh.getProgressiveRecommendation('레그 프레스', '8-12');
+  assert.ok(rec, '추천 존재');
+  assert.equal(rec.source, 'rm_estimate');
+  assert.equal(rec.weight, fresh.snapWeightToEquipment(rm * pct[cls], '레그 프레스'), '옛 0.7 일괄이 아니라 클래스 비율');
+  assert.notEqual(rec.weight, fresh.snapWeightToEquipment(rm * 0.7, '레그 프레스'));
+});
+
+test('증량 폭 경고 — 한 칸이 현재 무게의 10%를 넘으면 증량은 하되 note에 %와 안내를 붙인다', () => {
+  seedLog([workout(daysAgo(2), '케이블 푸시 다운', [set(20, 15), set(20, 15), set(20, 15)])]);
+  const rec = app.getProgressiveRecommendation('케이블 푸시 다운', '10-15');
+  assert.equal(rec.source, 'progress', '막지 않는다 — 경량 종목은 막으면 영영 증량이 없다');
+  assert.equal(rec.weight, 25);
+  assert.equal(rec.jumpWarned, true);
+  assert.ok(rec.note.includes('+25%') && rec.note.includes('정상이에요'), rec.note);
+  // 10% 이하면 경고 없음
+  seedLog([workout(daysAgo(2), '레그 프레스', [set(100, 12), set(100, 12), set(100, 12)])]);
+  const ok = app.getProgressiveRecommendation('레그 프레스', '8-12');
+  assert.equal(ok.source, 'progress');
+  assert.equal(ok.jumpWarned, false);
+  assert.ok(!ok.note.includes('%'));
 });
