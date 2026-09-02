@@ -251,8 +251,8 @@ async function modifyRoutineWithAI(currentRoutine, userRequest, chatHistory) {
     '7. **횟수 (type별 필수 가이드 — 루틴 생성 규칙과 동일)**:\n' +
     '   - 메인 복합 (isMain:true): "6-10"\n' +
     '   - 보조 복합 (compound, isMain:false): "8-12"\n' +
-    '   - 고립 일반: "10-15"\n' +
-    '   - 소근육 고립 (사이드/리어 레터럴 레이즈, 페이스 풀, 푸시다운, 컬류, 카프 레이즈, 힙 어덕션 등): "12-25" (중간~가벼운 무게로 반동 없이 실패 2~3회 전까지)\n' +
+    '   - 고립 일반: "10-15" (이두·삼두 등 팔 고립 포함)\n' +
+    '   - 소근육 고립 (사이드/리어 레터럴 레이즈, 카프 레이즈, 힙 어덕션 등 측면/후면 어깨·종아리·복근·내전근): "12-25" (중간~가벼운 무게로 반동 없이 실패 2~3회 전까지)\n' +
     '   ※ 가벼운 무게 다회수 운동을 무겁게 적은 횟수로 추천하지 말 것\n\n' +
     
     '## ❌ 절대 금지\n' +
@@ -573,7 +573,6 @@ function buildUserContext(options) {
     Object.keys(BODY_PART_GROUPS).forEach(function(g) {
       var vol = (groupedVol[g] || 0) / 2;
       if (vol > 0) {
-        var isSmall = (BODY_PART_GROUPS[g] && BODY_PART_GROUPS[g].size === 'small');
         var th = getVolumeThresholds(g);
         var status = vol < th.lackBelow ? '🔴' : (vol < th.optimalLow ? '🟡' : (vol <= th.optimalTop ? '🟢' : '🔥'));
         var tw = (thisWeekGrouped[g] || 0);
@@ -585,12 +584,12 @@ function buildUserContext(options) {
     }
     
     // 폐루프: 부위별 목표(큰 근육 12 / 작은 근육 10, domain diagnosis의 item.target)까지 남은 세트를 "이번 주 누적" 기준으로 제시 → AI가 이번 세션 크기를 격차에 맞춤
-    function volNeedNote(v, target, group) {
+    function volNeedNote(target, group) {
       target = target || 12;
       var tw = (thisWeekGrouped[group] || 0);
       var need = target - tw;
       return need > 0
-        ? (' — 이번 주 ' + (Math.round(tw * 10) / 10) + '세트, 목표 ' + target + '세트까지 ' + (Math.round(need * 10) / 10) + '세트 더')
+        ? (' — 이번 주 ' + (Math.round(tw * 10) / 10) + '세트, 목표 ' + target + '세트까지 ' + (Math.round(need * 10) / 10) + '세트 더' + (need > 8 ? ' (한 세션엔 최대 8세트)' : ''))
         : (' — 이번 주 ' + (Math.round(tw * 10) / 10) + '세트로 목표 ' + target + ' 도달');
     }
     if (diagnosis.lacking.length > 0) {
@@ -604,7 +603,7 @@ function buildUserContext(options) {
         }).filter(function(n) {
           return isExerciseAvailable(n);
         });
-        ctx += '- ' + item.label + volNeedNote(item.vol, item.target, item.group);
+        ctx += '- ' + item.label + volNeedNote(item.target, item.group);
         if (recs.length > 0) {
           ctx += ' → 권장 종목: ' + recs.slice(0, 3).join(', ');
         }
@@ -614,7 +613,7 @@ function buildUserContext(options) {
     if (diagnosis.belowOptimal && diagnosis.belowOptimal.length > 0) {
       ctx += '🟡 **최적 하한 미달 (여유 있으면 보충)**:\n';
       diagnosis.belowOptimal.forEach(function(item) {
-        ctx += '- ' + item.label + volNeedNote(item.vol, item.target, item.group) + '\n';
+        ctx += '- ' + item.label + volNeedNote(item.target, item.group) + '\n';
       });
     }
     if (diagnosis.directShort && diagnosis.directShort.length > 0) {
@@ -695,7 +694,7 @@ function buildUserContext(options) {
     }
     
     ctx += '## 🏋️ 사용자 1RM + 추천 작업 무게' + (focusBodyPart ? ' (' + focusBodyPart.toUpperCase() + ' 부위만)' : ' (부위별)') + '\n';
-    ctx += '※ 반복 목표에 맞춘 추정 작업무게(고중량 복합 ' + Math.round(FIRST_ATTEMPT_PCT.compound_heavy * 100) + '% / 중강도 복합 ' + Math.round(FIRST_ATTEMPT_PCT.compound_moderate * 100) + '% / 고립 ' + Math.round(FIRST_ATTEMPT_PCT.isolation * 100) + '% 1RM — 세션 화면의 첫 시도 무게와 같은 표), 그 종목 장비 단위로 스냅됨(덤벨 2kg·그 외 5kg). RIR 2~3을 남기는 기준의 집단 평균이라 상체·고립은 편차 큼 → 첫 세션 후 RIR로 재보정. **신규 종목에만 사용**, "최근 실제 수행" 있으면 그쪽 우선.\n\n';
+    ctx += '※ 반복 목표에 맞춘 추정 작업무게(고중량 복합 ' + Math.round(FIRST_ATTEMPT_PCT.compound_heavy * 100) + '% / 중강도 복합 ' + Math.round(FIRST_ATTEMPT_PCT.compound_moderate * 100) + '% / 고립 ' + Math.round(FIRST_ATTEMPT_PCT.isolation * 100) + '% 1RM — 고립 열은 고립(' + Math.round(FIRST_ATTEMPT_PCT.isolation * 100) + '%) 기준이고 경량 고립은 세션 화면에서 ' + Math.round(FIRST_ATTEMPT_PCT.light_isolation * 100) + '%를 쓴다), 그 종목 장비 단위로 스냅됨(덤벨 2kg·그 외 5kg). RIR 2~3을 남기는 기준의 집단 평균이라 상체·고립은 편차 큼 → 첫 세션 후 RIR로 재보정. **신규 종목에만 사용**, "최근 실제 수행" 있으면 그쪽 우선.\n\n';
     
     // 부위별 자동 그룹화
     var byPart = {};
@@ -1067,9 +1066,9 @@ async function generateFullRoutine(bodyPart) {
 
 **2. 부족 부위 우선 + 주간 볼륨 폐루프 (세트 수를 격차에 맞춤)**
 - 컨텍스트 "부족 부위(최우선 보충)"와 "🟡 최적 하한 미달"에 나온 부위를 이번 루틴에 우선 포함한다.
-- 각 항목 옆의 "목표 N세트까지 N세트 더"를 읽고, 이번 세션의 그 부위 세트 수를 그 격차에 맞춰 정한다(많이 부족할수록 세트를 더, 거의 찼으면 적게). 주간 목표는 부위 크기별로 다르다 — 큰 근육(가슴·등·대퇴사두·햄스트링·둔근) 약 12세트, 작은 근육(어깨·이두·삼두·복근) 약 8세트(목표 차이는 시간 예산 우선순위 때문이지 "복합으로 충분"해서가 아니다 — 간접 세트는 이미 0.5로 환산돼 있다. 측면/후면 어깨·이두·삼두·종아리는 직접 세트가 주 4세트 이상 필요하다).
+- 각 항목 옆의 "목표 N세트까지 N세트 더"를 읽고, 이번 세션의 그 부위 세트 수를 그 격차에 맞춰 정한다(많이 부족할수록 세트를 더, 거의 찼으면 적게). 주간 목표는 부위 크기별로 다르다 — 큰 근육(가슴·등·대퇴사두·햄스트링·둔근) 약 12세트, 작은 근육(어깨·이두·삼두·복근) 약 10세트(목표 차이는 시간 예산 우선순위 때문이지 "복합으로 충분"해서가 아니다 — 간접 세트는 이미 0.5로 환산돼 있다. 측면/후면 어깨·이두·삼두·종아리는 직접 세트가 주 4세트 이상 필요하다).
 - 세션당 한 부위 직접 세트는 약 8세트 이하로 둔다(소프트 상한 — 정밀 근거는 아직 약함). 격차가 커서 한 세션에 다 못 넣으면 초과분은 그 주 두 번째 세션으로 분할한다.
-- 컨텍스트 "🔥 수확 체감 구간"으로 표시된 부위는 더 늘리지 않는다. 단 이는 절대 상한이 아니라 수확 체감 지점이다(큰 근육 20+·작은 근육 16+, 넘어도 성장이 멈추는 건 아님) — "금지선"처럼 단정하지 말 것.
+- 컨텍스트 "🔥 수확 체감 구간"으로 표시된 부위는 더 늘리지 않는다. 단 이는 절대 상한이 아니라 수확 체감 지점이다(큰 근육·작은 근육 모두 20+, 넘어도 성장이 멈추는 건 아님) — "금지선"처럼 단정하지 말 것.
 
 **3. 다양성 (같은 주 중복 회피)**
 - 컨텍스트 "이번 주 이미 수행한 종목"에 있는 종목은 이번 루틴에 다시 넣지 않는다 — 같은 부위라도 다른 종목·각도로 새 자극을 준다. "최근 종목별 실제 수행"과도 가능하면 안 겹치게. (단, 부족 부위 보충·점진적 과부하가 우선)
@@ -1099,18 +1098,18 @@ async function generateFullRoutine(bodyPart) {
 **6. 반복 범위 (근비대 중심)**
 - 메인 복합: 6~10
 - 보조 복합: 8~12
-- 고립: 10~15 (사이드/리어 레터럴 레이즈, 페이스풀, 푸시다운, 컬, 카프 레이즈 등 소근육 고립은 12~25 — 아래 6-1)
+- 고립: 10~15 (이두·삼두 등 팔 고립 포함). 사이드/리어 레터럴 레이즈·카프 레이즈 등 측면/후면 어깨·종아리·복근·내전근 소근육 고립은 12~25 — 아래 6-1
 - 근력 편향 5~8은 쓰지 않는다.
 
 **6-1. 소근육 고립 = 고반복 통제 (실용 권장)**
-- 측면·후면 어깨, 종아리, 이두 등 **소근육 고립**은 중간~가벼운 무게로 **12~25회**, 반동 없이 통제해서 실패 2~3회 전까지 수행한다.
+- 측면·후면 어깨, 종아리, 복근, 내전근 등 **소근육 고립**은 중간~가벼운 무게로 **12~25회**, 반동 없이 통제해서 실패 2~3회 전까지 수행한다. 이두·삼두 등 팔 고립은 이 규칙 대상이 아니며 10~15회를 쓴다.
 - 이유: 근비대는 반복수와 거의 무관하지만, 소근육 고립을 무겁게 실으면 관절·힘줄 부담·승모근 개입·반동으로 타깃 자극이 줄고 부상 위험이 커지므로, 실용적으로 고반복을 기본값으로 둔다("저중량 고반복이 근비대에 더 우월"이라서가 아니다).
 - 너무 가볍게(약 30회 초과) 가지 말 것 — 가벼운 세트일수록 반드시 실패 근처까지 민다.
 - 이 규칙은 소근육 고립에만 적용한다. 복합운동(스쿼트·벤치 등)엔 적용하지 않는다.
 
 **7. 무게 — 더블 프로그레션 + 실제 수행 우선**
 - "최근 종목별 실제 수행" 표가 있으면 그 무게가 시작점이다(1RM 표보다 우선). 사용자가 낮춘 무게가 있으면 그 낮춘 값을 새 기준선으로 쓴다.
-- 더블 프로그레션: 먼저 반복을 목표 범위 안에서 올리고, 목표 범위 상단을 종목 종류별 요구 세션 수만큼 연속 달성했을 때만 무게를 장비 단위 한 칸 올린다(8번) — 고중량 복합·경량 고립은 2세션 연속, 중강도 복합·고립은 1세션(앱 계산과 동일). 한 칸이 현재 무게의 10%를 넘는 가벼운 케이블·머신은 무게 대신 반복으로 진행한다.
+- 더블 프로그레션: 먼저 반복을 목표 범위 안에서 올리고, 목표 범위 상단을 종목 종류별 요구 세션 수만큼 연속 달성했을 때만 무게를 장비 단위 한 칸 올린다(8번) — 고중량 복합·경량 고립은 2세션 연속, 중강도 복합·고립은 1세션(앱 계산과 동일). 한 칸이 현재 무게의 10%를 넘는 가벼운 케이블·머신도 증량은 하되, 다음 세션 반복이 떨어지는 게 정상임을 note에 적는다(앱의 진행 추천과 동일).
 - 목표 미달이면 같은 무게 유지.
 - 신규 종목(실제 수행 기록 없음)만 컨텍스트 "1RM + 추천 작업 무게"의 메인/보조/고립 값을 그대로 쓴다(이미 장비 단위로 스냅됨). 특정 반복 목표로 추정이 필요하면 근사표: 6회≈82% · 8회≈77% · 10회≈73% · 12회≈68% · 15회≈65% (RIR 2~3을 남기고 끝내는 기준의 집단 평균 추정치이지 실패 기준이 아니다. 하체 머신(레그프레스·핵스쿼트·레그컬/익스텐션)은 같은 %에서 반복이 훨씬 많이 나오므로 +8%p — 예: 10회≈81%. 상체·고립은 편차가 커서 첫 세션 후 RIR로 재보정. Nuzzo 2024).
 - 1RM도 실제 수행도 없으면 weight: null (사용자가 측정).
@@ -1168,7 +1167,7 @@ async function generateFullRoutine(bodyPart) {
 - 한 부위 4개 이상 / 동일 부위·각도 중복 / 메인 0개.
 - 실행 불가능한 무게(장비 단위 안 맞는 .5kg 등) 출력 금지.
 - 부족 부위 무시 금지.
-- RIR·주간 볼륨 상한(큰 근육 20·작은 근육 16)·세션당 8세트를 "탈락 게이트"처럼 단정하지 말 것 — 전부 소프트 기준이다.
+- RIR·주간 볼륨 상한(20)·세션당 8세트를 "탈락 게이트"처럼 단정하지 말 것 — 전부 소프트 기준이다.
 
 ## 응답 형식 (JSON만)
 {
@@ -1420,11 +1419,11 @@ async function generateWeeklyReview(forceRefresh) {
     var groupKeys = Object.keys(weekGrouped).sort(function(a, b) { return weekGrouped[b] - weekGrouped[a]; });
     groupKeys.forEach(function(g) {
       var vol = weekGrouped[g];
-      // 부위 크기별 임계 (큰 근육 10~20 / 작은 근육 8~16) — buildUserContext와 동일 기준
-      var isSmallG = BODY_PART_GROUPS[g] && BODY_PART_GROUPS[g].size === 'small';
-      var loV = isSmallG ? 3 : 4;
-      var mevV = isSmallG ? 8 : 10;
-      var optV = isSmallG ? 16 : 20;
+      // 부위 크기별 임계 — getVolumeThresholds 단일 기준
+      var th = getVolumeThresholds(g);
+      var loV = th.lackBelow;
+      var mevV = th.optimalLow;
+      var optV = th.optimalTop;
       // 라벨은 buildUserContext(:451, :460)와 같은 말을 쓴다 — 같은 앱의 두 프롬프트가 다른 말을 하면 안 된다.
       // 'MEV'는 검증된 용어가 아니고(Israetel 외 자비출판 휴리스틱, 경계값을 검증한 동료심사 연구 없음),
       // 상한 초과도 "손해"가 아니라 이득 증가폭이 완만해지는 구간이다(Pelland 2025 — 꺾이는 지점 미확인).
@@ -1454,7 +1453,7 @@ async function generateWeeklyReview(forceRefresh) {
     
     '## 🧬 평가 기준 (과학 근거)\n' +
     '- **운동 빈도**: 주간 총 세트가 같으면 빈도는 근비대에 무관 (Schoenfeld 2019, 25개 연구; Pelland 2026), 근력에는 유의. 주 2회 분할은 세트를 나눠 담는 수단이므로, 주 1회로 몰렸을 때만 세션당 부위 세트 수를 지적한다. 사용자의 주 5일 습관을 깎는 방향으로 쓰지 않는다\n' +
-    '- **부위 볼륨**: 큰 근육(가슴·등·다리·둔근) 주 10~20세트 / 작은 근육(팔·어깨) 주 8~16세트 적정 (Pelland 2026, 간접세트 0.5 환산). 간접 세트는 이미 환산돼 있으니 "팔은 복합으로 충분"이라고 쓰지 말 것 — 팔·측면/후면 어깨·종아리는 직접 세트가 주 4세트 이상 필요. 하한 미만 = 부족, 상한 초과 = 수확 체감(금지선 아님)\n' +
+    '- **부위 볼륨**: 큰 근육(가슴·등·다리·둔근) 주 10~20세트 / 작은 근육(팔·어깨) 주 8~20세트 적정 (Pelland 2026, 간접세트 0.5 환산). 간접 세트는 이미 환산돼 있으니 "팔은 복합으로 충분"이라고 쓰지 말 것 — 팔·측면/후면 어깨·종아리는 직접 세트가 주 4세트 이상 필요. 하한 미만 = 부족, 상한 초과 = 수확 체감(금지선 아님)\n' +
     '- **부위 균형**: PUSH/PULL/LEGS 골고루. 한 부위에만 몰리지 않게.\n' +
     '- **PR 갱신**: 점진적 과부하 성과 지표. 어시스트(보조) 종목의 PR은 **보조 무게가 줄어든 것**이다(보조 40kg→35kg = 신기록). 숫자가 내려갔다고 퇴보로 쓰지 말 것\n\n' +
     

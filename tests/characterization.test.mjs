@@ -3400,7 +3400,8 @@ test('코치 컨텍스트 — 볼륨 폐루프는 이번 주 누적을 함께 �
   const ctx = fresh.buildUserContext();
   assert.ok(ctx.includes('괄호 안은 이번 주 누적'), ctx.slice(0, 200));
   assert.ok(/가슴 [0-9.]+\(이번 주 3\)/.test(ctx), '가슴 이번 주 3세트');
-  assert.ok(ctx.includes('이번 주 3세트, 목표 12세트까지 9세트 더'), '격차는 이번 주 누적 기준');
+  // S9: need(9)가 8을 넘으면 세션당 세트 상한 안내가 붙는다(js/ai.js volNeedNote)
+  assert.ok(ctx.includes('이번 주 3세트, 목표 12세트까지 9세트 더 (한 세션엔 최대 8세트)'), '격차는 이번 주 누적 기준 + 세션 상한 안내');
 });
 
 test('코치 컨텍스트 — RPE는 개인 기준선 대비로 판정하고 "오버트레이닝" 라벨을 쓰지 않는다 (D5)', () => {

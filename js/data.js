@@ -166,8 +166,8 @@ var SESSIONS = {
       { name: '머신 체스트 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 60 },
       { name: '덤벨 인클라인 벤치 프레스', type: '덤벨', sets: 3, reps: '10-12', lastWeight: 20 },
       { name: '머신 시티드 숄더 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 40 },
-      { name: '덤벨 사이드 레터럴 레이즈', type: '덤벨', sets: 3, reps: '12-15', lastWeight: 8 },
-      { name: '머신 펙 덱 플라이', type: '머신', sets: 3, reps: '12-15', lastWeight: 35 },
+      { name: '덤벨 사이드 레터럴 레이즈', type: '덤벨', sets: 3, reps: '12-25', lastWeight: 8 },
+      { name: '머신 펙 덱 플라이', type: '머신', sets: 3, reps: '10-15', lastWeight: 35 },
       { name: '케이블 푸시 다운', type: '케이블', sets: 3, reps: '10-15', lastWeight: 25 }
     ]
   },
@@ -181,7 +181,7 @@ var SESSIONS = {
       { name: '풀업', type: '체중', sets: 3, reps: '본인 최대', lastWeight: null, reps_done: 7 },
       { name: '랫 풀 다운', type: '머신', sets: 3, reps: '8-12', lastWeight: 50 },
       { name: '머신 시티드 로우', type: '머신', sets: 3, reps: '8-12', lastWeight: 55 },
-      { name: '페이스 풀', type: '케이블', sets: 3, reps: '12-15', lastWeight: 20 },
+      { name: '페이스 풀', type: '케이블', sets: 3, reps: '15-20', lastWeight: 20 },
       { name: '인클라인 덤벨 컬', type: '덤벨', sets: 3, reps: '10-12', lastWeight: 10 },
       { name: '덤벨 해머 컬', type: '덤벨', sets: 3, reps: '10-15', lastWeight: 12 }
     ]
@@ -194,7 +194,7 @@ var SESSIONS = {
     setCount: 18,
     exercises: [
       { name: '레그 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 120 },
-      { name: '머신 레그 익스텐션', type: '머신', sets: 3, reps: '12-15', lastWeight: 45 },
+      { name: '머신 레그 익스텐션', type: '머신', sets: 3, reps: '10-15', lastWeight: 45 },
       // 종목명은 EXERCISE_BODY_PART_MAP의 정확 키를 쓴다 — 퍼지 매칭에 의존하면 부위·장비 판정이 어긋난다.
       // ('시티드 햄스트링 컬'·'카프 레이즈 머신'은 맵에 없는 이름이었고, 후자는 이 헬스장에 없는 전용 카프 머신을 가리켰다)
       { name: '시티드 레그 컬', type: '머신', sets: 3, reps: '10-12', lastWeight: 35 },
@@ -219,7 +219,7 @@ var SESSIONS = {
       { name: '머신 체스트 프레스', type: '머신', sets: 3, reps: '8-10', lastWeight: 60 },
       { name: '랫 풀 다운', type: '머신', sets: 3, reps: '8-12', lastWeight: 50 },
       { name: '머신 시티드 로우', type: '머신', sets: 3, reps: '8-12', lastWeight: 55 },
-      { name: '덤벨 사이드 레터럴 레이즈', type: '덤벨', sets: 3, reps: '12-15', lastWeight: 8 },
+      { name: '덤벨 사이드 레터럴 레이즈', type: '덤벨', sets: 3, reps: '12-25', lastWeight: 8 },
       { name: '인클라인 덤벨 컬', type: '덤벨', sets: 3, reps: '10-12', lastWeight: 10 },
       { name: '케이블 푸시 다운', type: '케이블', sets: 3, reps: '10-15', lastWeight: 25 }
     ]
@@ -697,7 +697,7 @@ var EXERCISE_CLASS_OVERRIDES = {
   '터미널 니 익스텐션': 'rehab',
   '페이스 풀': 'rehab',
   // 이름에 '벤치 프레스'가 들어가 HEAVY_COMPOUND_KEYWORDS에 걸리지만 실제 처방은 10~12회다.
-  // 지정하지 않으면 '고중량 복합'(5~8회)으로 잡혀, SESSIONS PUSH/UPPER 템플릿이 적어 둔
+  // 지정하지 않으면 '고중량 복합'(6~10회)으로 잡혀, SESSIONS PUSH/UPPER 템플릿이 적어 둔
   // 10-12와 화면에 뜨는 목표 반복이 어긋난다(20kg 덤벨 인클라인 프레스는 대형 리프트가 아니다).
   // 바벨/스미스 인클라인·평벤치는 진짜 고중량 복합이라 그대로 둔다.
   '덤벨 인클라인 벤치 프레스': 'compound_moderate'

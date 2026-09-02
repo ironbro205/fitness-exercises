@@ -144,7 +144,7 @@ function clearWizard() {
 // 유산소(러닝머신 인터벌 / 경사 걷기) 세션 저장 — 2단계 RUNNING 탭.
 // session = { id, date, mode:'interval'|'walk', totalSec, totalDistKm,
 //             segments:[{type,targetSpeed,actualSpeed,incline,sec}], completed(bool), rpe(1~10|null),
-//             handrail:'none'|'light'|'hold'|null (걷기 모드 전용) }
+//             handrail:'none'|'light'|'hold_upright'|'hold_lean'|null (걷기 모드 전용, 옛 값 'hold' 호환) }
 // ★옛 기록에는 mode·incline·handrail 이 없다 → 읽는 쪽에서 mode||'interval', incline||0 으로 폴백한다.
 // cardioLog 에 push → localStorage 저장 → 화면 재렌더.
 // CARDIO_LOG 는 BACKUP_EXCLUDE_KEYS 에 없으므로 KEYS 순회 백업/복원에 자동 포함된다(운동 데이터).

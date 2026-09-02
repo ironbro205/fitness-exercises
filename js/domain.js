@@ -277,7 +277,7 @@ function getExerciseClass(exerciseName) {
   }
 
   var info = EXERCISE_BODY_PART_MAP[name] || getExercisePart(name);
-  if (!info) return 'isolation'; // 미등록 종목 — 보수적 기본값 (12-15회, 소폭 증량)
+  if (!info) return 'isolation'; // 미등록 종목 — 보수적 기본값 (10-15회, 소폭 증량)
 
   if (info.compound) {
     for (var k = 0; k < HEAVY_COMPOUND_KEYWORDS.length; k++) {
@@ -600,9 +600,9 @@ var ROLLING_1RM_MAX_REPS = 12; // 절대 상한(클래스별 상한의 천장) �
 //   (repMin을 쓰면 '중강도 복합'(8~12회 처방)이 상한 10이 되어 11·12회 본세트가 통째로 잘린다 —
 //    랫 풀 다운·머신 시티드 로우·머신 체스트 프레스가 정확히 이 경우다.)
 // 그래서 repMax를 바닥으로 삼고, 기존 상한(12)보다 느슨해지지도 않게 min/max로 묶는다.
-//   compound_heavy(5~8회 처방)   → 10 (강화. 처방이 8회를 넘지 않으므로 잘리는 세트가 없다)
+//   compound_heavy(6~10회 처방)  → 10 (강화. 처방이 10회를 넘지 않으므로 잘리는 세트가 없다)
 //   compound_moderate(8~12회)    → 12 (유지)
-//   isolation(12~15) · light_isolation(15~25) · rehab(15~20) → 12 (유지)
+//   isolation(10~15) · light_isolation(12~25) · rehab(15~20) → 12 (유지)
 // 즉 "처방 범위는 절대 자르지 않되, 그 위로는 12회를 천장으로 둔다"가 실제 규칙이다.
 // 근본 해결(반복 12회 초과 구간까지 정확한 e1RM)은 세트별 RIR 실측이 필요하다 — 백로그 #7.
 var ROLLING_1RM_BASE_MAX_REPS = 10;
@@ -938,7 +938,7 @@ function applyTopSetAutoDeload(exercise) {
   if (!top || top.weight === null || top.weight === undefined || !(top.reps > 0)) return 0;
 
   // 기준은 **그 세트에 처방된 목표 반복**이지 클래스 상한이 아니다. 더블 프로그레션에서 증량 직후
-  // 탑세트 목표는 범위 하단(5-8 클래스면 5회)이라, 상한(8)과 비교하면 목표를 정확히 채운 날에도
+  // 탑세트 목표는 범위 하단(6-10 클래스면 6회)이라, 상한(10)과 비교하면 목표를 정확히 채운 날에도
   // "못 채웠다"며 백오프를 깎는다 — 거의 매 세션 발동하는 오작동이 된다.
   var range = clampRepsToClass(exercise.name, exercise.targetReps);
   var target = (typeof top.repsTarget === 'number' && top.repsTarget > 0) ? top.repsTarget : range.high;
@@ -1323,7 +1323,7 @@ function buildPrescriptionValues(ex, plan) {
     };
   }
   // '반복' 열은 클래스 목표 범위를 적는다 — 단, 세트마다 목표가 다른 스킴(피라미드 +4 / 백다운 12~15)은
-  // 그 범위가 실제 세트를 하나도 담지 못한다(5-8 이라 써 놓고 세트는 12·10·8회). 그럴 땐 **실제 세트의 폭**을 적는다.
+  // 그 범위가 실제 세트를 하나도 담지 못한다(6-10 이라 써 놓고 세트는 12·10·8회). 그럴 땐 **실제 세트의 폭**을 적는다.
   var workReps = plan.sets.filter(function(s) { return s && !s.isWarmup && !isSetExtension(s); })
                           .map(function(s) { return s.amrap && s.repsMax ? s.repsMax : s.reps; })
                           .filter(function(r) { return r > 0; });
@@ -1477,7 +1477,7 @@ function resolveRestSec(exercise, set) {
   if (isSetExtension(set)) return base;
 
   // 목표 하한. 백다운처럼 **클래스 범위 밖 목표(12~15회)** 를 가진 세트는 자기 하한을 들고 있다 —
-  // 클래스 하한(고중량 복합 5회)과 비교하면 백다운을 4회에 끝내도 미달로 안 잡힌다.
+  // 클래스 하한(고중량 복합 6회)과 비교하면 백다운을 4회에 끝내도 미달로 안 잡힌다.
   var range = clampRepsToClass(exercise ? exercise.name : '', exercise ? exercise.targetReps : null);
   var repsFloor = (typeof set.repsMin === 'number') ? set.repsMin : range.low;
   if (set.reps > 0 && set.reps < repsFloor) base += REST_AUTOREG_BONUS_SEC;
@@ -2357,8 +2357,9 @@ function getVolumeDiagnosis(volumeByPart, weeks, directByPart) {
       excessive.push(entry);
     }
 
-    // 직접 세트 하한 — 환산 버킷과 별개로 판정(환산이 🟢여도 잡는다). 0세트(미접촉)는 위 버킷이 이미 말한다.
-    if (groupedDirect && weeklyVol > 0 && DIRECT_MIN_GROUPS.indexOf(g) !== -1) {
+    // 직접 세트 하한 — 환산이 최적 하한 이상(🟢·🔥)인데 직접 고립이 부족한 경우만 별도 표식.
+    // 환산 자체가 하한 미달·부족(🔴·🟡)이면 그 버킷이 이미 부족을 말하므로 여기서 또 잡지 않는다.
+    if (groupedDirect && weeklyVol >= optimalLow && DIRECT_MIN_GROUPS.indexOf(g) !== -1) {
       var directWeekly = (groupedDirect[g] || 0) / weeks;
       if (directWeekly < DIRECT_MIN_SETS) {
         directShort.push({ group: g, label: BODY_PART_GROUPS[g].kr, direct: directWeekly, min: DIRECT_MIN_SETS });
