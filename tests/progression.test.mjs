@@ -338,3 +338,88 @@ test('증량 폭 경고 — 한 칸이 현재 무게의 10%를 넘으면 증량�
   assert.equal(ok.jumpWarned, false);
   assert.ok(!ok.note.includes('%'));
 });
+
+// ── 세트 구성 규칙 v69 ──
+
+// C — 하한 이상·상단 미달 → 목표 반복은 지난 최대 +1 (범위 상단 캡)
+test('[v69-C] 하한 이상·상단 미달 → 다음 목표는 지난 최대 +1', () => {
+  seedLog([workout(daysAgo(2), '덤벨 벤치 프레스', [set(60, 8), set(60, 7), set(60, 7)])]);
+  const plan = app.getSessionSetPlan('덤벨 벤치 프레스', 60, '6-10');
+  assert.equal(plan.weight, 60);
+  assert.equal(plan.reps, 9, '지난 최대 8회 + 1');
+});
+
+// D — 2세션 연속 하한 미달 → 한 단계 감량 / 1세션만 미달이면 유지 + 안내
+test('[v69-D] 2세션 연속 하한 미달 → 감량, 1세션만 미달이면 유지 + 안내', () => {
+  const missLog = [
+    workout(daysAgo(2), '핵 스쿼트', [set(60, 5), set(60, 5), set(60, 4)]),
+    workout(daysAgo(6), '핵 스쿼트', [set(60, 5), set(60, 5), set(60, 4)])
+  ];
+  seedLog(missLog);
+  const two = app.getProgressiveRecommendation('핵 스쿼트', '6-10');
+  assert.equal(two.source, 'regress');
+  assert.equal(two.weight, 55);
+
+  seedLog([missLog[0]]);
+  const one = app.getProgressiveRecommendation('핵 스쿼트', '6-10');
+  assert.equal(one.source, 'maintain');
+  assert.equal(one.weight, 60);
+  assert.ok(one.note.indexOf('하한') >= 0, one.note);
+});
+
+test('[v69-D 경계] 5kg(바벨 최저 격자) 2세션 연속 하한 미달 — 더 못 내리면 유지', () => {
+  seedLog([
+    workout(daysAgo(2), '레그 프레스', [set(5, 3), set(5, 3), set(5, 3)]),
+    workout(daysAgo(6), '레그 프레스', [set(5, 3), set(5, 3), set(5, 3)])
+  ]);
+  const rec = app.getProgressiveRecommendation('레그 프레스', '8-12');
+  assert.equal(rec.source, 'maintain');
+  assert.equal(rec.weight, 5);
+});
+
+// B — 한쪽씩(unilateral) 복합 종목은 클래스 범위 대신 8-12로, 한쪽씩 고립은 클래스 범위 유지
+test('[v69-B] 한쪽씩 복합은 8-12로 덮이고, 한쪽씩 고립은 클래스 범위(경량 고립) 그대로', () => {
+  const name = '덤벨 불가리안 스플릿 스쿼트';
+  const cut = app.clampRepsToClass(name, '6-10');
+  assert.equal(cut.low, 8); assert.equal(cut.high, 10);
+  // parseRepRange(null)의 전역 기본값('8-10')과의 교집합이라 {8,12} 전체가 아니라 {8,10}이 나온다
+  const full = app.clampRepsToClass(name, null);
+  assert.equal(full.low, 8); assert.equal(full.high, 10);
+
+  const iso = app.clampRepsToClass('케이블 원 암 레터럴 레이즈', null);
+  assert.equal(iso.low, 12); assert.equal(iso.high, 25, '한쪽씩 고립은 UNILATERAL_REP_RANGE 를 쓰지 않는다');
+});
+
+// F6 — 한쪽씩 복합의 교집합이 한 점(low===high)으로 좁아지면 8-12 폭 전체로 되돌린다.
+test('[F6] 한쪽씩 복합 오버라이드는 단일 반복으로 무너지지 않는다', () => {
+  const lunge = app.clampRepsToClass('런지', '12-15');
+  assert.equal(lunge.low, 8); assert.equal(lunge.high, 12, '교집합이 한 점(12)이라 전체 폭으로 복귀');
+
+  const bss = app.clampRepsToClass('불가리안 스플릿 스쿼트', '5-8');
+  assert.equal(bss.low, 8); assert.equal(bss.high, 12, '교집합이 한 점(8)이라 전체 폭으로 복귀');
+
+  // 교집합이 이미 폭을 갖고 있으면(8-10) 기존 동작 그대로 유지한다.
+  const dbss = app.clampRepsToClass('덤벨 불가리안 스플릿 스쿼트', '6-10');
+  assert.equal(dbss.low, 8); assert.equal(dbss.high, 10);
+});
+
+// H — 기록도 1RM도 없지만 같은 부위 종목의 1RM으로 추정 (단, 외부 하중이 있는 종목만)
+test('[v69-H] 기록·1RM 둘 다 없어도 같은 부위 종목 1RM 평균에서 추정한다 (머신·케이블 종목)', () => {
+  seedLog([]);
+  app.storage.set(app.KEYS.ONE_RM_DATA, Object.assign({}, app.INITIAL_1RM)); // 기본 시드값으로 리셋
+  // 해머 로우: 자체 1RM 기록 없음, 같은 부위(upper_back·복합) 종목은 기본 INITIAL_1RM 시드에 있다
+  const rec = app.getProgressiveRecommendation('해머 로우', '8-12');
+  assert.ok(rec, '유사 종목 추정으로 추천이 나와야 한다');
+  assert.equal(rec.source, 'rm_estimate');
+  assert.equal(rec.note, '유사 종목 기록 기반');
+  assert.equal(rec.weight % app.getWeightIncrement('해머 로우'), 0, '격자 위 무게여야 한다');
+});
+
+// F1 — 외부 하중이 없는 종목(맨몸·어시스트 기구)은 같은 부위 1RM 폴백으로도 kg을 주면 안 된다
+test('[F1] 맨몸·어시스트 종목은 기록·1RM이 없으면 null (같은 부위 1RM 폴백 금지)', () => {
+  seedLog([]);
+  app.storage.set(app.KEYS.ONE_RM_DATA, Object.assign({}, app.INITIAL_1RM)); // 기본 시드값으로 리셋
+  assert.equal(app.getProgressiveRecommendation('플랭크', '12-15'), null);
+  assert.equal(app.getProgressiveRecommendation('런지', '8-12'), null);
+  assert.equal(app.getProgressiveRecommendation('풀업', '6-10'), null);
+});

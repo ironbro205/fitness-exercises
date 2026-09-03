@@ -29,7 +29,7 @@
 | A2 | 기본 세트법은 클래스가 정한다 | compound_heavy=탑세트, 나머지=스트레이트, 재활=잠금 | `js/data.js:491-497` |
 | A3 | 백오프 감량 비율 | `BACKOFF_PCT = 0.90` (탑세트의 90%) | `js/data.js:510` |
 | A4 | 탑세트 목표 미달 시 추가 감량 | `BACKOFF_DELOAD_PCT = 0.85` | `js/data.js:512` |
-| A5 | 피더 세트 | `FEEDER_PCT = 0.90` × `FEEDER_REPS = 2` | `js/data.js:513-514` |
+| A5 | 피더 세트 | (v69: 전용 상수 삭제 → `WARMUP_RAMP.full[2]` = 0.85배율 × 2회로 통합) | `js/data.js` |
 | A6 | 어센딩 피라미드 비율 | `PYRAMID_PCTS = [0.85, 0.925, 1.00]`, repsDelta +4/+2/0 | `js/data.js:515` · `:565-576` |
 | A7 | 역피라미드 비율 | `RPT_PCTS = [1.00, 0.90, 0.80]`, repsDelta 0/+2/+4, RIR 0-2 고정 | `js/data.js:516` · `:578-591` |
 | A8 | 드롭 감량 | `DROP_PCT = 0.75` (−25% 씩 2회), 사이 휴식 10초 | `js/data.js:517` · `:519` · `:593-600` |
