@@ -328,9 +328,9 @@ var EXERCISE_BODY_PART_MAP = {
   '덤벨 아놀드 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: true, equipment: 'dumbbell' },
   '덤벨 사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'dumbbell' },
   '사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'dumbbell' },
-  '케이블 원 암 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'cable' },
+  '케이블 원 암 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'cable', unilateral: true },
   '리버스 펙 덱 플라이': { primary: 'shoulders_rear', secondary: ['upper_back'], compound: false, mainEligible: false, equipment: 'rear_pec_deck' },
-  '원암 리버스 펙 덱 플라이': { primary: 'shoulders_rear', secondary: [], compound: false, mainEligible: false, equipment: 'rear_pec_deck' },
+  '원암 리버스 펙 덱 플라이': { primary: 'shoulders_rear', secondary: [], compound: false, mainEligible: false, equipment: 'rear_pec_deck', unilateral: true },
   '페이스 풀': { primary: 'shoulders_rear', secondary: ['upper_back'], compound: false, mainEligible: false, equipment: 'cable' },
   '스미스 머신 오버헤드 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: true, equipment: 'smith' },
   '바벨 오버헤드 프레스': { primary: 'shoulders_front', secondary: ['triceps'], compound: true, mainEligible: true, equipment: 'barbell' },
@@ -373,7 +373,7 @@ var EXERCISE_BODY_PART_MAP = {
   '어시스트 풀업': { primary: 'lats', secondary: ['biceps', 'upper_back'], compound: true, mainEligible: true, equipment: 'assist_machine' },
   '플레이트 랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false, equipment: 'plate_lat_pulldown' },
   '와이드 그립 랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false, equipment: 'wide_pulldown_rear' },
-  '원 암 케이블 랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false, stretched: true, equipment: 'cable' },
+  '원 암 케이블 랫 풀 다운': { primary: 'lats', secondary: ['biceps'], compound: true, mainEligible: false, stretched: true, equipment: 'cable', unilateral: true },
   '해머 로우': { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true, mainEligible: false, equipment: 'hammer_row' },
   '스미스 머신 슈러그': { primary: 'traps', secondary: [], compound: false, mainEligible: false, equipment: 'smith' },
   '바벨 슈러그': { primary: 'traps', secondary: [], compound: false, mainEligible: false, equipment: 'barbell' },
@@ -418,10 +418,10 @@ var EXERCISE_BODY_PART_MAP = {
   '머신 힙 어브덕션': { primary: 'glutes_med', secondary: [], compound: false, mainEligible: false, equipment: 'abduction_machine' },
   '힙 어덕션': { primary: 'adductors', secondary: [], compound: false, mainEligible: false, equipment: 'adduction_machine' },
   '힙 어브덕션': { primary: 'glutes_med', secondary: [], compound: false, mainEligible: false, equipment: 'abduction_machine' },
-  '덤벨 불가리안 스플릿 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true, equipment: 'dumbbell' },
-  '불가리안 스플릿 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true, equipment: 'bodyweight' },
-  '덤벨 싱글 레그 데드리프트': { primary: 'hamstrings', secondary: ['glutes'], compound: true, mainEligible: true, stretched: true, equipment: 'dumbbell' },
-  '런지': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true, equipment: 'bodyweight' },
+  '덤벨 불가리안 스플릿 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true, equipment: 'dumbbell', unilateral: true },
+  '불가리안 스플릿 스쿼트': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true, equipment: 'bodyweight', unilateral: true },
+  '덤벨 싱글 레그 데드리프트': { primary: 'hamstrings', secondary: ['glutes'], compound: true, mainEligible: true, stretched: true, equipment: 'dumbbell', unilateral: true },
+  '런지': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true, equipment: 'bodyweight', unilateral: true },
   '와이드 스탠스 레그 프레스': { primary: 'adductors', secondary: ['glutes', 'quads'], compound: true, mainEligible: false, stretched: true, equipment: 'leg_press' },
   '케이블 풀 스루': { primary: 'glutes', secondary: ['hamstrings'], compound: true, mainEligible: false, stretched: true, equipment: 'cable' },
   
@@ -522,7 +522,13 @@ var WEIGHT_JUMP_MAX_PCT = 0.10;
 var BACKOFF_PCT = 0.90;         // 탑세트의 90% — 실무 권장 −5~15%의 중앙값이자 5kg 격자에 깔끔히 떨어짐
                                 //   v2 §1-B 계산으로 재검증: 8RM 기준 백오프가 RIR 2~3에 착지하는 유일한 구간
 var BACKOFF_DELOAD_PCT = 0.85;  // v2 §2-E③ — 탑세트가 목표 반복 미달이면 백오프를 한 스텝 더 (Khairallah 2009)
-var FEEDER_PCT = 0.90;          // v2 §2-F — 워밍업 램프의 마지막 단(피더). 워킹무게 기준 90%로 보수적으로 번역
+var BACKOFF_PCT_LIGHT = 0.85;        // 덤벨·한쪽씩·케이블·고립 백오프 −15% (사용자 스펙, 관례 등급)
+var BACKOFF_DELOAD_PCT_LIGHT = 0.80; // 위 종목의 탑 미달 자동 디로드
+var WARMUP_MAX_PCT = 0.88;           // 워밍업 마지막 단은 탑의 88% 미만
+var WARMUP_RAMP = { full: [[0.50, 8], [0.70, 4], [0.85, 2]], short: [[0.50, 8], [0.75, 3]] }; // [배율, 반복]
+var UNILATERAL_REP_RANGE = { low: 8, high: 12 };  // 한쪽씩 복합 종목
+var REGRESS_SESSIONS = 2;            // 하한 미달이 이만큼 연속이면 한 단계 감량
+var FEEDER_PCT = 0.85;          // v2 §2-F — 워밍업 램프의 마지막 단(피더) = WARMUP_RAMP.full 마지막 단, 88% 가드 아래
 var FEEDER_REPS = 2;            // 피더는 준비지 피로가 아니다 — 2회 (사용자 원안 4~6회는 피로가 남는다)
 var PYRAMID_PCTS = [0.85, 0.925, 1.00];  // v2 §1-D 어센딩 (Angleri 2017 CP 프로토콜의 3세트 축약)
 var RPT_PCTS = [1.00, 0.90, 0.80];       // v2 §1-E 역피라미드 (IJSC 2024 디센딩)
@@ -557,7 +563,7 @@ var SET_SCHEMES = {
     // 내부 id는 top_backoff 그대로 두고 표시명만 '탑세트'로 줄인다 — 저장된 사용자 선택과
     // 과거 세션(exercise.scheme)이 전부 이 id를 들고 있어 바꾸면 이관이 또 필요해진다.
     kr: '탑세트', short: '탑세트',
-    desc: '가장 무거운 1세트 뒤 90% 무게로 채워요',
+    desc: '가장 무거운 1세트 뒤 한 단계 가벼운 무게로 채워요',
     build: {
       pattern: 'ramp', feeder: true, progressFrom: 'first',
       steps: [
@@ -1410,7 +1416,7 @@ var COACH_KNOWLEDGE =
   '- 머신=프리웨이트: 근비대 동등, 국소(regional) 비대까지 동등 (Haugen 2023 메타 13편·1,016명; Amanuma 2025). 환경/안전/안정성에 맞춰 고르면 됨.\n' +
   '- 종목 유지·교체: 진행 중인 종목은 8~12주 유지가 기본. 고정 vs 순환은 근비대 동등(Kassiano 2024 RCT n=70; Baz-Valle 2019). 단 한 종목만 고집하면 근두(head)별 빈 곳이 생길 수 있다(Fonseca 2014: 총 단면적은 같았지만 스쿼트만 한 군은 대퇴직근·중간광근이 안 컸다). 교체는 "몇 주 했나"가 아니라 사유(해부학적 공백·통증·장비·완수율 하락)로 정한다.\n' +
   '- 휴식: 60초 이상이면 근비대에 충분하고, 90초를 넘긴 추가 이득은 확인되지 않았다 (Singer 2024 베이지안 메타; 훈련자 메타 근비대 SMD 0.08). 앱이 고중량복합 180초 · 중강도복합 150초 · 고립 120초 · 경량고립 90초 · 재활 60초로 길게 쉬는 이유는 근비대가 아니라 다음 세트의 반복 수와 기술을 지키기 위해서다. 직전 세트가 목표 하단을 못 채웠을 때만 +30초. "쉬고 싶은 만큼"은 적응은 같은데 세션만 약 29% 길어지므로 권하지 않는다.\n' +
-  '- 세트법: 볼륨이 같으면 스트레이트·피라미드·드롭세트·고급 기법의 근비대는 동등 (Havers 2026 드롭세트 메타 12연구·274명 SMD 0.04; Tsartsapakis 2026 고급 기법 g=0.05; Angleri 2017). 그래서 앱은 "더 좋은 세트법"을 찾지 않고 문제에 맞춰 배정한다 — 고중량 복합만 탑세트+백오프(가장 무거운 1세트 뒤 90% 무게로 채운다. 90%는 실무 관례), 나머지는 스트레이트. 드롭세트의 이득은 시간(30~70% 단축)뿐이고 체감 힘듦·젖산이 크게 오르므로(RPE SMD 1.62) 세션당 1종목까지, 시간 압박이 있을 때만 제안한다.\n' +
+  '- 세트법: 볼륨이 같으면 스트레이트·피라미드·드롭세트·고급 기법의 근비대는 동등 (Havers 2026 드롭세트 메타 12연구·274명 SMD 0.04; Tsartsapakis 2026 고급 기법 g=0.05; Angleri 2017). 그래서 앱은 "더 좋은 세트법"을 찾지 않고 문제에 맞춰 배정한다 — 고중량 복합만 탑세트+백오프(가장 무거운 1세트 뒤 90% 무게로 채운다. 90%는 실무 관례. 덤벨·한쪽씩·케이블·고립 종목은 85%), 나머지는 스트레이트. 드롭세트의 이득은 시간(30~70% 단축)뿐이고 체감 힘듦·젖산이 크게 오르므로(RPE SMD 1.62) 세션당 1종목까지, 시간 압박이 있을 때만 제안한다.\n' +
   '- 길항근 슈퍼세트: 세션 시간 약 −37%인데 볼륨 로드·근비대·근력 동등 (Zhang 2025 메타 19연구 — 단 만성 근비대 근거는 그중 3편뿐; Burke 2024). 길항쌍만 쓴다 — 같은 근육을 연달아 쓰는 페어는 볼륨 로드가 떨어진다. 체감 힘듦·대사 스트레스가 높아 세션당 2페어까지.\n' +
   '- 점진적 과부하: 더블 프로그레션이 기본. 목표 횟수 상단을 달성하면 무게 +한 칸(장비 단위: 덤벨 2kg·머신·케이블·바벨·스미스 5kg), 횟수는 하단으로 리셋. 연속 달성을 몇 세션 요구하는지는 종목 종류에 따라 1~2세션이다(고중량 복합·경량 고립은 2세션, 나머지 1세션 — 앱이 계산한다). 한 칸이 현재 무게의 10%를 넘으면(가벼운 케이블·머신) 무게 대신 반복으로 진행한다(ACSM 2~10%).\n' +
   '- ⚠️ 예외 — 어시스트(보조) 기구 종목(어시스트 풀업·어시스트 딥스): 스택 무게는 부하가 아니라 **체중을 상쇄해 주는 보조력**이다. 실제 부하 = 체중 − 보조 무게. 그래서 진행 방향이 정반대다 — 상단 횟수를 달성하면 보조를 한 칸 **내린다**(보조 40kg → 35kg = 증량). 보조를 올리는 것이 감량이고, 통증·디로드처럼 부하를 줄여야 할 때 보조를 올린다. 보조 0kg = 맨몸이 최종 목표이며 그 아래는 없다. 이 종목의 무게를 말할 때는 반드시 "보조 40kg"처럼 말하고, 1RM·e1RM은 계산하지 않는다(보조 무게로 뽑은 1RM은 강해질수록 내려가는 뒤집힌 값이다). 진행 지표는 보조 무게 감소 추이다. (ExRx Calculating Actual Resistance / ACSM 2009 — docs/research/assisted-progression.md)\n' +

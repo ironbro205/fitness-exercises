@@ -186,7 +186,7 @@ test('탑세트+백오프: 탑 1개 + 백오프 2개(90%), 반복 목표는 같�
   assert.equal(working[1].reps, working[0].reps);
 });
 
-test('워밍업 램프: 고중량 복합 3세트(50%·75%·피더 90%) / 중강도 복합 1세트(55%) / 고립은 없음', () => {
+test('워밍업 램프: 고중량 복합 3세트(50%·70%·85%) / 중강도 복합 1세트(55%) / 고립은 없음', () => {
   resetOverrides();
   seedLog([
     { date: daysAgo(3), exercises: [
@@ -195,13 +195,13 @@ test('워밍업 램프: 고중량 복합 3세트(50%·75%·피더 90%) / 중강�
       { name: '머신 레그 익스텐션', setsDetail: [set(40, 13), set(40, 13)] }
     ] }
   ]);
-  // [v2 §2-F] 램프가 75%에서 멈추면 첫 워킹세트가 무겁게 느껴진다 → 마지막 단을 90%×2회로 올린다
+  // [v69] 워밍업 램프 50%×8 → 70%×4 → 85%×2(내림), 마지막 단은 탑의 88% 미만이어야 한다
   const heavy = app.getSessionSetPlan('핵 스쿼트', null, '8-10', { sets: 3 }).sets.filter((s) => s.isWarmup);
   assert.equal(heavy.length, 3);
   assert.equal(heavy[0].reps, 8);
   assert.equal(heavy[1].reps, 4);
   assert.equal(heavy[2].reps, 2, '피더는 준비지 피로가 아니다 — 2회');
-  assert.equal(heavy.map((s) => s.weight).join(','), '30,45,55');
+  assert.equal(heavy.map((s) => s.weight).join(','), '30,40,50');
 
   const mod = app.getSessionSetPlan('레그 프레스', null, '8-12', { sets: 3 }).sets.filter((s) => s.isWarmup);
   assert.equal(mod.length, 1);
@@ -325,11 +325,11 @@ test('[보정①] 피더 단은 첫 워킹세트보다 가볍고, 자리가 없�
   heavySeed();
   const warm = app.getSessionSetPlan('핵 스쿼트', null, '5-8', { sets: 3 }).sets.filter((s) => s.isWarmup);
   const work = app.getSessionSetPlan('핵 스쿼트', null, '5-8', { sets: 3 }).sets.filter((s) => !s.isWarmup);
-  assert.equal(warm[warm.length - 1].weight, 55);
+  assert.equal(warm[warm.length - 1].weight, 50, '85%×2 (내림) — 60kg의 85% = 51 → 5kg 격자로 내리면 50');
   assert.ok(warm[warm.length - 1].weight < work[0].weight, '피더는 첫 워킹세트보다 가벼워야 한다');
   assert.ok(warm[warm.length - 1].weight > warm[warm.length - 2].weight, '램프는 계속 올라가야 한다');
 
-  // 20kg처럼 75% 단(15kg)과 90% 단(15kg)이 같은 칸이면 피더를 넣지 않는다
+  // 20kg처럼 70% 단과 85% 단이 같은 칸이면 그 단을 넣지 않는다
   seedLog([{ date: daysAgo(3), exercises: [{ name: '핵 스쿼트', setsDetail: [set(20, 8), set(20, 8)] }] }]);
   const low = app.getSessionSetPlan('핵 스쿼트', null, '5-8', { sets: 3 }).sets.filter((s) => s.isWarmup);
   assert.equal(low.length, 2, '격자에 자리가 없으면 램프는 2단 그대로');
@@ -574,6 +574,71 @@ test('[신규] SET_SCHEMES 표 자체의 무결성 (pct 범위·rir 형식·role
   });
   // 시트 순서 목록과 스킴 표가 서로 빠짐없이 대응한다
   assert.equal(app.SET_SCHEME_ORDER.slice().sort().join(','), Object.keys(app.SET_SCHEMES).sort().join(','));
+});
+
+test('[v69] top_backoff 설명은 더 이상 고정 비율(90%)을 말하지 않는다 (종목별로 달라짐)', () => {
+  assert.equal(app.SET_SCHEMES.top_backoff.desc.indexOf('90%'), -1);
+});
+
+test('[v69] 덤벨·한쪽씩 종목은 백오프 85%·경량 자동 디로드 80%, 반복 범위는 8-12로 덮인다', () => {
+  resetOverrides();
+  seedLog([]);
+  const name = '덤벨 불가리안 스플릿 스쿼트';
+  // parseRepRange(null)은 이 함수와 무관한 전역 기본값('8-10')으로 먼저 떨어지므로, null 호출은
+  // {low:8,high:12}가 아니라 {8,10}이 된다(8-10 ∩ 8-12) — 명시 폭(8-12)을 주면 클래스 상한 그대로 나온다.
+  const rNull = app.clampRepsToClass(name, null);
+  assert.equal(rNull.low, 8); assert.equal(rNull.high, 10);
+  const r812 = app.clampRepsToClass(name, '8-12');
+  assert.equal(r812.low, 8); assert.equal(r812.high, 12);
+
+  const plan = app.getSessionSetPlan(name, 20, '8-12', { sets: 3, baseWeight: 20 });
+  const warm = plan.sets.filter((s) => s.isWarmup);
+  const work = plan.sets.filter((s) => !s.isWarmup);
+  assert.equal(warm.map((s) => s.weight).join(','), '10,14', '한쪽씩·덤벨은 워밍업 2단(50%×8 → 75%×3)');
+  assert.equal(warm.map((s) => s.reps).join(','), '8,3');
+  assert.equal(work.map((s) => s.weight).join(','), '20,18,18', '백오프 = 20×0.85=17 → 5의 배수 아님 → 18');
+  assert.equal(work[1].pct, app.BACKOFF_PCT_LIGHT);
+
+  // 탑세트가 목표 미달 → 자동 디로드는 80%(BACKOFF_DELOAD_PCT_LIGHT)
+  const ex = { name: name, scheme: 'top_backoff', targetReps: '8-12', sets: [
+    { role: 'top', weight: 20, reps: 6, repsTarget: 10, completed: true, isWarmup: false },
+    { role: 'backoff', weight: 18, reps: 8, completed: false, isWarmup: false },
+    { role: 'backoff', weight: 18, reps: 8, completed: false, isWarmup: false }
+  ] };
+  assert.equal(app.applyTopSetAutoDeload(ex), 2);
+  assert.deepEqual(ex.sets.map((s) => s.weight), [20, 16, 16], 'reduceWeight(20, 0.80) = 16');
+});
+
+test('[v69] 핵 스쿼트 탑 45kg — 워밍업 20/30/35(내림), 백오프 40', () => {
+  resetOverrides();
+  seedLog([]);
+  const plan = app.getSessionSetPlan('핵 스쿼트', 45, '5-8', { sets: 3, baseWeight: 45 });
+  const warm = plan.sets.filter((s) => s.isWarmup);
+  const work = plan.sets.filter((s) => !s.isWarmup);
+  assert.equal(warm.map((s) => s.weight).join(','), '20,30,35');
+  assert.equal(work.map((s) => s.weight).join(','), '45,40,40');
+});
+
+test('[v69] 불변식 스윕 — 여러 종목 × 세트법 × 무게에서 checkSetPlanInvariants 가 늘 빈 배열', () => {
+  resetOverrides();
+  seedLog([]);
+  const names = ['핵 스쿼트', '레그 프레스', '덤벨 불가리안 스플릿 스쿼트', '머신 레그 익스텐션'];
+  const schemes = ['straight', 'top_backoff', 'pyramid', 'rpt'];
+  let checked = 0;
+  names.forEach((name) => {
+    const step = app.getWeightIncrement(name);
+    schemes.forEach((sc) => {
+      for (let w = step; w <= 200; w += step) {
+        checked++;
+        app.setSetSchemeOverride(name, sc);
+        const plan = app.getSessionSetPlan(name, w, null, { sets: 3, baseWeight: w });
+        assert.deepEqual([...app.checkSetPlanInvariants(plan.sets, name)], [],
+          `${name}/${sc} w=${w}: 불변식 위반`);
+      }
+    });
+  });
+  assert.ok(checked > 100, `스윕 조합이 너무 적다: ${checked}`);
+  resetOverrides();
 });
 
 test('[신규] "세트 추가"가 스킴이 정한 다음 단을 이어 붙인다 (탑 → 백오프)', () => {
@@ -1359,9 +1424,10 @@ test('[불변] 세트법을 바꿔도 기준 무게는 그대로다 — 다섯 �
 });
 
 test('[불변] 세트마다 무게가 다른 로그에서도 기준 무게가 안 내려간다 (2차 #2)', () => {
-  // 탑 100×5 / 백오프 90×8 을 그대로 따른 사용자. 옛 역산은 e1RM(탑)과 반복(백오프)을 섞어
+  // 탑 100×6 / 백오프 90×8 을 그대로 따른 사용자. 옛 역산은 e1RM(탑)과 반복(백오프)을 섞어
   // 90kg 으로 깎았다 — 세션 안에서 복구 불가, 다음 세션 previousWeight 까지 90 으로 굳었다.
-  const detail = [set(100, 5), set(90, 8), set(90, 8)];
+  // (반복은 6-8 하한 6 이상이어야 v69 REGRESS_SESSIONS 감량이 끼어들지 않는다)
+  const detail = [set(100, 6), set(90, 8), set(90, 8)];
   seedRecalc([mixedSession('핵 스쿼트', detail, 3), mixedSession('핵 스쿼트', detail, 10)]);
   const ex = startSession('핵 스쿼트');                   // 기본값 = 탑세트
   assert.equal(app.hardestWeight('핵 스쿼트', weightsOf(ex)), 100, '전제: 탑 100kg');
@@ -1841,7 +1907,8 @@ test('[가드] 건너뛴 종목은 세트법 변경으로 조용히 되살아나
 });
 
 test('[되돌리기] 세트법을 왕복해도 자동 디로드를 되돌릴 수 있다 (2차 #11)', () => {
-  seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
+  // 지난 세션 6회(하한) → 목표(v69 — C: 지난 최대+1) = 7회
+  seedRecalc([session('핵 스쿼트', 90, 6, 3)]);
   const ex = startSession('핵 스쿼트');                   // 탑세트 [90, 80, 80]
   app.state.setSchemeOpen = false;
   let top = workingSets(ex)[0];
@@ -2102,11 +2169,11 @@ test('[문구] 남은 세트 기준으로 토스트를 만든다 (3차 M2)', () 
 });
 
 test('[수정] 끝낸 탑보다 무거운 값은 그 탑까지만 반영된다 (3차 M1)', () => {
-  seedRecalc([session('핵 스쿼트', 100, 6, 3)]);   // 하단 = 6 (2026-09 반복 범위 통일)
+  seedRecalc([session('핵 스쿼트', 100, 6, 3)]);   // 지난 최대 6회 → 목표(v69 — C: +1) = 7회
   const ex = startSession('핵 스쿼트');
   app.state.setSchemeOpen = false;
   workingSets(ex)[0].completed = true;
-  workingSets(ex)[0].reps = 6;                             // 탑 100 완료
+  workingSets(ex)[0].reps = 7;                             // 탑 100 완료 (목표 7회 달성 — 자동 디로드 없음)
 
   const toast = tapTopSet(120);                            // 재탭 후 120 입력
   assert.deepEqual([...weightsOf(ex)], [100, 90, 90],

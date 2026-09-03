@@ -1783,7 +1783,7 @@ window.addSetToExercise = function(exerciseIdx) {
     return !s.isWarmup && !isSetExtension(s);
   });
   var lastSet = working.length ? working[working.length - 1] : exercise.sets[exercise.sets.length - 1];
-  // 탑세트 뒤에 세트를 더하면 그건 그 스킴이 탑 다음에 두는 세트다 — 탑+백오프면 백오프(90%),
+  // 탑세트 뒤에 세트를 더하면 그건 그 스킴이 탑 다음에 두는 세트다 — 탑+백오프면 백오프(백오프 비율 90%·경량 85%),
   // 탑+백다운이면 백다운(82.5% · 12~15회). 역할·무게·반복·휴식을 스킴 표에서 그대로 가져온다.
   var addedRole = (lastSet && lastSet.role) || 'work';
   var addedWeight = lastSet ? lastSet.weight : null;
@@ -1800,8 +1800,8 @@ window.addSetToExercise = function(exerciseIdx) {
     ? { amrap: true, repsMax: lastSet.repsMax, repsMin: lastSet.repsMin } : null;
   if (lastSet && lastSet.role === 'top') {
     // 스킴이 탑 다음에 두는 단. 없으면(스트레이트·피라미드 등) 기존 동작대로 백오프로 이어 붙인다.
-    var afterTop = nextStepAfterTop(sessionSchemeOf(exercise))
-      || { role: 'backoff', pct: BACKOFF_PCT, rir: '2-3' };
+    var afterTop = nextStepAfterTop(sessionSchemeOf(exercise), exercise.name)
+      || { role: 'backoff', pct: backoffPctFor(exercise.name), rir: '2-3' };
     addedRole = afterTop.role;
     addedPct = afterTop.pct;
     addedWeight = reduceWeight(lastSet.weight, afterTop.pct, exercise.name);
@@ -1853,7 +1853,7 @@ window.completeSet = function() {
   }
   
   // [v2 §2-E③] 탑세트가 목표 반복에 못 미치면 남은 백오프를 한 스텝 더 내린다 (Khairallah 2009).
-  // 90% 감량은 탑세트를 채웠을 때를 전제로 계산된 값이라(v2 §1-B), 탑에서 이미 무너진 날엔
+  // 백오프 비율(90%·경량 85%)은 탑세트를 채웠을 때를 전제로 계산된 값이라(v2 §1-B), 탑에서 이미 무너진 날엔
   // 백오프에서 반복이 또 무너진다 — 그날 컨디션에 맞춰 감량폭을 키우는 자가조절이다.
   if (set.role === 'top') {
     // 재저장(반복 수를 고쳐 저장)에도 적용된다 — 이미 낮춰 뒀으면 0을 돌려주므로 토스트가 반복되지 않는다.
@@ -2346,7 +2346,9 @@ function topSetPrefill(ex) {
     // 지난 세션 실측은 안전 게이트를 모른다. 통증으로 증량이 잠긴 종목이면 그 처방(prog.weight)을
     // 넘지 못하게 맞춘다 — 아니면 "증량 보류"를 말하면서 증량을 그리게 된다(3차 H1).
     var prog = getProgressiveRecommendation(ex.name, ex.targetReps);
-    if (prog && prog.painGated && typeof prog.weight === 'number') {
+    // 2세션 연속 하한 미달로 감량이 확정된 종목도 같은 방식으로 잘라낸다 — 아니면 지난
+    // 실측(더 무거운 값)을 미리 채워 놓고 감량 안내와 반대되는 무게를 보여주게 된다.
+    if (prog && (prog.painGated || prog.source === 'regress') && typeof prog.weight === 'number') {
       recent = isReverseProgression(ex.name)
         ? Math.max(recent, prog.weight)     // 역방향은 보조가 적을수록 어렵다
         : Math.min(recent, prog.weight);
@@ -2445,7 +2447,7 @@ window.confirmTopSetWeight = function() {
     return;
   }
   var weight = state.topSetSheet.weight;
-  // 이미 끝낸 탑세트는 되돌릴 수 없다. 그보다 무거운 값을 받으면 남은 백오프(그 값의 90%)가
+  // 이미 끝낸 탑세트는 되돌릴 수 없다. 그보다 무거운 값을 받으면 남은 백오프(백오프 비율 90%·경량 85%)가
   // 끝낸 탑보다 무거워지고, 토스트는 존재하지 않는 탑 무게를 말한다(3차 M1).
   var doneTop = completedTopSet(ex);
   if (doneTop && typeof doneTop.weight === 'number') {
@@ -3355,7 +3357,7 @@ function exerciseBaseWeight(ex) {
 }
 
 // 세트법 사다리의 **꼭대기(탑)** 무게 — rebuildPendingSets 의 baseWeight 가 뜻하는 그 값.
-// 탑을 이미 끝냈으면 남은 세트 중 최대는 백오프(탑의 90%)라, 그걸 baseWeight 로 넘기면
+// 탑을 이미 끝냈으면 남은 세트 중 최대는 백오프(백오프 비율 90%·경량 85%)라, 그걸 baseWeight 로 넘기면
 // 사다리가 매번 한 단씩 내려앉는다. 끝낸 탑이 있으면 그 무게가 곧 꼭대기다.
 function exerciseLadderBase(ex) {
   var doneTop = completedTopSet(ex);
@@ -3446,7 +3448,7 @@ function applyExerciseChange(ex, field, value) {
     if (isPreview) { ex.weight = w; ex.weightLocked = true; }
     else if (completedTopSet(ex)) {
       // 탑세트를 이미 끝냈으면 세트법 사다리는 이미 쓰였다. 이때 baseWeight(사다리 꼭대기)를
-      // 다시 매기면 남은 세트가 그 90% 로 내려앉아, 화면 숫자(남은 세트 중 최대)는 그대로인데
+      // 다시 매기면 남은 세트가 백오프 비율(90%·경량 85%)로 내려앉아, 화면 숫자(남은 세트 중 최대)는 그대로인데
       // 실제 무게만 한 단 떨어진다 — [+5] 를 눌러도 아무 일 없어 보인다.
       // 남은 건 백오프뿐이므로 **남은 본세트 무게를 직접** 매긴다.
       var touched = 0;
@@ -3796,7 +3798,7 @@ function buildTopSetWeightSheetHtml(session, exercise) {
         '</div>' +
 
         '<p class="text-[11px] font-mono text-stone-500 mt-2">' + sourceKr + '</p>' +
-        noteBlock('탑 1세트 뒤 나머지는 90% 무게로 채워요.',
+        noteBlock('탑 1세트 뒤 나머지는 한 단계 가벼운 무게로 채워요.',
           '가장 무거운 1세트로 자극을 주고 뒤 세트는 감량해 반복을 지켜요.') +
 
         // .grid-cols-2 는 이 저장소 CSS에 없다 — 새로 정의하면 이 시트 밖 화면까지 바뀐다.

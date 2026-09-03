@@ -14,11 +14,15 @@
 > | `top_backdown` · `pyramid` · `rpt` 신규 (§1-C·1-D·1-E) | ✅ 구현 — **기본 배정 없음, 시트 선택지로만** |
 > | **`cluster`(§1-H) · `rest_pause` 분리(§1-G G-2)** | ❌ **구현하지 않기로 확정** — 다시 넣지 말 것 |
 > | GVT (§1-I) | ❌ 보고서 자체가 채택 반대 |
+> | **세트 구성 규칙 v69 (2026-09-03, 사용자 스펙)** — 워밍업 램프 50%×8 → 70%×4 → 85%×2 **내림**, 마지막 단 < 탑 88%, 덤벨·한쪽씩은 2단(50%×8 → 75%×3) | ✅ 구현 — `WARMUP_RAMP`·`WARMUP_MAX_PCT`·`floorWeightToEquipment`. 근거 등급 = 관례(램프 비율 RCT 없음, v2-sets-rest-tempo-warmup.md) |
+> | 경량 백오프 −15% (덤벨·한쪽씩·케이블·고립, 탑세트 스킴을 골랐을 때) · 자동 디로드 −20% | ✅ 구현 — `BACKOFF_PCT_LIGHT` 0.85 / `BACKOFF_DELOAD_PCT_LIGHT` 0.80, `backoffPctFor()`. 고중량 복합 바벨·머신은 90% 유지 |
+> | 하한 미달 감량 — 같은 무게로 **2세션 연속** 반복 하한 미달이면 한 단계 감량(`source:'regress'`), 1회는 유지+안내 · 하한 이상·상단 미달이면 다음 목표 = 지난 최대 +1 | ✅ 구현 — `REGRESS_SESSIONS`, `getProgressiveRecommendation`·`getSessionSetPlan` |
+> | `unilateral` 종목 메타(7종) — 한쪽씩 **복합**은 반복 8-12(`UNILATERAL_REP_RANGE`), 고립 한쪽씩은 클래스 범위 유지 · 출력 불변식 검사 `checkSetPlanInvariants` | ✅ 구현 — 스윕 테스트가 종목×세트법×무게 전 구간에서 위반 0 을 고정 |
 >
 > **무게 반올림 규칙**(§1-0 `step`)은 보고서보다 구체화됐다: 계산된 무게는 **가까운 배수**(덤벨 2kg / 그 외 5kg)로
 > 맞추되 **감량은 기준 세트보다 최소 한 단위 낮은 것을 보장**한다. '무조건 내림'은 채택하지 않았다 —
 > 5kg 격자에서 백오프 90%가 −14~−18%로 이탈해 §1-B 표의 자극 미달 구간(RIR 4 이상)에 떨어지기 때문이다.
-> 계약은 `tests/set-schemes.test.mjs` 의 "반올림:" 테스트들이 고정한다.
+> 계약은 `tests/set-schemes.test.mjs` 의 "반올림:" 테스트들이 고정한다. **예외(v69):** 워밍업 램프 단은 내림(`floorWeightToEquipment`)이다 — 워밍업은 준비 세트라 가벼운 쪽 오차가 안전하고, 88% 가드와 함께 써야 하기 때문이다. 백오프·드롭의 '가까운 배수 + 최소 한 단위 하강'은 그대로다.
 
 ---
 
