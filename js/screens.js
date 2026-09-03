@@ -2349,9 +2349,13 @@ function topSetPrefill(ex) {
     // 2세션 연속 하한 미달로 감량이 확정된 종목도 같은 방식으로 잘라낸다 — 아니면 지난
     // 실측(더 무거운 값)을 미리 채워 놓고 감량 안내와 반대되는 무게를 보여주게 된다.
     if (prog && (prog.painGated || prog.source === 'regress') && typeof prog.weight === 'number') {
-      recent = isReverseProgression(ex.name)
+      var clamped = isReverseProgression(ex.name)
         ? Math.max(recent, prog.weight)     // 역방향은 보조가 적을수록 어렵다
         : Math.min(recent, prog.weight);
+      // 게이트가 실제로 값을 깎았으면 이건 더 이상 "지난 실측"이 아니라 오늘의 처방이다 —
+      // source를 'plan'으로 바꿔야 시트가 "최근 실측"이 아니라 "오늘 추천"이라고 정확히 말한다.
+      if (clamped !== recent) return { weight: clamped, source: 'plan' };
+      recent = clamped;
     }
     return { weight: recent, source: 'recent' };
   }

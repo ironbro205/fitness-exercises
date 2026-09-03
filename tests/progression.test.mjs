@@ -390,13 +390,36 @@ test('[v69-B] 한쪽씩 복합은 8-12로 덮이고, 한쪽씩 고립은 클래�
   assert.equal(iso.low, 12); assert.equal(iso.high, 25, '한쪽씩 고립은 UNILATERAL_REP_RANGE 를 쓰지 않는다');
 });
 
-// H — 기록도 1RM도 없지만 같은 부위 종목의 1RM으로 추정
-test('[v69-H] 기록·1RM 둘 다 없어도 같은 부위 종목 1RM 평균에서 추정한다', () => {
+// F6 — 한쪽씩 복합의 교집합이 한 점(low===high)으로 좁아지면 8-12 폭 전체로 되돌린다.
+test('[F6] 한쪽씩 복합 오버라이드는 단일 반복으로 무너지지 않는다', () => {
+  const lunge = app.clampRepsToClass('런지', '12-15');
+  assert.equal(lunge.low, 8); assert.equal(lunge.high, 12, '교집합이 한 점(12)이라 전체 폭으로 복귀');
+
+  const bss = app.clampRepsToClass('불가리안 스플릿 스쿼트', '5-8');
+  assert.equal(bss.low, 8); assert.equal(bss.high, 12, '교집합이 한 점(8)이라 전체 폭으로 복귀');
+
+  // 교집합이 이미 폭을 갖고 있으면(8-10) 기존 동작 그대로 유지한다.
+  const dbss = app.clampRepsToClass('덤벨 불가리안 스플릿 스쿼트', '6-10');
+  assert.equal(dbss.low, 8); assert.equal(dbss.high, 10);
+});
+
+// H — 기록도 1RM도 없지만 같은 부위 종목의 1RM으로 추정 (단, 외부 하중이 있는 종목만)
+test('[v69-H] 기록·1RM 둘 다 없어도 같은 부위 종목 1RM 평균에서 추정한다 (머신·케이블 종목)', () => {
   seedLog([]);
-  app.storage.set(app.KEYS.ONE_RM_DATA, { '덤벨 로우': 60, '랫 풀 다운': 70 }); // 둘 다 lats·compound
-  const rec = app.getProgressiveRecommendation('풀업', '6-10');
+  app.storage.set(app.KEYS.ONE_RM_DATA, Object.assign({}, app.INITIAL_1RM)); // 기본 시드값으로 리셋
+  // 해머 로우: 자체 1RM 기록 없음, 같은 부위(upper_back·복합) 종목은 기본 INITIAL_1RM 시드에 있다
+  const rec = app.getProgressiveRecommendation('해머 로우', '8-12');
   assert.ok(rec, '유사 종목 추정으로 추천이 나와야 한다');
   assert.equal(rec.source, 'rm_estimate');
   assert.equal(rec.note, '유사 종목 기록 기반');
-  assert.equal(rec.weight % app.getWeightIncrement('풀업'), 0, '격자 위 무게여야 한다');
+  assert.equal(rec.weight % app.getWeightIncrement('해머 로우'), 0, '격자 위 무게여야 한다');
+});
+
+// F1 — 외부 하중이 없는 종목(맨몸·어시스트 기구)은 같은 부위 1RM 폴백으로도 kg을 주면 안 된다
+test('[F1] 맨몸·어시스트 종목은 기록·1RM이 없으면 null (같은 부위 1RM 폴백 금지)', () => {
+  seedLog([]);
+  app.storage.set(app.KEYS.ONE_RM_DATA, Object.assign({}, app.INITIAL_1RM)); // 기본 시드값으로 리셋
+  assert.equal(app.getProgressiveRecommendation('플랭크', '12-15'), null);
+  assert.equal(app.getProgressiveRecommendation('런지', '8-12'), null);
+  assert.equal(app.getProgressiveRecommendation('풀업', '6-10'), null);
 });

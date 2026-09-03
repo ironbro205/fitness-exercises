@@ -1,7 +1,7 @@
 // 세트 스킴(세트법) · 휴식시간 · 슈퍼세트 엔진 테스트
 // 근거 문서: docs/research/set-schemes.md · docs/research/set-schemes-v2.md · docs/research/training-splits.md
 // 핵심 계약:
-//  · 고중량 복합만 탑세트(가장 무거운 1세트 + 90% 백오프), 나머지는 스트레이트
+//  · 고중량 복합만 탑세트(가장 무거운 1세트 + 백오프(90%·경량 85%)), 나머지는 스트레이트
 //  · 무게는 가까운 배수(덤벨 2kg / 그 외 5kg)로 맞추되, 감량은 기준보다 최소 한 단위 낮다 (§2-B 함정)
 //  · 휴식 기본값이 클래스별 새 권장치이고, 반복이 하단 미달이면 +30초
 //  · 드롭·마이오렙·백다운 세트가 증량 판정·1RM을 오염시키지 않는다 (백다운은 볼륨엔 포함)
@@ -395,6 +395,51 @@ test('[보정③] 탑세트가 목표 미달이면 남은 백오프를 한 칸 �
   resetOverrides();
 });
 
+// F2 — 홀드데이 "+1" 목표(더블 프로그레션 유지 단계)는 지난 달성치(repsFloor)가 진짜 바닥이다.
+// 목표(+1)를 못 채워도 지난 세션 실제 반복만 지키면 무너진 게 아니라 자동 디로드가 걸리면 안 된다.
+test('[F2] 홀드데이 +1 목표 미달이어도 지난 달성치를 지키면 자동 디로드가 걸리지 않는다', () => {
+  seedRecalc([mixedSession('핵 스쿼트', [set(90, 7), set(80, 6), set(80, 6)], 3)]);
+  const plan = app.getSessionSetPlan('핵 스쿼트', null, '6-10', { sets: 3 });
+  const top = plan.sets.find((s) => s.role === 'top');
+  assert.equal(top.repsTarget, 8, '홀드데이 목표 = 지난 최대 7회 +1');
+  assert.equal(top.repsFloor, 7, '진짜 바닥 = 지난 세션 실제 달성치');
+
+  // 탑만 완료 처리(실제 세션처럼) — 백오프는 아직 미완료라야 자동 디로드가 건드릴 수 있다.
+  const mkEx = (topReps) => {
+    const sets = plan.sets.map((s) => Object.assign({}, s));
+    const t = sets.find((s) => s.role === 'top');
+    t.completed = true; t.reps = topReps;
+    return { name: '핵 스쿼트', scheme: 'top_backoff', targetReps: '6-10', sets: sets };
+  };
+
+  // 케이스 1: 목표(8) 미달이지만 지난 달성치(7)는 지켰다 → 디로드 없음, 백오프 그대로(80)
+  const hit = mkEx(7);
+  assert.equal(app.applyTopSetAutoDeload(hit), 0, '지난 달성치를 지켰으면 무너진 게 아니다');
+  hit.sets.filter((s) => s.role === 'backoff').forEach((s) => assert.equal(s.weight, 80));
+
+  // 케이스 2: 지난 달성치(7)마저 못 채웠다(6) → 디로드 발동, 백오프 한 칸 더 내려간다(75)
+  const missed = mkEx(6);
+  assert.equal(app.applyTopSetAutoDeload(missed), 2);
+  missed.sets.filter((s) => s.role === 'backoff').forEach((s) => assert.equal(s.weight, 75));
+  resetOverrides();
+});
+
+// F2 — 증량 직후(progress-day)는 repsFloor가 없다 → 처방 목표 미달이면 여전히 디로드된다(기존 동작 유지).
+test('[F2] 증량 직후(repsFloor 없음)는 처방 목표 미달이면 기존처럼 디로드된다', () => {
+  const mk = () => ({
+    name: '핵 스쿼트', scheme: 'top_backoff', targetReps: '6-10',
+    sets: [
+      { role: 'top', weight: 70, reps: 5, repsTarget: 6, completed: true, isWarmup: false },
+      { role: 'backoff', weight: 65, reps: 8, completed: false, isWarmup: false },
+      { role: 'backoff', weight: 65, reps: 8, completed: false, isWarmup: false }
+    ]
+  });
+  const ex = mk();
+  assert.equal(ex.sets[0].repsFloor, undefined, 'repsFloor 없음 — 증량 직후 시나리오');
+  assert.equal(app.applyTopSetAutoDeload(ex), 2, '처방 목표(6) 미달 → 기존처럼 디로드');
+  resetOverrides();
+});
+
 test('[신규] 피라미드의 반복 목표는 클래스 범위로 잘리지 않는다 (v2 §4-E 최대 함정)', () => {
   heavySeed();
   // compound_heavy 는 5~8회 클래스인데, 피라미드 첫 세트는 +4회(12회)여야 한다
@@ -638,6 +683,43 @@ test('[v69] 불변식 스윕 — 여러 종목 × 세트법 × 무게에서 chec
     });
   });
   assert.ok(checked > 100, `스윕 조합이 너무 적다: ${checked}`);
+  resetOverrides();
+});
+
+// F3 — 탑이 격자 밖(사용자가 세션 안에서 손수 고친 보존 무게)이어도 불변식은 계속 성립해야 한다.
+test('[F3] 격자 밖 탑(보존 무게)에서도 checkSetPlanInvariants 가 늘 빈 배열', () => {
+  resetOverrides();
+  seedLog([]);
+  const schemes = ['straight', 'top_backoff', 'pyramid', 'rpt'];
+  const offGrid5kg = [22.5, 62.5, 7.5];
+  const offGridDumbbell = [3, 11];
+  const cases = [
+    ['핵 스쿼트', offGrid5kg],
+    ['레그 프레스', offGrid5kg],
+    ['머신 레그 익스텐션', offGrid5kg],
+    ['덤벨 불가리안 스플릿 스쿼트', offGridDumbbell]
+  ];
+  cases.forEach(([name, weights]) => {
+    weights.forEach((w) => {
+      schemes.forEach((sc) => {
+        app.setSetSchemeOverride(name, sc);
+        const plan = app.getSessionSetPlan(name, w, null, { sets: 3, baseWeight: w });
+        assert.deepEqual([...app.checkSetPlanInvariants(plan.sets, name)], [],
+          `${name}/${sc} w=${w}: 불변식 위반`);
+      });
+    });
+  });
+  resetOverrides();
+});
+
+test('[F3] 핵 스쿼트 격자 밖 탑(22.5) top_backoff — 백오프는 탑보다만 가벼우면 된다', () => {
+  resetOverrides();
+  seedLog([]);
+  app.setSetSchemeOverride('핵 스쿼트', 'top_backoff');
+  const plan = app.getSessionSetPlan('핵 스쿼트', 22.5, null, { sets: 3, baseWeight: 22.5, warmup: false });
+  const working = [...plan.sets.filter((s) => !s.isWarmup).map((s) => s.weight)];
+  assert.deepEqual(working, [22.5, 20, 20]);
+  assert.deepEqual([...app.checkSetPlanInvariants(plan.sets, '핵 스쿼트')], []);
   resetOverrides();
 });
 
@@ -1627,7 +1709,9 @@ test('[탑세트] 지난 실측 갈래도 통증 게이트에 클램프된다 (3
   assert.equal(app.sessionReferenceSet(ex), null);
 
   const pre = app.topSetPrefill(ex);
-  assert.equal(pre.source, 'recent', '전제: 지난 실측 갈래로 내려왔다');
+  // F4: 게이트가 실제로 값을 깎았으면(95 → 80) 더 이상 "지난 실측"이 아니라 오늘의 처방이다 —
+  // source가 'recent'로 남으면 시트가 "최근 4세션 실측"이라고 거짓말한다.
+  assert.equal(pre.source, 'plan', '전제: 클램프가 값을 바꿨다 → 오늘 처방으로 표시');
   assert.equal(pre.weight, prog.weight, '95가 아니라 처방(80)으로 잘린다');
   endSession();
 });
@@ -1660,8 +1744,8 @@ test('[탑세트] 확인하면 웜업 → 피더 → 탑 → 백오프로 구성
 
   const warmups = ex.sets.filter((s) => s.isWarmup);
   const feeder = warmups[warmups.length - 1];
-  assert.equal(feeder.weight, app.reduceWeight(95, app.FEEDER_PCT, '핵 스쿼트'), '피더 = 탑의 90%');
-  assert.equal(feeder.reps, app.FEEDER_REPS);
+  assert.equal(feeder.weight, app.floorWeightToEquipment(95 * app.WARMUP_RAMP.full[2][0], '핵 스쿼트'), '마지막 램프 단 = 탑의 85% 내림');
+  assert.equal(feeder.reps, app.WARMUP_RAMP.full[2][1]);
   assert.ok(warmups.length >= 2 && warmups[0].weight < feeder.weight, '웜업 램프가 피더 앞에 온다');
   assert.equal(toast, '탑세트로 바꿨어요 — 탑 95kg');
   endSession();

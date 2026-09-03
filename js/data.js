@@ -528,8 +528,6 @@ var WARMUP_MAX_PCT = 0.88;           // 워밍업 마지막 단은 탑의 88% �
 var WARMUP_RAMP = { full: [[0.50, 8], [0.70, 4], [0.85, 2]], short: [[0.50, 8], [0.75, 3]] }; // [배율, 반복]
 var UNILATERAL_REP_RANGE = { low: 8, high: 12 };  // 한쪽씩 복합 종목
 var REGRESS_SESSIONS = 2;            // 하한 미달이 이만큼 연속이면 한 단계 감량
-var FEEDER_PCT = 0.85;          // v2 §2-F — 워밍업 램프의 마지막 단(피더) = WARMUP_RAMP.full 마지막 단, 88% 가드 아래
-var FEEDER_REPS = 2;            // 피더는 준비지 피로가 아니다 — 2회 (사용자 원안 4~6회는 피로가 남는다)
 var PYRAMID_PCTS = [0.85, 0.925, 1.00];  // v2 §1-D 어센딩 (Angleri 2017 CP 프로토콜의 3세트 축약)
 var RPT_PCTS = [1.00, 0.90, 0.80];       // v2 §1-E 역피라미드 (IJSC 2024 디센딩)
 var DROP_PCT = 0.75;            // 드롭마다 −25% — Angleri 2017 DS 프로토콜(~50~75% 1RM 구간)을 2회 드롭으로 재현
