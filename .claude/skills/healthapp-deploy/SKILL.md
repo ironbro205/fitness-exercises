@@ -26,7 +26,7 @@ description: "헬스앱(이 저장소, fitness-exercises)의 변경을 실제 �
    - `gh`로 PR 생성 (`gh pr create`)
    - 사용자 승인 후 `main` 병합 → 이 순간 Vercel이 자동 배포 시작
    > 코드 변경이면 병합 전에 Codex 리뷰가 끝나 있어야 한다(전역 규칙). 이 스킬은 이미 리뷰·QA를 통과한 변경을 "내보내는" 단계다.
-5. **라이브 브라우저 QA (필수)** — 배포가 끝나면 라이브 주소(fitness-exercises-iota.vercel.app)를 **브라우저로 직접 열어 스팟체크**한다. 에이전트가 수행할 때는 Orca 내장 브라우저(`orca tab create --url …` → `snapshot`/`eval`로 화면 확인 → 확인 후 `tab close`)나 Playwright 등 가용한 브라우저 도구를 쓴다. 확인 항목:
+5. **라이브 브라우저 QA (필수)** — 배포가 끝나면 라이브 주소(fitness-exercises-iota.vercel.app)를 **브라우저로 직접 열어 스팟체크**한다. 에이전트가 수행할 때는 Playwright 등 가용한 브라우저 도구를 쓴다. 확인 항목:
    - 새 `APP_VERSION`(캐시 버전)이 서빙되는가
    - **이번에 바꾼 기능이 실제 화면에서 동작**하는가 (변경 기능 중심 스팟체크 — 전 화면 전수조사 금지)
    - 콘솔에 빨간 에러가 없는가
