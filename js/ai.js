@@ -3,15 +3,15 @@
 // ═══════════════════════════════════════════════
 // Claude 커넥터 동기화 — docs/claude-connector-plan.md
 // 앱은 원자료 스냅샷을 POST /api/snapshot 으로 올리고, Claude 앱(Opus)이 커넥터로 저장한
-// 오늘의 루틴·유산소 플랜을 GET /api/plan 으로 받아 온다. 판단(무게·세트·휴식)은 Opus 몫이라
-// 스냅샷에는 계산값(추천 무게·1RM·정체·부족 부위·목표 세트·볼륨 판정·사이클)을 넣지 않는다.
+// 이번 주 계획·오늘 유산소를 GET /api/plan 으로 받아 온다(docs/weekly-plan.md). 판단(무게·세트·휴식)은
+// Opus 몫이라 스냅샷에는 계산값(추천 무게·1RM·정체·부족 부위·목표 세트·볼륨 판정)을 넣지 않는다.
+// 예외는 이번 주 부위별 실제 세트(weekSets)와 그것을 센 종목별 부위 무게표(muscleWeights) 둘뿐이다.
 // 연결 코드가 없으면 아무 요청도 하지 않는다.
 // ═══════════════════════════════════════════════
 
 var CLAUDE_SNAPSHOT_SCHEMA = 1;
 var CLAUDE_WINDOW_DAYS = 56;            // 최근 8주 원자료
 var CLAUDE_VISIBLE_SYNC_MIN_MS = 60000; // 다시 보일 때 동기화 최소 간격
-var CLAUDE_SESSIONS = ['push', 'pull', 'legs', 'upper', 'free'];
 // 세션별 종목 목록의 부위 묶음 (free = 전체). 어깨 후면은 PULL 에 둔다.
 var CLAUDE_CATALOG_PARTS = {
   push: ['chest', 'chest_upper', 'chest_lower', 'shoulders_front', 'shoulders_side', 'triceps'],
@@ -32,7 +32,8 @@ function getSyncToken() {
 
 function getClaudeSyncState() {
   var s = storage.get(KEYS.CLAUDE_SYNC, null);
-  var base = { lastUploadAt: null, lastUploadHash: null, lastImportedRoutineId: null, lastImportedCardioId: null };
+  // 옛 버전이 남긴 lastImportedRoutineId 는 읽지 않는다(여기 없는 키는 버려진다).
+  var base = { lastUploadAt: null, lastUploadHash: null, lastImportedCardioId: null };
   if (s && typeof s === 'object' && !Array.isArray(s)) {
     Object.keys(base).forEach(function(k) { if (s[k] !== undefined) base[k] = s[k]; });
   }
@@ -100,15 +101,18 @@ function buildClaudeCatalog() {
   return out;
 }
 
+// 드롭·마이오렙 같은 연장 세트에는 drop:true (세트 수에 세지 않는다 — 계약 5절). 본 세트에는 필드 없음.
 function claudeSetsOf(logEx) {
   return loggedExerciseSets(logEx).map(function(s) {
-    return { weight: claudeNum(s && s.weight), reps: claudeNum(s && s.reps), warmup: !!(s && s.isWarmup) };
+    var out = { weight: claudeNum(s && s.weight), reps: claudeNum(s && s.reps), warmup: !!(s && s.isWarmup) };
+    if (isSetExtension(s)) out.drop = true;
+    return out;
   });
 }
 
 function claudeWorkoutEntry(w, condByWorkout) {
   var cond = condByWorkout[w.id] || null;
-  return {
+  var entry = {
     date: String(w.date),
     session: String(w.session || w.sessionType || ''),
     sessionName: String(w.sessionName || w.sessionKr || ''),
@@ -121,6 +125,11 @@ function claudeWorkoutEntry(w, condByWorkout) {
       return { name: String(ex.name), assist: isReverseProgression(ex.name), sets: claudeSetsOf(ex) };
     })
   };
+  // 주간 계획 세션으로 한 운동에만 있다 (끝난 세션 판정용 · 계약 5절)
+  ['planWeek', 'planLabel', 'planType'].forEach(function(k) {
+    if (typeof w[k] === 'string' && w[k]) entry[k] = w[k];
+  });
+  return entry;
 }
 
 function claudeCardioEntry(c) {
@@ -206,6 +215,18 @@ function buildClaudeSnapshot(nowDate) {
     body.push({ date: String(b.date), weightKg: claudeNum(b.weight), bodyFatPct: claudeNum(b.bodyFat) });
   });
 
+  var catalog = buildClaudeCatalog();
+  // 이번 주 부위별 실제 세트와 그것을 센 무게표 — 앱 카드와 같은 함수(js/domain.js)로 센다.
+  var weekStart = getWeekStartStr(today);
+  // 무게표 = catalog.free 전부 + 스냅샷 기록에 나오는 모든 종목 이름(별칭·자유 입력 포함, 빈 표여도 넣는다)
+  var muscleWeights = {};
+  function addWeights(name) {
+    if (typeof name === 'string' && !muscleWeights.hasOwnProperty(name)) muscleWeights[name] = exerciseGroupWeights(name);
+  }
+  catalog.free.forEach(addWeights);
+  workouts.forEach(function(w) { w.exercises.forEach(function(ex) { addWeights(ex.name); }); });
+  olderLastPerformed.forEach(function(o) { addWeights(o.name); });
+
   return {
     schemaVersion: CLAUDE_SNAPSHOT_SCHEMA,
     uploadedAt: now.toISOString(),
@@ -217,7 +238,9 @@ function buildClaudeSnapshot(nowDate) {
     olderLastPerformed: olderLastPerformed,
     cardio: cardio,
     body: body,
-    catalog: buildClaudeCatalog()
+    catalog: catalog,
+    weekSets: { weekStart: weekStart, byGroup: getWeekGroupSets(weekStart) },
+    muscleWeights: muscleWeights
   };
 }
 
@@ -273,28 +296,51 @@ function uploadClaudeSnapshot(opts) {
   }).catch(function() { return { ok: false }; });
 }
 
-function claudeValidRoutine(p) {
-  return !!(p && typeof p === 'object' && typeof p.id === 'string' && p.id &&
-    CLAUDE_SESSIONS.indexOf(p.session) !== -1 && Array.isArray(p.exercises) && p.exercises.length &&
-    p.exercises.every(function(ex) { return ex && typeof ex.name === 'string' && Array.isArray(ex.sets) && ex.sets.length; }));
-}
-
 function claudeValidCardio(p) {
   return !!(p && typeof p === 'object' && typeof p.id === 'string' && p.id &&
     (p.mode === 'interval' || p.mode === 'walk') && Array.isArray(p.segments) && p.segments.length);
 }
 
-// 받은 계획 중 **오늘 것이고 가져온 적 없는 id** 만 state 에 둔다. 반환: 무엇이 바뀌었는가.
+// 주간 계획 모양 — weekStart 글자, 세션 1개 이상, 세션마다 label·type·exercises(종목마다 name·sets).
+function claudeValidWeek(p) {
+  return !!(p && typeof p === 'object' && typeof p.weekStart === 'string' &&
+    Array.isArray(p.sessions) && p.sessions.length &&
+    p.sessions.every(function(s) {
+      return s && typeof s.label === 'string' && s.label && PLAN_TYPE_CATALOG.hasOwnProperty(s.type) &&
+        Array.isArray(s.exercises) &&
+        s.exercises.every(function(ex) { return ex && typeof ex.name === 'string' && Array.isArray(ex.sets); });
+    }));
+}
+
+function claudeWeekRev(p) {
+  return p ? String(p.id) + '|' + String(p.updatedAt) : '';
+}
+
+// /api/plan 응답 { week, cardio } 를 state 에 둔다. 반환: 무엇이 바뀌었는가.
+//  · week: 모양이 맞고 이번 주(월요일 기준) 것이면 저장, null 이면 지운다. 그 밖(모양이 틀림·다른 주)은 그대로 둔다.
+//    적용 끝에 남은 계획이 이번 주 것이 아니면 지운다(앱을 켜 둔 채 월요일이 된 경우).
+//  · cardio: **오늘 것이고 가져온 적 없는 id** 만.
+//  · 옛 서버의 routine 필드는 보지 않는다.
 function applyClaudePlans(plans, todayStr) {
   var today = todayStr || getTodayStr();
   var sync = getClaudeSyncState();
-  var r = plans && plans.routine;
+  var w = plans ? plans.week : undefined;
   var c = plans && plans.cardio;
-  var nextRoutine = (claudeValidRoutine(r) && r.date === today && r.id !== sync.lastImportedRoutineId) ? r : null;
+  var beforeWeek = claudeWeekRev(state.weekPlan);
+  if (w === null) {
+    state.weekPlan = null;
+    try { localStorage.removeItem(KEYS.WEEK_PLAN); } catch (e) {}
+  } else if (claudeValidWeek(w) && w.weekStart === getWeekStartStr(today)) {
+    state.weekPlan = w;
+    storage.set(KEYS.WEEK_PLAN, w);
+  }
+  if (state.weekPlan && state.weekPlan.weekStart !== getWeekStartStr(today)) {
+    state.weekPlan = null;
+    try { localStorage.removeItem(KEYS.WEEK_PLAN); } catch (e) {}
+  }
   var nextCardio = (claudeValidCardio(c) && c.date === today && c.id !== sync.lastImportedCardioId) ? c : null;
-  var changed = (state.claudeRoutine ? state.claudeRoutine.id : null) !== (nextRoutine ? nextRoutine.id : null) ||
+  var changed = beforeWeek !== claudeWeekRev(state.weekPlan) ||
                 (state.claudeCardio ? state.claudeCardio.id : null) !== (nextCardio ? nextCardio.id : null);
-  state.claudeRoutine = nextRoutine;
   state.claudeCardio = nextCardio;
   return changed;
 }
@@ -314,8 +360,9 @@ function fetchClaudePlans() {
     if (!res || !res.ok) return { ok: false, status: res ? res.status : 0 };
     return res.json().then(function(body) {
       var changed = applyClaudePlans(body);
-      // 추천 줄은 운동 탭 첫 화면·러닝 탭에만 뜬다 — 그 화면일 때만 다시 그린다.
-      if (changed && !state.activeSession && (state.currentTab === 'workout' || state.currentTab === 'running') &&
+      // 계획은 홈 카드·운동 탭·기록 탭 세트 카드·러닝 탭 줄에 뜬다 — 그 화면일 때만 다시 그린다.
+      if (changed && !state.activeSession &&
+          ['home', 'workout', 'running', 'stats'].indexOf(state.currentTab) !== -1 &&
           typeof render === 'function') {
         render();
       }
@@ -343,18 +390,9 @@ function claudeSyncOnVisible() {
 })();
 
 // ── 가져오기 ─────────────────────────────
-function claudeSessionLabel(session) {
-  return String(session || '').toUpperCase();
-}
-
 function claudeCardioTotalMin(plan) {
   var sec = ((plan && plan.segments) || []).reduce(function(n, s) { return n + (claudeNum(s && s.sec) || 0); }, 0);
   return Math.round(sec / 60);
-}
-
-// 운동 탭 첫 화면 한 줄의 글자 (예: 'Claude 추천 · PUSH 6종목')
-function claudeRoutineRowText(plan) {
-  return 'Claude 추천 · ' + claudeSessionLabel(plan.session) + ' ' + plan.exercises.length + '종목';
 }
 
 // 러닝 탭 한 줄의 글자 (예: 'Claude 유산소 · 경사 걷기 30분')
@@ -362,23 +400,23 @@ function claudeCardioRowText(plan) {
   return 'Claude 유산소 · ' + (CLAUDE_CARDIO_MODE_KR[plan.mode] || '') + ' ' + claudeCardioTotalMin(plan) + '분';
 }
 
-// Claude 루틴 → 2단계 generatedRoutine
-function claudeRoutineToGenerated(plan) {
-  return {
-    source: 'claude',
-    bodyPart: plan.session,
-    headline: plan.title,
-    note: plan.note,
-    exercises: plan.exercises.map(function(ex) {
-      return {
-        name: ex.name,
-        note: ex.note,
-        claudeSets: ex.sets.map(function(s) {
-          return { weight: s.weight, reps: s.reps, warmup: s.warmup === true, restSec: s.restSec };
-        })
-      };
-    })
-  };
+// 주간 세션 → 2단계 종목 [{name, note, claudeSets}]. 이 세션을 손으로 고친 편집본이 있고
+// 그 뒤로 Claude 가 세션을 다시 저장하지 않았으면(rev === session.updatedAt) 편집본, 아니면 계획 원본.
+function claudeWeekSessionExercises(plan, session) {
+  var edits = storage.get(KEYS.WEEK_EDITS, {}) || {};
+  var e = edits[plan.weekStart + '|' + session.label];
+  if (e && e.rev === session.updatedAt && Array.isArray(e.exercises)) {
+    return JSON.parse(JSON.stringify(e.exercises));
+  }
+  return (session.exercises || []).map(function(ex) {
+    return {
+      name: ex.name,
+      note: ex.note,
+      claudeSets: (ex.sets || []).map(function(s) {
+        return { weight: s.weight, reps: s.reps, warmup: s.warmup === true, restSec: s.restSec };
+      })
+    };
+  });
 }
 
 // Claude 유산소 → cardioNormalizePlan 이 먹는 모양 (구간 sec → startSec/endSec 누적)

@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 import { loadApp } from './_harness.mjs';
 import { validateSnapshot } from '../api/snapshot.mjs';
 
@@ -78,8 +79,8 @@ test('스냅샷 — 서버 계약 검사를 통과하고 키가 계약 그대로
   sampleData(app);
   const snap = plain(app.buildClaudeSnapshot());
   assert.equal(validateSnapshot(snap), null, '서버 모양 검사 통과');
-  assert.deepEqual(Object.keys(snap).sort(), ['appVersion', 'body', 'cardio', 'catalog', 'equipment', 'olderLastPerformed',
-    'profile', 'schemaVersion', 'todayKst', 'uploadedAt', 'workouts'].sort());
+  assert.deepEqual(Object.keys(snap).sort(), ['appVersion', 'body', 'cardio', 'catalog', 'equipment', 'muscleWeights', 'olderLastPerformed',
+    'profile', 'schemaVersion', 'todayKst', 'uploadedAt', 'weekSets', 'workouts'].sort());
   assert.equal(snap.schemaVersion, 1);
   assert.equal(snap.todayKst, app.getTodayStr());
   assert.equal(snap.appVersion, 'health-app-' + app.APP_VERSION);
@@ -98,10 +99,18 @@ test('스냅샷 — 계산값(추천·1RM·정체·부족 부위·목표 세트�
   sampleData(app);
   const snap = plain(app.buildClaudeSnapshot());
   const BANNED = /1rm|onerm|e1rm|recommend|suggest|plateau|stall|weak|target|volume|cycle|phase|week|prog|deload|freq|goal/i;
+  // 허용 예외(계약 5절 · docs/weekly-plan.md): 이번 주 실제 세트(weekSets)와 그것을 센 무게표(muscleWeights)는
+  // 통째로, 운동 기록의 planWeek(끝난 세션 판정용 원자료)는 키 하나만. 그 밖의 금지는 그대로 막는다.
+  const ALLOWED_SUBTREES = new Set(['weekSets', 'muscleWeights']);
+  const ALLOWED_KEYS = new Set(['planWeek']);
   const keys = [];
   (function walk(v) {
     if (Array.isArray(v)) return v.forEach(walk);
-    if (v && typeof v === 'object') Object.keys(v).forEach((k) => { keys.push(k); walk(v[k]); });
+    if (v && typeof v === 'object') Object.keys(v).forEach((k) => {
+      if (ALLOWED_SUBTREES.has(k)) return;
+      if (!ALLOWED_KEYS.has(k)) keys.push(k);
+      walk(v[k]);
+    });
   })(snap);
   assert.deepEqual(keys.filter((k) => BANNED.test(k)), [], '계산값 키가 들어갔다');
   const text = JSON.stringify(snap);
@@ -269,7 +278,7 @@ test('전송 — 실패는 조용히: 401 이면 해시를 남기지 않는다',
 test('전송 — 다시 보일 때(visibilitychange)는 60초에 한 번만', async () => {
   const app = loadApp();
   withToken(app);
-  const calls = fakeFetch(app, { '/api/plan': () => ({ routine: null, cardio: null }) });
+  const calls = fakeFetch(app, { '/api/plan': () => ({ week: null, cardio: null }) });
   app.document.visibilityState = 'visible';
   const doc = { visibilityState: 'visible' };
   app.document = doc;
@@ -309,74 +318,80 @@ function cardioPlan(app, over) {
   }, over || {});
 }
 
-test('계획 받기 — 오늘 것이고 가져온 적 없는 id 만 state 에 둔다', async () => {
+test('계획 받기 — 유산소는 오늘 것이고 가져온 적 없는 id 만 state 에 둔다', async () => {
   const app = loadApp();
   withToken(app);
-  let plans = { routine: routinePlan(app), cardio: cardioPlan(app) };
+  let plans = { week: null, cardio: cardioPlan(app) };
   const calls = fakeFetch(app, { '/api/plan': () => plans });
   await app.fetchClaudePlans();
   assert.equal(calls[0].init.headers.Authorization, 'Bearer qa-token-0123456789abcdef');
-  assert.equal(app.state.claudeRoutine.id, 'r-1');
   assert.equal(app.state.claudeCardio.id, 'c-1');
 
   // 오늘 날짜가 아니면 무시
-  plans = { routine: routinePlan(app, { date: kstDaysAgo(app, 1) }), cardio: cardioPlan(app, { date: kstDaysAgo(app, 1) }) };
+  plans = { week: null, cardio: cardioPlan(app, { date: kstDaysAgo(app, 1) }) };
   await app.fetchClaudePlans();
-  assert.equal(app.state.claudeRoutine, null);
   assert.equal(app.state.claudeCardio, null);
 
   // 이미 가져온 id 면 무시
-  app.setClaudeSyncState({ lastImportedRoutineId: 'r-1', lastImportedCardioId: 'c-1' });
-  plans = { routine: routinePlan(app), cardio: cardioPlan(app) };
+  app.setClaudeSyncState({ lastImportedCardioId: 'c-1' });
+  plans = { week: null, cardio: cardioPlan(app) };
   await app.fetchClaudePlans();
-  assert.equal(app.state.claudeRoutine, null);
   assert.equal(app.state.claudeCardio, null);
 
   // 새 id 면 다시 뜬다
-  plans = { routine: routinePlan(app, { id: 'r-2' }), cardio: null };
+  plans = { week: null, cardio: cardioPlan(app, { id: 'c-2' }) };
   await app.fetchClaudePlans();
-  assert.equal(app.state.claudeRoutine.id, 'r-2');
+  assert.equal(app.state.claudeCardio.id, 'c-2');
 });
 
-// ═══ 5. 루틴 가져오기 · 2단계 ═══
+// ═══ 5. 주간 세션 가져오기 · 2단계 ═══
+// 옛 '오늘 루틴'(routinePlan) 모양의 종목을 이번 주 계획의 세션 하나('PUSH')로 싣는다.
+const SESSION_REV = '2026-09-21T00:00:00.000Z';
+function weekFromRoutine(app, plan, over) {
+  const r = plan || routinePlan(app);
+  return Object.assign({
+    id: 'wk-1', createdAt: SESSION_REV, updatedAt: SESSION_REV,
+    weekStart: app.getWeekStartStr(app.getTodayStr()), days: 3, deload: false, note: '', targets: {},
+    sessions: [{ label: 'PUSH', type: 'push', note: r.note, updatedAt: SESSION_REV, exercises: r.exercises }],
+  }, over || {});
+}
 function importRoutine(app, plan) {
-  app.applyClaudePlans({ routine: plan || routinePlan(app), cardio: null });
+  app.applyClaudePlans({ week: weekFromRoutine(app, plan), cardio: null });
   app.state.currentTab = 'workout';
   app.state.workoutWizardStep = 1;
 }
 
-test('루틴 가져오기 — 첫 화면 한 줄 → 2단계, 한 번 열면 사라진다', () => {
+test('주간 세션 가져오기 — 카드 → 2단계(받은 세트 그대로), 마법사 저장', () => {
   const app = loadApp();
   app.state.currentTab = 'workout';
   app.state.workoutWizardStep = 1;
-  assert.ok(!app.renderWorkout().includes('openClaudeRoutine()'), '계획이 없으면 줄이 없다');
+  assert.ok(!app.renderWorkout().includes('openWeekSession('), '계획이 없으면 주간 화면이 없다');
 
   importRoutine(app);
   const step1 = app.renderWorkout();
-  assert.ok(step1.includes('Claude 추천 · PUSH 3종목'), '줄 글자: 세션명·종목 수');
-  assert.ok(step1.indexOf('openClaudeRoutine()') < step1.indexOf('body-part-grid'), '부위 카드 위');
+  assert.ok(step1.includes('openWeekSession(state.weekPlan.sessions[0].label)'), '세션 카드');
+  assert.ok(step1.includes('3종목 · 6세트'), '카드 한 줄: 종목 수 · 워밍업 뺀 세트 수');
+  assert.ok(!step1.includes('body-part-grid'), '계획이 있으면 부위 카드는 기본 루틴 뒤로');
 
-  app.openClaudeRoutine();
+  app.openWeekSession('PUSH');
   assert.equal(app.state.workoutWizardStep, 2);
   assert.equal(app.state.selectedBodyPart, 'push');
-  assert.equal(app.state.claudeRoutine, null, '한 번 열면 사라진다');
-  assert.equal(app.getClaudeSyncState().lastImportedRoutineId, 'r-1');
   const r = plain(app.state.generatedRoutine);
   assert.equal(r.source, 'claude');
   assert.equal(r.bodyPart, 'push');
-  assert.equal(r.headline, '가슴 상부 위주');
+  assert.equal(r.headline, 'PUSH');
+  assert.equal(r.planWeek, app.getWeekStartStr(app.getTodayStr()));
+  assert.equal(r.planLabel, 'PUSH');
+  assert.equal(r.planType, 'push');
   assert.deepEqual(r.exercises[0].claudeSets[2], { weight: 60, reps: '8', warmup: false, restSec: 150 });
   assert.equal(app.storage.get(app.KEYS.WORKOUT_WIZARD).generatedRoutine.source, 'claude', '마법사 저장');
-
-  app.state.currentTab = 'workout';
-  app.state.workoutWizardStep = 1;
-  assert.ok(!app.renderWorkout().includes('openClaudeRoutine()'));
+  assert.ok(app.state.weekPlan, '열어도 계획은 그대로 남는다(한 주 동안 쓴다)');
 });
 
 test('2단계 — Claude 종목 줄은 이름 + 세트 요약, 헤더 합계는 작업 세트에서', () => {
   const app = loadApp();
   importRoutine(app);
-  app.openClaudeRoutine();
+  app.openWeekSession('PUSH');
   const html = app.renderWorkoutStep2();
   assert.ok(html.includes('워밍업 2 · 60kg×8 · 55kg×10×2'), '세트 요약(연속 같은 값은 ×N)');
   assert.ok(html.includes('22kg×8~10×2'), '범위 반복은 물결로 · 무게는 장비 단위(21 → 덤벨 22)');
@@ -389,7 +404,7 @@ test('2단계 — Claude 종목 줄은 이름 + 세트 요약, 헤더 합계는 
 test('편집 시트 — Claude 종목: 무게(작업 세트 일괄·장비 단위)·반복·세트 수·빼기·바꾸기', () => {
   const app = loadApp();
   importRoutine(app);
-  app.openClaudeRoutine();
+  app.openWeekSession('PUSH');
   const ex = () => app.state.generatedRoutine.exercises[0];
   app.openExerciseEdit('preview', 0);
   let sheet = app.buildExerciseEditSheetHtml();
@@ -442,7 +457,7 @@ test('편집 시트 — Claude 종목: 무게(작업 세트 일괄·장비 단�
 test('Claude 세트 그대로 실행 — 무게는 장비 단위 스냅만, 반복·워밍업·세트별 휴식 그대로', () => {
   const app = loadApp();
   importRoutine(app);
-  app.openClaudeRoutine();
+  app.openWeekSession('PUSH');
   app.startGeneratedRoutine();
   const s = app.state.activeSession;
   assert.equal(s.source, 'claude');
@@ -465,7 +480,7 @@ test('Claude 세트 그대로 실행 — 무게는 장비 단위 스냅만, 반�
 test('Claude 세션 — 자동 조정 꺼짐: 탑세트 미달 백오프 감량 없음 · 미달 +30초 없음 · 휴식은 세트 값', () => {
   const app = loadApp();
   importRoutine(app);
-  app.openClaudeRoutine();
+  app.openWeekSession('PUSH');
   app.startGeneratedRoutine();
   const s = app.state.activeSession;
   s.warmup = null;
@@ -528,7 +543,7 @@ test('유산소 가져오기 — 러닝 탭 한 줄 → 모양만 맞춰 미리�
   const app = loadApp();
   app.state.currentTab = 'running';
   assert.ok(!app.renderRunning().includes('openClaudeCardio()'));
-  app.applyClaudePlans({ routine: null, cardio: cardioPlan(app) });
+  app.applyClaudePlans({ week: null, cardio: cardioPlan(app) });
   const html = app.renderRunning();
   assert.ok(html.includes('Claude 유산소 · 경사 걷기 30분'), '줄 글자: 모드·총 분');
   app.openClaudeCardio();
@@ -544,7 +559,7 @@ test('유산소 가져오기 — 러닝 탭 한 줄 → 모양만 맞춰 미리�
 
   // 인터벌은 경사 없이
   const b = loadApp();
-  b.applyClaudePlans({ routine: null, cardio: cardioPlan(b, { id: 'c-2', mode: 'interval', segments: [
+  b.applyClaudePlans({ week: null, cardio: cardioPlan(b, { id: 'c-2', mode: 'interval', segments: [
     { type: 'warmup', sec: 300, speed: 5, incline: 0 }, { type: 'run', sec: 60, speed: 8, incline: 0 }, { type: 'walk', sec: 120, speed: 5.5, incline: 0 }] }) });
   b.openClaudeCardio();
   assert.equal(b.state.cardio.mode, 'interval');
@@ -729,7 +744,7 @@ test('디자인 규칙 — js/ai.js 도 11px 하한 · CSS 에 있는 클래스�
 test('시점 — 코드가 있으면 init() 끝에서 보내고(POST) 받아 온다(GET)', async () => {
   const app = loadApp();
   withToken(app);
-  const calls = fakeFetch(app, { '/api/plan': () => ({ routine: null, cardio: null }) });
+  const calls = fakeFetch(app, { '/api/plan': () => ({ week: null, cardio: null }) });
   app.init();
   for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
   assert.deepEqual(calls.map((c) => [c.url, c.init.method]), [['/api/snapshot', 'POST'], ['/api/plan', 'GET']]);
@@ -764,7 +779,7 @@ test('시점 — 운동 완료·유산소 저장 뒤에는 보내기만 한다 (
 test('시점 — 다시 보일 때: 60초가 지나면 동기화하고, 숨은 상태에서는 하지 않는다', async () => {
   const app = loadApp();
   withToken(app);
-  const calls = fakeFetch(app, { '/api/plan': () => ({ routine: null, cardio: null }) });
+  const calls = fakeFetch(app, { '/api/plan': () => ({ week: null, cardio: null }) });
   app.document = { visibilityState: 'hidden' };
   app._claudeLastSyncAt = 0;
   app.claudeSyncOnVisible();
@@ -804,7 +819,7 @@ test('Claude 세션 — 세트를 다시 짜도(rebuildPendingSets) 자동 디�
 // ═══ 7. Claude 세션 편집 — 남은 세트만 손댄다 (설계서 결정 5 · 편집 시트 규칙) ═══
 function startClaudeSession(app) {
   importRoutine(app);
-  app.openClaudeRoutine();
+  app.openWeekSession('PUSH');
   app.startGeneratedRoutine();
   const s = app.state.activeSession;
   s.warmup = null;
@@ -905,7 +920,7 @@ test('Claude 세션 — 세트법 시트·탑세트 시트는 열리지 않고 �
 test('2단계·편집 시트 — 무게는 장비 단위로 맞춘 값(세션 세트와 같은 숫자), 저장 원값은 그대로', () => {
   const app = loadApp();
   importRoutine(app);
-  app.openClaudeRoutine();
+  app.openWeekSession('PUSH');
   const ex1 = app.state.generatedRoutine.exercises[1];
   assert.ok(app.renderWorkoutStep2().includes('22kg×8~10×2'));
   assert.equal(app.claudeEditValues(ex1).weight, 22);
@@ -935,7 +950,7 @@ test('시점 — 운동 완료 뒤 RPE·컨디션을 저장하면(goHome·goToWo
 // ═══ 11. Claude 세션 — 세션 화면 버튼·휴식 표시도 받은 값 그대로 (설계서 결정 5) ═══
 function startClaudeSessionWith(app, exercises) {
   importRoutine(app, routinePlan(app, { exercises }));
-  app.openClaudeRoutine();
+  app.openWeekSession('PUSH');
   app.startGeneratedRoutine();
   const s = app.state.activeSession;
   s.warmup = null;
@@ -1084,4 +1099,375 @@ test('기본 틀 세션 — 종목 추가는 예전 엔진 그대로 (buildSessi
   const expected = plain(app.buildSessionExercise('바벨 벤치 프레스'));
   app.addExerciseAfterCurrent('바벨 벤치 프레스');
   assert.deepEqual(plain(s.exercises[s.currentExerciseIdx + 1]), expected);
+});
+
+// ═══ 12. 주간 계획 (docs/weekly-plan.md · 공통 계약) ═══
+const REV2 = '2026-09-22T00:00:00.000Z';
+function wkSession(label, type, exercises, updatedAt) {
+  return { label, type, note: '', updatedAt: updatedAt || SESSION_REV,
+    exercises: exercises || [{ name: '머신 체스트 프레스', note: '', sets: [
+      { weight: 30, reps: '8', warmup: true, restSec: 60 },
+      { weight: 60, reps: '8', warmup: false, restSec: 120 },
+      { weight: 60, reps: '8', warmup: false, restSec: 120 }] }] };
+}
+function fourDayWeek(app, over) {
+  const legs = [{ name: '레그 프레스', note: '', sets: [{ weight: 120, reps: '10', warmup: false, restSec: 120 }, { weight: 120, reps: '10', warmup: false, restSec: 120 }] }];
+  return Object.assign({
+    id: 'wk-4', createdAt: SESSION_REV, updatedAt: SESSION_REV, weekStart: app.getWeekStartStr(app.getTodayStr()),
+    days: 4, deload: false, note: '', targets: { chest: 10 },
+    sessions: [wkSession('상체 A', 'upper'), wkSession('하체 A', 'lower', legs), wkSession('상체 B', 'upper'), wkSession('하체 B', 'lower', legs)],
+  }, over || {});
+}
+
+test('applyClaudePlans — 이번 주 계획 저장 · 지난 주 계획 버림 · null 이면 삭제 · routine 무시 · 바뀔 때만 다시 그림', async () => {
+  const app = loadApp();
+  const ws = app.getWeekStartStr(app.getTodayStr());
+  assert.equal(app.applyClaudePlans({ week: fourDayWeek(app), cardio: null, routine: routinePlan(app) }), true);
+  assert.equal(app.state.weekPlan.id, 'wk-4');
+  assert.equal(app.storage.get(app.KEYS.WEEK_PLAN).weekStart, ws, '기기에 저장');
+  assert.equal(app.state.claudeRoutine, undefined, '옛 routine 필드는 보지 않는다');
+  assert.equal(app.applyClaudePlans({ week: fourDayWeek(app), cardio: null }), false, 'id·updatedAt 이 같으면 안 바뀜');
+  assert.equal(app.applyClaudePlans({ week: fourDayWeek(app, { updatedAt: REV2 }), cardio: null }), true, 'updatedAt 이 바뀌면 바뀜');
+
+  // 지난 주 계획은 받지 않는다
+  const b = loadApp();
+  b.applyClaudePlans({ week: fourDayWeek(b, { weekStart: b.addDaysStr(ws, -7) }), cardio: null });
+  assert.equal(b.state.weekPlan, null);
+  assert.equal(b.storage.get(b.KEYS.WEEK_PLAN), null);
+  // 모양이 틀리면 받지 않는다
+  b.applyClaudePlans({ week: fourDayWeek(b, { sessions: [] }), cardio: null });
+  b.applyClaudePlans({ week: fourDayWeek(b, { sessions: [{ label: 'X', type: 'legs', exercises: [] }] }), cardio: null });
+  assert.equal(b.state.weekPlan, null);
+
+  // null 이면 지운다
+  assert.equal(app.applyClaudePlans({ week: null, cardio: null }), true);
+  assert.equal(app.state.weekPlan, null);
+  assert.equal(app.localStorage.getItem('fitness_week_plan'), null);
+
+  // fetchClaudePlans: 같은 계획을 다시 받으면 다시 그리지 않는다
+  const c = loadApp();
+  withToken(c);
+  fakeFetch(c, { '/api/plan': () => ({ week: fourDayWeek(c), cardio: null }) });
+  let renders = 0;
+  c.render = () => { renders++; };
+  c.state.currentTab = 'home';
+  await c.fetchClaudePlans();
+  await c.fetchClaudePlans();
+  assert.equal(renders, 1, '바뀐 한 번만 다시 그린다');
+});
+
+test('init — 저장된 계획이 이번 주 것이 아니면 버리고, 손 편집도 이번 주 것만 남긴다', () => {
+  const app = loadApp();
+  const ws = app.getWeekStartStr(app.getTodayStr());
+  const last = app.addDaysStr(ws, -7);
+  app.storage.set(app.KEYS.WEEK_PLAN, fourDayWeek(app, { weekStart: last }));
+  app.storage.set(app.KEYS.WEEK_EDITS, { [last + '|상체 A']: { rev: 'x', exercises: [] }, [ws + '|상체 A']: { rev: 'y', exercises: [] } });
+  app.init();
+  assert.equal(app.state.weekPlan, null, '지난 주 계획을 되살렸다');
+  assert.equal(app.localStorage.getItem('fitness_week_plan'), null);
+  assert.deepEqual(Object.keys(app.storage.get(app.KEYS.WEEK_EDITS)), [ws + '|상체 A']);
+
+  app.storage.set(app.KEYS.WEEK_PLAN, fourDayWeek(app));
+  app.init();
+  assert.equal(app.state.weekPlan.id, 'wk-4', '이번 주 계획은 되살린다');
+
+  // 백업에는 담기지 않는다
+  const backup = app.buildBackupObject();
+  assert.equal(backup.data.fitness_week_plan, undefined);
+  assert.equal(backup.data.fitness_week_edits, undefined);
+});
+
+test('운동 탭 주간 화면 — 머리 줄(끝낸 수 없음) · 남은 카드 순서 · 끝난 줄 요일 · 기본 루틴 → 부위 카드 → 되돌아오기', () => {
+  const app = loadApp();
+  const ws = app.getWeekStartStr(app.getTodayStr());
+  app.state.data.workoutLog = [{ id: 'w1', startTime: 1, date: ws, completed: true, planWeek: ws, planLabel: '상체 A', planType: 'upper',
+    session: 'upper', sessionName: '상체 A', sessionKr: '상체 A', exercises: [] }];
+  app.storage.set(app.KEYS.WORKOUT_LOG, app.state.data.workoutLog);   // setTab 이 저장소에서 다시 읽는다
+  app.applyClaudePlans({ week: fourDayWeek(app), cardio: null });
+  app.setTab('workout');
+  const html = app.renderWorkout();
+  assert.ok(html.includes('>이번 주</p>'), '머리 줄 라벨');
+  assert.ok(!/\d\/\d/.test(html), '끝낸 수/전체는 홈 카드에만 (같은 사실 반복 금지)');
+  const cardLabels = [...html.matchAll(/<p class="week-session-label">([^<]*)<\/p>/g)].map((m) => m[1]);
+  assert.deepEqual(cardLabels, ['하체 A', '하체 B', '상체 B'], '지난번 upper → 하체 먼저, 끝난 상체 A 는 카드에서 빠짐');
+  assert.ok(html.includes('1종목 · 2세트') && html.includes('1종목 · 2세트'), '카드 한 줄(워밍업 뺀 세트)');
+  assert.ok(html.includes('<span>상체 A · ' + app.weekdayKrOf(ws) + '</span>') && html.includes(app.icon('check', 14)), '끝난 줄: check + label · 요일');
+  assert.ok(!/week-done-row"[^>]*onclick/.test(html), '끝난 줄은 누를 수 없다');
+  assert.ok(html.indexOf('week-session-card') < html.indexOf('week-done-row') && html.indexOf('week-done-row') < html.indexOf('showBasicRoutine()'), '카드 → 끝난 줄 → 기본 루틴');
+  assert.ok(!html.includes('body-part-grid'));
+
+  app.showBasicRoutine();
+  let basic = app.renderWorkout();
+  assert.ok(basic.includes('body-part-grid') && basic.includes("selectBodyPart('push')"), '부위 카드');
+  assert.ok(basic.includes('showWeekPlan()') && basic.includes('이번 주 계획') && basic.includes(app.icon('arrowLeft', 16)), '맨 위 되돌아가는 줄');
+  assert.ok(basic.indexOf('showWeekPlan()') < basic.indexOf('body-part-grid'));
+  app.showWeekPlan();
+  assert.ok(app.renderWorkout().includes('week-session-card'), '되돌아오기');
+
+  // 안드로이드 뒤로가기도 같은 동작
+  app.showBasicRoutine();
+  assert.equal(app.getTopLayer(), 'weekBasic');
+  app.navBack();
+  assert.equal(app.state.workoutShowBasic, false);
+  assert.equal(app.state.currentTab, 'workout');
+  // 탭을 옮기면 기본 루틴 보기는 풀린다
+  app.showBasicRoutine();
+  app.setTab('home');
+  assert.equal(app.state.workoutShowBasic, false);
+
+  // 계획이 없으면 되돌아가는 줄도 없다
+  const b = loadApp();
+  b.setTab('workout');
+  assert.ok(!b.renderWorkout().includes('showWeekPlan()'));
+});
+
+test('주간 세션 실행 — 카드 → 2단계 → 시작 → 저장: 기록에 planWeek·planLabel·planType, 이름 = label, 다음 렌더에서 끝남', () => {
+  const app = loadApp();
+  const ws = app.getWeekStartStr(app.getTodayStr());
+  app.storage.set(app.KEYS.WORKOUT_LOG, []);   // setTab 이 저장소에서 다시 읽는다
+  app.applyClaudePlans({ week: fourDayWeek(app), cardio: null });
+  app.setTab('workout');
+  app.openWeekSession('상체 B');
+  assert.equal(app.state.workoutWizardStep, 2);
+  assert.equal(app.state.selectedBodyPart, 'upper');
+  assert.ok(app.renderWorkout().includes('1종목 · 2세트'), '2단계 머리 줄');
+  app.startGeneratedRoutine();
+  const s = app.state.activeSession;
+  assert.equal(s.source, 'claude');
+  assert.equal(s.sessionName, '상체 B');
+  assert.equal(s.sessionKr, '상체 B');
+  assert.deepEqual([s.planWeek, s.planLabel, s.planType], [ws, '상체 B', 'upper']);
+  assert.equal(app.storage.get(app.KEYS.ACTIVE_SESSION).planLabel, '상체 B', '진행 세션 저장에도 남는다(새로고침 복원)');
+  s.warmup = null;
+  app.state.editingSet = { exerciseIdx: 0, setIdx: 1 };
+  app.completeSet();
+  app.state.restTimer = null;
+  app.finalizeSession();
+  const w = app.state.data.workoutLog[0];
+  assert.deepEqual([w.planWeek, w.planLabel, w.planType, w.sessionName, w.sessionKr], [ws, '상체 B', 'upper', '상체 B', '상체 B']);
+  assert.equal(app.storage.get(app.KEYS.WORKOUT_LOG)[0].planLabel, '상체 B');
+
+  app.state.completedSession = null;
+  app.state.currentTab = 'workout';
+  const html = app.renderWorkout();
+  assert.ok(html.includes('<span>상체 B · ' + app.weekdayKrOf(app.getTodayStr()) + '</span>'), '끝난 줄로 내려간다');
+  const cardLabels = [...html.matchAll(/<p class="week-session-label">([^<]*)<\/p>/g)].map((m) => m[1]);
+  assert.deepEqual(cardLabels, ['하체 A', '하체 B', '상체 A'], '방금 upper 를 했으니 하체 먼저');
+  assert.deepEqual(plain(app.weekPlanDoneMap(app.state.weekPlan, app.state.data.workoutLog)), { '상체 B': app.getTodayStr() });
+});
+
+test('손 편집 보존 — 편집 → 다른 세션 → 다시 열면 편집본, Claude 가 그 세션을 다시 저장하면 원본', () => {
+  const app = loadApp();
+  app.applyClaudePlans({ week: fourDayWeek(app), cardio: null });
+  app.setTab('workout');
+  app.openWeekSession('상체 A');
+  app.openExerciseEdit('preview', 0);
+  app.adjustExerciseEdit('weight', 5);
+  app.adjustExerciseEdit('sets', 1);
+  app.state.exerciseEdit = null;
+  const edited = plain(app.state.generatedRoutine.exercises);
+  assert.deepEqual(edited[0].claudeSets.map((cs) => cs.weight), [30, 65, 65, 65]);
+
+  app.backToStep1();
+  app.openWeekSession('상체 B');
+  assert.deepEqual(plain(app.state.generatedRoutine.exercises[0].claudeSets.map((cs) => cs.weight)), [30, 60, 60], '다른 세션은 원본');
+  app.backToStep1();
+  app.openWeekSession('상체 A');
+  assert.deepEqual(plain(app.state.generatedRoutine.exercises), edited, '다시 열면 편집본');
+  app.backToStep1();
+  assert.ok(app.renderWorkout().includes('1종목 · 3세트'), '카드도 편집본을 센다');
+
+  // Claude 가 상체 A 를 다시 저장(세션 updatedAt 변경) → 원본
+  const wk = fourDayWeek(app, { updatedAt: REV2 });
+  wk.sessions[0] = wkSession('상체 A', 'upper', undefined, REV2);
+  app.applyClaudePlans({ week: wk, cardio: null });
+  app.openWeekSession('상체 A');
+  assert.deepEqual(plain(app.state.generatedRoutine.exercises[0].claudeSets.map((cs) => cs.weight)), [30, 60, 60], '다시 저장된 세션은 Claude 원본');
+});
+
+test('스냅샷 — 주간 계획 필드: 운동 planWeek·planLabel·planType, weekSets = getWeekGroupSets, muscleWeights 키 = catalog.free', () => {
+  const app = loadApp();
+  sampleData(app);
+  const ws = app.getWeekStartStr(app.getTodayStr());
+  app.state.data.workoutLog.unshift({ id: 'w_plan', startTime: 9, date: app.getTodayStr(), session: 'upper', sessionType: 'upper',
+    sessionName: '상체 A', sessionKr: '상체 A', duration: 55, planWeek: ws, planLabel: '상체 A', planType: 'upper',
+    exercises: [{ name: '바벨 벤치 프레스', setsCount: 3, setsDetail: [
+      { weight: 60, reps: 8, isWarmup: false, completed: true }, { weight: 60, reps: 8, isWarmup: false, completed: true },
+      { weight: 60, reps: 8, isWarmup: false, completed: true }] }] });
+  const snap = plain(app.buildClaudeSnapshot());
+  assert.equal(validateSnapshot(snap), null, '서버 모양 검사 통과');
+  const planned = snap.workouts.find((w) => w.planLabel);
+  assert.deepEqual([planned.planWeek, planned.planLabel, planned.planType, planned.sessionName], [ws, '상체 A', 'upper', '상체 A']);
+  snap.workouts.filter((w) => w !== planned).forEach((w) => {
+    assert.ok(!('planWeek' in w) && !('planLabel' in w) && !('planType' in w), '계획 밖 운동에는 없다');
+  });
+  assert.equal(snap.weekSets.weekStart, ws);
+  assert.deepEqual(snap.weekSets.byGroup, plain(app.getWeekGroupSets(ws)));
+  assert.ok(snap.weekSets.byGroup.chest >= 3, '방금 한 벤치 3세트가 들어간다');
+  assert.ok(Object.values(snap.weekSets.byGroup).every((v) => v > 0), '0인 그룹은 빠진다');
+  assert.deepEqual(Object.keys(snap.muscleWeights).sort(), snap.catalog.free.slice().sort());
+  snap.catalog.free.forEach((n) => assert.deepEqual(snap.muscleWeights[n], plain(app.exerciseGroupWeights(n)), n));
+  assert.deepEqual(snap.muscleWeights['바벨 벤치 프레스'] || {}, snap.catalog.free.includes('바벨 벤치 프레스') ? { chest: 1, shoulders_front: 0.5, triceps: 0.5 } : {});
+});
+
+test('applyClaudePlans — 켜 둔 채 주가 바뀌면 남은 지난 주 계획을 지운다 (모양 틀림·다른 주 응답은 무시)', () => {
+  const app = loadApp();
+  const ws = app.getWeekStartStr(app.getTodayStr());
+  app.applyClaudePlans({ week: fourDayWeek(app), cardio: null });
+  // 모양이 틀린 응답 · 다른 주 응답 → 기존 계획 유지
+  app.applyClaudePlans({ week: fourDayWeek(app, { id: 'bad', sessions: [] }), cardio: null });
+  app.applyClaudePlans({ week: fourDayWeek(app, { id: 'next', weekStart: app.addDaysStr(ws, 7) }), cardio: null });
+  assert.equal(app.state.weekPlan.id, 'wk-4');
+  assert.equal(app.storage.get(app.KEYS.WEEK_PLAN).id, 'wk-4');
+  // 월요일이 지난 상황: 메모리·저장소에 지난 주 계획이 남아 있다
+  const stale = fourDayWeek(app, { id: 'old', weekStart: app.addDaysStr(ws, -7) });
+  app.state.weekPlan = stale;
+  app.storage.set(app.KEYS.WEEK_PLAN, stale);
+  assert.equal(app.applyClaudePlans({ week: fourDayWeek(app, { id: 'bad2', sessions: [] }), cardio: null }), true, '바뀜으로 알린다');
+  assert.equal(app.state.weekPlan, null);
+  assert.equal(app.localStorage.getItem('fitness_week_plan'), null);
+});
+
+test('손 편집 기준값 — 2단계를 연 채 계획이 새 updatedAt 으로 바뀐 뒤 편집하면 rev 는 열 때 값, 다시 열면 새 원본', () => {
+  const app = loadApp();
+  const ws = app.getWeekStartStr(app.getTodayStr());
+  app.applyClaudePlans({ week: fourDayWeek(app), cardio: null });
+  app.setTab('workout');
+  app.openWeekSession('상체 A');
+  assert.equal(app.state.generatedRoutine.planRev, SESSION_REV);
+  // 연 채로 Claude 가 상체 A 를 다시 저장 → 동기화
+  const wk = fourDayWeek(app, { updatedAt: REV2 });
+  wk.sessions[0] = wkSession('상체 A', 'upper', [{ name: '머신 체스트 프레스', note: '', sets: [
+    { weight: 70, reps: '6', warmup: false, restSec: 150 }] }], REV2);
+  app.applyClaudePlans({ week: wk, cardio: null });
+  // 옛 화면에서 편집
+  app.openExerciseEdit('preview', 0);
+  app.adjustExerciseEdit('weight', 5);
+  app.state.exerciseEdit = null;
+  const saved = app.storage.get(app.KEYS.WEEK_EDITS)[ws + '|상체 A'];
+  assert.equal(saved.rev, SESSION_REV, '저장된 rev 는 열 때의 옛 값');
+  app.backToStep1();
+  app.openWeekSession('상체 A');
+  assert.deepEqual(plain(app.state.generatedRoutine.exercises[0].claudeSets.map((cs) => cs.weight)), [70], '다시 열면 Claude 새 원본');
+  assert.equal(app.state.generatedRoutine.planRev, REV2);
+});
+
+// ═══ 13. 판정·반증 뒤 후속 (계약 5절 개정 · 키보드 · 끝난 세션이 계획에서 빠진 경우) ═══
+test('스냅샷 — 연장 세트는 drop:true, 무게표는 기록에 나온 모든 이름(별칭 포함) · 불변식 Σ(본 세트 × 무게표) == weekSets', () => {
+  const app = loadApp();
+  const today = app.getTodayStr();
+  const ws = app.getWeekStartStr(today);
+  app.state.profile = { age: 37, height: 170, weight: 77.5 };
+  app.state.data.cardioLog = []; app.state.data.bodyLog = []; app.state.data.conditionLog = [];
+  // finalizeSession 이 남기는 모양: sets(숫자)=연장 뺀 세트, setsDetail=완료 세트 전부(드롭 포함)
+  const done = (w, r, role) => Object.assign({ weight: w, reps: r, isWarmup: false, completed: true }, role ? { role } : {});
+  const entry = (name, detail) => {
+    const counted = detail.filter((s) => !app.isSetExtension(s)).length;
+    return { name, sets: counted, setsCount: counted, setsDetail: detail };
+  };
+  app.state.data.workoutLog = [
+    { id: 'w_a', startTime: 2, date: today, session: 'upper', sessionType: 'upper', sessionName: '상체 A', sessionKr: '상체 A', duration: 60,
+      planWeek: ws, planLabel: '상체 A', planType: 'upper', completed: true, exercises: [
+        entry('체스트 프레스 머신', [done(60, 8, 'top'), done(55, 10, 'backoff'), done(45, 12, 'drop')]),   // 별칭 이름
+        entry('사이드 레터럴 레이즈', [done(8, 15), done(8, 14), done(6, 12, 'drop'), done(6, 6, 'myo')]),
+        entry('랫 풀 다운', [done(55, 10), done(55, 9)]),
+      ] },
+    { id: 'w_b', startTime: 1, date: ws, session: 'lower', sessionType: 'lower', sessionName: '하체 A', sessionKr: '하체 A', duration: 55,
+      planWeek: ws, planLabel: '하체 A', planType: 'lower', completed: true, exercises: [
+        entry('레그 프레스', [done(120, 10), done(120, 10), done(100, 12, 'drop')]),
+        entry('아무개 자유 종목', [done(10, 10)]),
+      ] },
+  ];
+  app._lastSetsCache = null;
+  const snap = plain(app.buildClaudeSnapshot());
+  assert.equal(validateSnapshot(snap), null);
+  const sets = snap.workouts.flatMap((w) => w.exercises.flatMap((e) => e.sets));
+  assert.equal(sets.filter((s) => s.drop === true).length, 4, '드롭·마이오렙 4개에 drop:true');
+  assert.ok(sets.filter((s) => !s.drop).every((s) => !('drop' in s)), '본 세트에는 drop 필드가 없다');
+  ['체스트 프레스 머신', '사이드 레터럴 레이즈', '아무개 자유 종목'].forEach((n) => assert.ok(n in snap.muscleWeights, '무게표에 기록 이름: ' + n));
+  assert.ok(!snap.catalog.free.includes('체스트 프레스 머신'), '별칭은 catalog 에 없다 — 이 검사가 헛돌고 있다');
+  snap.catalog.free.forEach((n) => assert.ok(n in snap.muscleWeights));
+  // 불변식: 서버가 스냅샷만으로 센 값 == 앱 weekSets
+  const byGroup = {};
+  snap.workouts.filter((w) => w.date >= ws).forEach((w) => w.exercises.forEach((e) => {
+    const n = e.sets.filter((s) => !s.drop && !s.warmup).length;
+    const mw = snap.muscleWeights[e.name] || {};
+    Object.keys(mw).forEach((g) => { byGroup[g] = (byGroup[g] || 0) + n * mw[g]; });
+  }));
+  Object.keys(byGroup).forEach((g) => { if (!(byGroup[g] > 0)) delete byGroup[g]; });
+  assert.deepEqual(Object.keys(byGroup).sort(), Object.keys(snap.weekSets.byGroup).sort());
+  Object.keys(byGroup).forEach((g) => assert.ok(Math.abs(byGroup[g] - snap.weekSets.byGroup[g]) < 1e-9, g));
+  assert.equal(snap.weekSets.byGroup.chest, 2, '드롭은 세지 않는다(체스트 2세트)');
+});
+
+// onclick 속성 코드를 앱 전역에서 실행하는 가짜 요소 — 키보드 처리기가 부르는 .click() 대신
+function fakeButton(app, html, marker) {
+  const at = html.indexOf(marker);
+  assert.ok(at !== -1, '요소를 못 찾음: ' + marker);
+  const tagStart = html.lastIndexOf('<div', at);
+  const tag = html.slice(tagStart, html.indexOf('>', at) + 1);
+  const code = tag.match(/onclick="([^"]*)"/)[1].replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+  assert.ok(/role="button"/.test(tag) && /tabindex="0"/.test(tag), 'role=button · tabindex=0: ' + tag.slice(0, 80));
+  const el = { tagName: 'DIV', clicked: 0, click() { this.clicked++; vm.runInContext(code, app); } };
+  return { tagName: 'DIV', closest: (sel) => (sel === '[role="button"]' ? el : null), el };
+}
+function keyEvent(key, target) {
+  return { key, target, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+}
+
+test('키보드 — 세션 카드에 초점 → Enter → 2단계, 홈 카드 → Space → 운동 탭, 입력칸·이미 처리한 키는 건드리지 않는다', () => {
+  const app = loadApp();
+  app.applyClaudePlans({ week: fourDayWeek(app), cardio: null });
+  app.state.currentTab = 'workout';
+  const card = fakeButton(app, app.renderWorkout(), 'week-session-card');
+  const e1 = keyEvent('Enter', card);
+  app.handleRoleButtonKeydown(e1);
+  assert.equal(e1.defaultPrevented, true);
+  assert.equal(app.state.workoutWizardStep, 2, 'Enter → 2단계');
+  app.backToStep1();
+
+  app.setTab('home');
+  const home = fakeButton(app, app.renderHome(), 'openWeekPlanFromHome()');
+  app.handleRoleButtonKeydown(keyEvent(' ', home));
+  assert.equal(app.state.currentTab, 'workout', 'Space → 운동 탭');
+
+  // 부위 카드도 키보드로 눌린다
+  app.showBasicRoutine();
+  const part = fakeButton(app, app.renderWorkout(), "selectBodyPart('pull')");
+  app.handleRoleButtonKeydown(keyEvent('Enter', part));
+  assert.equal(app.state.selectedBodyPart, 'pull');
+
+  // 입력칸·진짜 버튼·다른 키·이미 처리한 키는 무시
+  const input = Object.assign({}, card, { tagName: 'INPUT' });
+  const e2 = keyEvent('Enter', input);
+  app.handleRoleButtonKeydown(e2);
+  assert.equal(e2.defaultPrevented, false);
+  const before = card.el.clicked;
+  app.handleRoleButtonKeydown(keyEvent('a', card));
+  const done = keyEvent('Enter', card); done.defaultPrevented = true;
+  app.handleRoleButtonKeydown(done);
+  app.handleRoleButtonKeydown(keyEvent('Enter', Object.assign({}, card, { tagName: 'BUTTON' })));
+  assert.equal(card.el.clicked, before);
+
+  // 화면 파일의 role="button" 은 전부 tabindex 가 있다
+  for (const f of ['screens.js', 'bodymap.js', 'core.js', 'ai.js']) {
+    const src = fs.readFileSync(path.join(DIR, '..', 'js', f), 'utf8').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+    for (const m of src.matchAll(/role="button"(?!\])[^>]{0,40}/g)) assert.ok(/tabindex=/.test(m[0]), f + ': ' + m[0]);
+  }
+});
+
+test('끝난 세션이 계획에서 빠진 경우 — 끝난 줄(✓·요일)로 보이고 홈 카드 끝낸 수·전체 수에 더한다', () => {
+  const app = loadApp();
+  const ws = app.getWeekStartStr(app.getTodayStr());
+  const log = [{ id: 'w1', startTime: 1, date: ws, completed: true, planWeek: ws, planLabel: '전신 X', planType: 'full',
+    sessionName: '전신 X', sessionKr: '전신 X', exercises: [] }];
+  app.storage.set(app.KEYS.WORKOUT_LOG, log);
+  app.state.data.workoutLog = log;
+  app.applyClaudePlans({ week: fourDayWeek(app), cardio: null });   // 전신 X 는 계획에 없다
+  app.setTab('workout');
+  const html = app.renderWorkout();
+  assert.ok(html.includes('<span>전신 X · ' + app.weekdayKrOf(ws) + '</span>'), '끝난 줄');
+  assert.equal((html.match(/week-session-card/g) || []).length, 4, '남은 카드는 계획 4개 그대로');
+  app.setTab('home');
+  assert.ok(app.renderHome().includes('>1 / 5<'), '끝낸 1 / 전체 4+1');
 });

@@ -131,39 +131,6 @@ test('calculateRollingMax1RM — 고횟수 세트는 추세에서 제외 (고중
   assert.equal(app.calculateRollingMax1RM('랫풀다운', 4).value, 84);
 });
 
-// ── 사이클: 주차 → 단계 (1~4 빌드, 5 디로드) ──
-test('getPhaseByWeek — 1~4 빌드, 5 디로드', () => {
-  assert.equal(app.getPhaseByWeek(1), '빌드');
-  assert.equal(app.getPhaseByWeek(4), '빌드');
-  assert.equal(app.getPhaseByWeek(5), '디로드');
-});
-
-// ── 사이클: 완료 기준 진행 (날짜 아님) ──
-test('advanceCycleOnSessionComplete — 목표 달성 시에만 다음 주차/사이클', () => {
-  // 미달 → 그대로
-  assert.deepEqual(plain(app.advanceCycleOnSessionComplete({ currentCycle: 1, currentWeek: 2, cyclePhase: '빌드', workoutFreq: 4 }, 3)),
-    { currentCycle: 1, currentWeek: 2, cyclePhase: '빌드' });
-  // 목표 달성 → 다음 주차
-  assert.deepEqual(plain(app.advanceCycleOnSessionComplete({ currentCycle: 1, currentWeek: 2, cyclePhase: '빌드', workoutFreq: 4 }, 4)),
-    { currentCycle: 1, currentWeek: 3, cyclePhase: '빌드' });
-  // 5주차(디로드) 완료 → 새 사이클 1주차
-  assert.deepEqual(plain(app.advanceCycleOnSessionComplete({ currentCycle: 1, currentWeek: 5, cyclePhase: '디로드', workoutFreq: 4 }, 4)),
-    { currentCycle: 2, currentWeek: 1, cyclePhase: '빌드' });
-});
-
-// ── 진행은 완료 "횟수" 기준(캘린더 아님): 부분 진행도가 유지된다 ──
-test('advanceCycleIfWeekComplete — 부분 진행도 누적 후 목표 도달 시 다음 주차', () => {
-  const fresh = loadApp();
-  fresh.state.profile = { workoutFreq: 4, currentCycle: 1, currentWeek: 1, cyclePhase: '빌드', weekSessionsDone: 0 };
-  fresh.state.data.cycleHistory = [];
-  fresh.advanceCycleIfWeekComplete(); fresh.advanceCycleIfWeekComplete(); fresh.advanceCycleIfWeekComplete(); // 3회
-  assert.equal(fresh.state.profile.weekSessionsDone, 3, '부분 진행도 유지');
-  assert.equal(fresh.state.profile.currentWeek, 1, '아직 같은 주차');
-  fresh.advanceCycleIfWeekComplete(); // 4회 → 목표 달성
-  assert.equal(fresh.state.profile.currentWeek, 2, '다음 주차로');
-  assert.equal(fresh.state.profile.weekSessionsDone, 0, '진행도 리셋');
-});
-
 // ── 휴식 감시자: 오래 쉬면 복귀 안내 ──
 test('getIdleComebackMessage — 10일 이상 쉬면 복귀 안내', () => {
   assert.equal(app.getIdleComebackMessage([{ date: '2026-06-12', completed: true }], '2026-06-14'), null); // 2일 → 없음
@@ -431,8 +398,8 @@ test('복원 — 알맹이 없는 백업은 거절하고, 프로필 없는 백�
   storedProfile.age = 99;                       // 저장본을 바꿔도
   assert.equal(fresh.DEFAULT_PROFILE.age, beforeAge, '전역 기본 프로필은 오염되지 않음');
   fresh.init();
-  fresh.state.profile.currentWeek = 4;          // init 이 물려준 객체를 바꿔도
-  assert.equal(fresh.DEFAULT_PROFILE.currentWeek, 1, 'init 도 기본값 복사본을 쓴다');
+  fresh.state.profile.age = 4;                  // init 이 물려준 객체를 바꿔도
+  assert.equal(fresh.DEFAULT_PROFILE.age, beforeAge, 'init 도 기본값 복사본을 쓴다');
 
   // ③ 1RM이 비면 '초기화됨' 플래그를 세우지 않는다 → 다음 로드에서 기본 1RM이 다시 깔린다
   fresh.localStorage.clear();
@@ -619,12 +586,12 @@ test('renderMore — 껍데기 메뉴 7개 삭제 + 백업/프로필 반영', ()
   assert.ok(more.includes('.json'), 'JSON 백업 안내');
 });
 
-test('renderHome — 사이클 5주(빌드/디로드), 옛 4단계 라벨 제거', () => {
+// 앱 자체 5주 사이클은 통째로 지웠다(docs/weekly-plan.md 결정 8) — 홈 맨 위는 '이번 주 계획' 카드.
+test('renderHome — 사이클 카드 대신 이번 주 계획 카드, 사이클 흔적 없음', () => {
   const fresh = loadApp();
   const home = fresh.renderHome();
-  assert.ok(home.includes('빌드'), '빌드 단계 표시');
-  assert.ok(!home.includes('구축') && !home.includes('강화'), '옛 4단계 라벨(구축/강화) 제거');
-  assert.ok(home.includes('다 하면 다음 주차') || home.includes('목표 달성') || home.includes('쉬는 중'), '이번주 진행/복귀 안내');
+  assert.ok(home.includes('이번 주 계획'), '이번 주 계획 카드');
+  ['현재 단계', '빌드', '주차', '구축', '강화'].forEach((gone) => assert.ok(!home.includes(gone), '홈에 사이클 흔적: ' + gone));
 });
 
 // ═══════════════════════════════════════════════
@@ -642,20 +609,21 @@ test('묶음5 renderHome — 요약판: 코치카드/빠른입력/최근PR 제�
   assert.ok(!home.includes('빠른 입력'), '빠른 입력 섹션 제거');
   assert.ok(!home.includes("setTab('workout')") && !home.includes("setTab('running')") && !home.includes("setTab('stats')"), '하단 바로가기 버튼 제거');
   assert.ok(!home.includes('최근 PR'), '홈 최근 PR 카드 제거(기록 탭으로)');
-  // 유지 — 디자인 정돈에서 "이번 주 운동 N회 / 목표 주 N회" 숫자는 사이클 카드와 같은 사실이라
-  //        지웠다(감사 H1). 카드 자체(요일 박스)는 남아야 한다.
+  // 유지 — 디자인 정돈에서 "이번 주 운동 N회 / 목표 주 N회" 숫자는 맨 위 카드와 같은 사실이라
+  //        지웠다(감사 H1). 카드 자체(요일 박스)는 남아야 한다. (사이클 카드는 주간 계획 카드로 바뀌었다)
   assert.ok(home.includes('이번 주') && home.includes('day-box'), '이번 주 요일 카드 유지');
-  assert.ok(home.includes('현재 단계'), '사이클 단계 카드 유지');
-  assert.ok(!/이번 주 운동 *<\/p>/.test(home), '주간 횟수 숫자는 사이클 카드 한 곳에만');
+  assert.ok(home.includes('이번 주 계획'), '맨 위 이번 주 계획 카드 유지');
+  assert.ok(!/이번 주 운동 *<\/p>/.test(home), '주간 횟수 숫자는 맨 위 카드 한 곳에만');
 });
 
-test('묶음5 renderMore — 죽은 사이클 메뉴 2개 + 잘못된 모델 배지 제거, 현재 사이클/기억 노트 유지', () => {
+test('묶음5 renderMore — 죽은 사이클 메뉴 2개 + 잘못된 모델 배지 제거, 현재 사이클 행도 제거', () => {
   const fresh = loadApp();
   const more = fresh.renderMore();
   assert.ok(!more.includes('새 사이클 시작'), '죽은 "새 사이클 시작" 메뉴 제거');
   assert.ok(!more.includes('사이클 히스토리'), '죽은 "사이클 히스토리" 메뉴 제거');
   assert.ok(!more.includes('Sonnet 4'), '코치 카드 모델 배지 제거');
-  assert.ok(more.includes('현재 사이클'), '현재 사이클 정보 행 유지');
+  // 앱 자체 사이클은 설계서(docs/weekly-plan.md) 결정 8로 통째로 지웠다 — '현재 사이클' 행도 없다.
+  assert.ok(!more.includes('현재 사이클'), '현재 사이클 행 제거');
   // '기억 노트 메뉴 유지' 단언은 설계서 결정 7(기억 노트 삭제)로 뺐다.
 });
 
@@ -1370,13 +1338,6 @@ test('getRecentVolumeSplitByPart — 직접과 분할환산을 분리, getRecent
   // getRecentVolumeByPart(AI 프롬프트 경로 래퍼)는 설계서 결정 1로 삭제돼 단언에서 뺐다.
 });
 
-// ── 임계 단일 출처: getVolumeThresholds ↔ getVolumeDiagnosis ──
-test('getVolumeThresholds — 큰/작은 근육 임계 (종아리는 의도적으로 large)', () => {
-  assert.deepEqual(plain(app.getVolumeThresholds('chest')),  { size: 'large', lackBelow: 4, optimalLow: 10, optimalTop: 20, target: 12 });
-  assert.deepEqual(plain(app.getVolumeThresholds('biceps')), { size: 'small', lackBelow: 3, optimalLow: 8,  optimalTop: 20, target: 10 });
-  assert.deepEqual(plain(app.getVolumeThresholds('calves')), { size: 'large', lackBelow: 4, optimalLow: 10, optimalTop: 20, target: 12 });
-});
-
 // ── 전완·요추는 볼륨 부위가 아니다 (#5·#6) ──
 // 두 부위는 직접 종목이 각각 1개·0개뿐이라 막대가 영구 '부족'으로 박혔고, 그 오탐이
 // buildUserContext 를 타고 모든 AI 프롬프트에 "권장 종목: 이지 바 리버스 컬" 을 실어 보냈다.
@@ -1386,15 +1347,18 @@ test('볼륨 부위 — 전완·요추는 세지 않는다 (인체도 표시는 
   for (const k of ['forearms', 'lower_back']) {
     assert.equal(fresh.BODY_PART_GROUPS[k], undefined, `BODY_PART_GROUPS 에 ${k} 가 남아 있다`);
   }
-  // 컬(전완 secondary)·데드(요추 secondary)를 3주간 해도 두 부위가 화면·프롬프트에 안 나온다
+  // 컬(전완 secondary)·데드(요추 secondary)를 해도 두 부위가 세트 카드에 안 나온다
+  // (옛 '부위별 주간 볼륨' 카드는 주간 계획의 '이번 주 부위별 세트' 카드로 바뀌었다 — docs/weekly-plan.md 결정 7)
+  const ws = fresh.getWeekStartStr(fresh.getTodayStr());
   fresh.state.data.workoutLog = [
-    { date: isoDaysAgo(12), completed: true, exercises: [{ name: '바벨 컬', setsCount: 3 }, { name: '랫 풀 다운', setsCount: 4 }] },
-    { date: isoDaysAgo(6),  completed: true, exercises: [{ name: '바벨 컬', setsCount: 3 }, { name: '바벨 루마니안 데드리프트', setsCount: 3 }] },
-    { date: isoDaysAgo(2),  completed: true, exercises: [{ name: '덤벨 해머 컬', setsCount: 3 }, { name: '데드리프트', setsCount: 3 }] }
+    { date: ws, completed: true, exercises: [{ name: '바벨 컬', setsCount: 3 }, { name: '랫 풀 다운', setsCount: 4 }] },
+    { date: ws, completed: true, exercises: [{ name: '바벨 컬', setsCount: 3 }, { name: '바벨 루마니안 데드리프트', setsCount: 3 }] },
+    { date: ws, completed: true, exercises: [{ name: '덤벨 해머 컬', setsCount: 3 }, { name: '데드리프트', setsCount: 3 }] }
   ];
-  const card = fresh.volumeByPartCardHtml();
-  assert.ok(!card.includes('전완'), '볼륨 카드에 전완 줄이 남아 있다');
-  assert.ok(!card.includes('요추'), '볼륨 카드에 요추 줄이 남아 있다');
+  const card = fresh.weekSetsCardHtml();
+  assert.ok(card.includes('이두'), '세트 카드가 비어 있다 — 이 검사가 헛돌고 있다');
+  assert.ok(!card.includes('전완'), '세트 카드에 전완 줄이 남아 있다');
+  assert.ok(!card.includes('요추'), '세트 카드에 요추 줄이 남아 있다');
   // WEAK_PART_EXERCISE_MAP·buildUserContext(AI 프롬프트) 단언은 설계서 결정 1·3으로 뺐다.
 
   // 세는 것만 멈춘 것이지 지운 게 아니다 — 자극 인체도·라벨·종목은 그대로 살아 있다
@@ -1403,43 +1367,6 @@ test('볼륨 부위 — 전완·요추는 세지 않는다 (인체도 표시는 
   assert.equal(fresh.BODY_PART_KR.forearms, '전완');
   assert.equal(fresh.BODY_PART_KR.lower_back, '요추');
   assert.ok(fresh.EXERCISE_BODY_PART_MAP['이지 바 리버스 컬'], '종목 자체는 남아 교체 목록에서 고를 수 있어야 한다');
-});
-
-// ── STATS 카드: 최소 표본 가드 + 프롬프트와 같은 숫자 + 정직한 문구 ──
-test('volumeByPartCardHtml — 2주 미만은 판정 보류, 이후는 프롬프트와 같은 수치/정직한 문구', () => {
-  app.state.data.workoutLog = [];
-  assert.equal(app.volumeByPartCardHtml(), '');           // 기록 없으면 카드 자체를 안 그린다
-
-  // 3일 사용자 → 판정하지 않는다
-  app.state.data.workoutLog = [{ date: isoDaysAgo(2), completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 4 }] }];
-  const early = app.volumeByPartCardHtml();
-  assert.ok(early.includes('아직 판단하기 일러요'), '최소 표본 가드 문구');
-  assert.ok(!early.includes('meal-status-pill'), '가드 중에는 판정 배지 없음');
-
-  // 오래 쉬다 복귀 → 첫 기록만 오래됐을 뿐 최근 2주 표본이 1회뿐이면 판정하지 않는다.
-  // (기간만 보면 1년 전 기록 하나로 가드가 풀려 복귀 첫날 전 부위가 '부족' 빨간 배지가 된다)
-  app.state.data.workoutLog = [
-    { date: isoDaysAgo(365), completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 4 }] },
-    { date: isoDaysAgo(1),   completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 4 }] }
-  ];
-  const comeback = app.volumeByPartCardHtml();
-  assert.ok(comeback.includes('아직 판단하기 일러요'), '복귀 직후는 최근 2주 표본 부족 → 판정 보류');
-  assert.ok(!comeback.includes('meal-status-pill'), '복귀 직후 판정 배지 없음');
-
-  // 21일 사용자 + 최근 2주 안에 2회 이상 → 판정 표시. 창(최근 2주) 밖 기록은 볼륨에 안 잡힌다
-  app.state.data.workoutLog = [
-    { date: isoDaysAgo(20), completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 4 }] },
-    { date: isoDaysAgo(6),  completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 3 }] },
-    { date: isoDaysAgo(3),  completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 3 }] }
-  ];
-  const html = app.volumeByPartCardHtml();
-  assert.ok(!html.includes('아직 판단하기 일러요'));
-  assert.ok(html.includes('직접 3.0 · 간접 포함 3.0세트/주'), '2주 평균 = 6세트 / 2주');
-  // 'AI 프롬프트 경로와 같은 값' 단언은 설계서 결정 1(앱 안 AI 삭제)로 뺐다.
-  assert.ok(html.includes('부족'));
-  assert.ok(!html.includes('과잉'), "'과잉'은 근거를 넘어선 표현이라 쓰지 않는다");
-  assert.ok(!html.includes('MEV'), '사용자 화면에 전문 약어 노출 금지');
-  assert.ok(html.includes('기준은 평균이라 본인 반응은 다를 수 있어요.'), '근거 범위의 한계를 계속 밝힌다(ⓘ 안으로 접혔을 뿐)');
 });
 
 // ═══════════════════════════════════════════════
@@ -2070,18 +1997,27 @@ test('XSS 회귀 — Claude 연결 코드 칸 · Claude 계획의 title·note·�
   assert.ok(!sheet.includes(ATTR), '연결 코드 칸에서 속성 탈출이 가능하다');
   fresh.state.claudeSyncSheetOpen = false;
 
-  // ② Claude 계획 (루틴·유산소) — 첫 화면 한 줄 → 2단계 → 세션
+  // ② Claude 계획 (이번 주 계획·유산소) — 운동 탭 주간 화면 → 2단계 → 세션
   const today = fresh.getTodayStr();
+  const ws = fresh.getWeekStartStr(today);
   fresh.applyClaudePlans({
-    routine: { id: 'x-1', createdAt: new Date().toISOString(), date: today, session: 'push', title: P, note: P,
-      exercises: [{ name: P, note: P, sets: [{ weight: 20, reps: '8', warmup: false, restSec: 90 }] }] },
+    week: { id: 'x-1', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), weekStart: ws, days: 3,
+      deload: false, note: P, targets: {},
+      sessions: [{ label: P, type: 'push', note: P, updatedAt: new Date().toISOString(),
+        exercises: [{ name: P, note: P, sets: [{ weight: 20, reps: '8', warmup: false, restSec: 90 }] }] }] },
     cardio: { id: 'x-2', createdAt: new Date().toISOString(), date: today, mode: 'walk', title: P, note: P,
       segments: [{ type: 'walk', sec: 600, speed: 5, incline: 6 }] },
   });
-  assert.ok(fresh.state.claudeRoutine && fresh.state.claudeCardio, '계획이 안 들어왔다 — 이 검사가 헛돌고 있다');
+  assert.ok(fresh.state.weekPlan && fresh.state.claudeCardio, '계획이 안 들어왔다 — 이 검사가 헛돌고 있다');
   fresh.state.currentTab = 'workout';
   fresh.state.workoutWizardStep = 1;
-  assert.ok(!fresh.renderWorkout().includes('<img'), '운동 탭 Claude 줄에서 태그가 살아있다');
+  const weekScreen = fresh.renderWorkout();
+  assert.ok(!weekScreen.includes('<img'), '운동 탭 주간 화면에서 태그가 살아있다');
+  assert.ok(weekScreen.includes(MARK), '주간 화면에 이스케이프된 세션 이름이 없다 — 이 검사가 헛돌고 있다');
+  assert.ok(!/onclick="[^"]*(&lt;img|eeek)/.test(weekScreen), '세션 이름이 onclick 속성에 들어갔다');
+  fresh.state.currentTab = 'home';
+  const home = fresh.renderHome();
+  assert.ok(!home.includes('<img') && home.includes(MARK), '홈 계획 카드 세션 이름');
   fresh.state.currentTab = 'running';
   const run = fresh.renderRunning ? fresh.renderRunning() : '';
   assert.ok(!run.includes('<img'), '러닝 탭 Claude 줄에서 태그가 살아있다');
@@ -2091,7 +2027,7 @@ test('XSS 회귀 — Claude 연결 코드 칸 · Claude 계획의 title·note·�
   assert.ok(cardioPreview.includes(MARK), '유산소 미리보기에 이스케이프된 title 이 없다 — 이 검사가 헛돌고 있다');
 
   fresh.state.currentTab = 'workout';
-  fresh.openClaudeRoutine();
+  fresh.openWeekSession(P);
   const step2 = fresh.renderWorkoutStep2();
   assert.ok(!step2.includes('<img'), '2단계에서 태그가 살아있다');
   assert.ok(step2.includes(MARK), '2단계에 이스케이프된 종목 이름이 없다 — 이 검사가 헛돌고 있다');
@@ -2606,15 +2542,298 @@ test('경사걷기 손잡이 — 뒤로 기댐만 경사 −2%, 세우고 잡음
   assert.deepEqual(plain(app.WALK_HANDRAIL_OPTIONS.map((o) => o.value)), ['none', 'light', 'hold_upright', 'hold_lean']);
 });
 
-test('볼륨 진단 — 직접 세트 하한: 환산이 적정이어도 팔·측면/후면 어깨·종아리 직접 4세트 미만이면 directShort (B4)', () => {
+
+// ═══════════════════════════════════════════════
+// 주간 계획 (docs/weekly-plan.md) — 주 계산 · 세트 세기 · 끝난 세션 · 정렬 · 홈 카드 · 기록 탭 카드 · 사이클 삭제
+// ═══════════════════════════════════════════════
+const WEEK_REV = '2026-09-21T00:00:00.000Z';
+function weekExercise(name, n, warm) {
+  const sets = [];
+  for (let i = 0; i < (warm || 0); i++) sets.push({ weight: 20, reps: '10', warmup: true, restSec: 60 });
+  for (let i = 0; i < n; i++) sets.push({ weight: 40, reps: '8', warmup: false, restSec: 90 });
+  return { name, note: '', sets };
+}
+function weekSession(label, type, exercises) {
+  return { label, type, note: '', updatedAt: WEEK_REV, exercises: exercises || [weekExercise('머신 체스트 프레스', 3)] };
+}
+function weekPlanFixture(fresh, over) {
+  return Object.assign({
+    id: 'wk-a', createdAt: WEEK_REV, updatedAt: WEEK_REV, weekStart: fresh.getWeekStartStr(fresh.getTodayStr()),
+    days: 4, deload: false, note: '', targets: {},
+    sessions: [
+      weekSession('상체 A', 'upper'), weekSession('하체 A', 'lower', [weekExercise('레그 프레스', 3)]),
+      weekSession('상체 B', 'upper'), weekSession('하체 B', 'lower', [weekExercise('레그 프레스', 3)]),
+    ],
+  }, over || {});
+}
+
+test('getWeekStartStr — 일요일은 6일 전 월요일, 월요일은 그대로, 연 경계', () => {
+  assert.equal(app.getWeekStartStr('2026-09-27'), '2026-09-21', '일요일 → 6일 전 월요일');
+  assert.equal(app.getWeekStartStr('2026-09-28'), '2026-09-28', '월요일 → 그대로');
+  assert.equal(app.getWeekStartStr('2026-09-23'), '2026-09-21', '수요일');
+  assert.equal(app.getWeekStartStr('2027-01-01'), '2026-12-28', '연 경계');
+});
+
+test('addDaysStr · weekdayKrOf — 문자열 날짜 연산', () => {
+  assert.equal(app.addDaysStr('2026-12-28', 7), '2027-01-04');
+  assert.equal(app.addDaysStr('2026-03-01', -1), '2026-02-28');
+  assert.equal(app.weekdayKrOf('2026-09-21'), '월');
+  assert.equal(app.weekdayKrOf('2026-09-27'), '일');
+});
+
+test('exerciseGroupWeights — 주동 1 · 보조 0.5 (그룹 단위)', () => {
+  assert.deepEqual(plain(app.exerciseGroupWeights('바벨 벤치 프레스')), { chest: 1, shoulders_front: 0.5, triceps: 0.5 });
+  assert.deepEqual(plain(app.exerciseGroupWeights('머신 체스트 프레스')), { chest: 1, triceps: 0.5, shoulders_front: 0.5 });
+  assert.deepEqual(plain(app.exerciseGroupWeights('덤벨 사이드 레터럴 레이즈')), { shoulders_side: 1 });
+  assert.deepEqual(plain(app.exerciseGroupWeights('')), {}, '정보가 없으면 빈 표');
+});
+
+test('세트 세기 불변식 — Σ(작업 세트 수 × exerciseGroupWeights) == getWeekGroupSets (모든 종목)', () => {
   const fresh = loadApp();
-  const d1 = fresh.getVolumeDiagnosis({ biceps: 12 }, 1, { biceps: 2 });
-  assert.equal(d1.directShort.length, 1);
-  assert.equal(d1.directShort[0].group, 'biceps');
-  assert.equal(d1.directShort[0].direct, 2);
-  assert.equal(fresh.getVolumeDiagnosis({ biceps: 12 }, 1, { biceps: 5 }).directShort.length, 0);
-  assert.equal(fresh.getVolumeDiagnosis({ chest: 12 }, 1, { chest: 1 }).directShort.length, 0, '가슴은 대상 아님');
-  assert.equal(fresh.getVolumeDiagnosis({ biceps: 12 }, 1).directShort.length, 0, '직접 맵 없으면 판정 안 함');
-  assert.equal(fresh.getVolumeThresholds('biceps').target, 10);
-  assert.equal(fresh.getVolumeThresholds('biceps').optimalTop, 20);
+  const ws = fresh.getWeekStartStr(fresh.getTodayStr());
+  const names = Object.keys(fresh.EXERCISE_BODY_PART_MAP);
+  const expected = {};
+  const log = names.map((name, i) => {
+    const n = (i % 4) + 1;
+    const kind = i % 3;
+    let ex;
+    if (kind === 0) ex = { name, setsCount: n };
+    else if (kind === 1) ex = { name, sets: n };
+    else {
+      // setsDetail 만 있는 기록 — 워밍업·드롭(연장)은 세지 않는다
+      const detail = [{ weight: 10, reps: 10, isWarmup: true, completed: true }];
+      for (let k = 0; k < n; k++) detail.push({ weight: 40, reps: 8, isWarmup: false, completed: true, role: 'work' });
+      detail.push({ weight: 30, reps: 8, isWarmup: false, completed: true, role: 'drop' });
+      ex = { name, setsDetail: detail };
+    }
+    const w = fresh.exerciseGroupWeights(name);
+    Object.keys(w).forEach((g) => { expected[g] = (expected[g] || 0) + n * w[g]; });
+    return { date: ws, completed: true, exercises: [ex] };
+  });
+  // 지난 주 기록은 이번 주 세트에 들어가지 않는다
+  log.push({ date: fresh.addDaysStr(ws, -1), completed: true, exercises: [{ name: '바벨 벤치 프레스', setsCount: 9 }] });
+  fresh.state.data.workoutLog = log;
+  const actual = plain(fresh.getWeekGroupSets(ws));
+  Object.keys(expected).forEach((g) => { if (!(expected[g] > 0)) delete expected[g]; });
+  assert.deepEqual(Object.keys(actual).sort(), Object.keys(expected).sort());
+  Object.keys(expected).forEach((g) => assert.ok(Math.abs(actual[g] - expected[g]) < 1e-9, g + ': ' + actual[g] + ' != ' + expected[g]));
+  assert.ok(Object.values(actual).every((v) => v > 0), '0인 그룹은 빠진다');
+});
+
+test('weekPlanDoneMap — 그 주 planWeek 의 label → 가장 이른 날짜', () => {
+  const plan = { weekStart: '2026-09-21', sessions: [] };
+  const log = [
+    { date: '2026-09-24', planWeek: '2026-09-21', planLabel: '상체 A' },
+    { date: '2026-09-22', planWeek: '2026-09-21', planLabel: '상체 A' },
+    { date: '2026-09-23', planWeek: '2026-09-21', planLabel: '하체 A' },
+    { date: '2026-09-15', planWeek: '2026-09-14', planLabel: '하체 B' },
+    { date: '2026-09-22', sessionName: 'PUSH' },
+  ];
+  assert.deepEqual(plain(app.weekPlanDoneMap(plan, log)), { '상체 A': '2026-09-22', '하체 A': '2026-09-23' });
+  assert.deepEqual(plain(app.weekPlanDoneMap(null, log)), {});
+});
+
+test('lastWorkoutPlanType — planType 우선, 옛 session 대응, 모르면 null', () => {
+  assert.equal(app.lastWorkoutPlanType([
+    { date: '2026-09-22', startTime: 1, session: 'push', planType: 'lower' },
+    { date: '2026-09-21', startTime: 2, planType: 'upper' },
+  ]), 'lower', '가장 최근 운동의 planType (옛 session 보다 우선)');
+  assert.equal(app.lastWorkoutPlanType([
+    { date: '2026-09-22', startTime: 1, session: 'push' },
+    { date: '2026-09-22', startTime: 5, session: 'legs' },
+  ]), 'lower', '같은 날이면 startTime 이 늦은 것 · legs → lower');
+  assert.equal(app.lastWorkoutPlanType([{ date: '2026-09-22', sessionType: 'free' }]), 'full', 'sessionType 만 있는 옛 기록도');
+  assert.equal(app.lastWorkoutPlanType([{ date: '2026-09-22', session: 'pull' }]), 'pull');
+  assert.equal(app.lastWorkoutPlanType([{ date: '2026-09-22', session: 'cardio' }]), null);
+  assert.equal(app.lastWorkoutPlanType([]), null);
+});
+
+test('orderRemainingSessions — 지난번과 주동 부위가 안 겹치는 세션이 앞, 각 무리는 계획 순서', () => {
+  const labels = (arr) => plain(arr.map((s) => s.label));
+  const four = { sessions: [
+    { label: '상체 A', type: 'upper' }, { label: '하체 A', type: 'lower' },
+    { label: '상체 B', type: 'upper' }, { label: '하체 B', type: 'lower' }] };
+  assert.deepEqual(labels(app.orderRemainingSessions(four, {}, 'lower')), ['상체 A', '상체 B', '하체 A', '하체 B'], '4일: 지난번 lower → upper 먼저');
+  assert.deepEqual(labels(app.orderRemainingSessions(four, { '상체 A': '2026-09-21' }, 'upper')), ['하체 A', '하체 B', '상체 B'], '끝난 세션은 빠진다');
+  const five = { sessions: [
+    { label: 'PUSH', type: 'push' }, { label: 'PULL', type: 'pull' }, { label: '하체 A', type: 'lower' },
+    { label: '상체', type: 'upper' }, { label: '하체 B', type: 'lower' }] };
+  assert.deepEqual(labels(app.orderRemainingSessions(five, {}, 'push')), ['PULL', '하체 A', '하체 B', 'PUSH', '상체'], '5일: 지난번 push → pull·lower 먼저, upper 뒤');
+  const three = { sessions: [{ label: '전신 A', type: 'full' }, { label: '전신 B', type: 'full' }, { label: '전신 C', type: 'full' }] };
+  assert.deepEqual(labels(app.orderRemainingSessions(three, {}, 'lower')), ['전신 A', '전신 B', '전신 C'], '3일: 계획 순서');
+  assert.deepEqual(labels(app.orderRemainingSessions(five, {}, null)), ['PUSH', 'PULL', '하체 A', '상체', '하체 B'], 'lastType null: 계획 순서');
+});
+
+test('홈 — 이번 주 계획 카드: 있음(끝낸 수/전체·남은 세션)·다 끝남·디로드·없음·오래 쉼', () => {
+  const fresh = loadApp();
+  const ws = fresh.getWeekStartStr(fresh.getTodayStr());
+  fresh.state.data.workoutLog = [{ id: 'w1', date: ws, startTime: 1, completed: true, planWeek: ws, planLabel: '상체 A', planType: 'upper',
+    sessionName: '상체 A', sessionKr: '상체 A', exercises: [] }];
+  fresh.state.weekPlan = weekPlanFixture(fresh);
+  let home = fresh.renderHome();
+  assert.ok(home.includes('이번 주 계획'));
+  assert.ok(home.includes('>1 / 4<'), '끝낸 수 / 전체');
+  assert.ok(home.includes('하체 A · 하체 B · 상체 B'), '남은 세션(운동 탭과 같은 순서)');
+  assert.ok(!home.includes('week-tag'), '디로드가 아니면 꼬리표 없음');
+  assert.ok(home.includes('openWeekPlanFromHome()'), '카드를 누르면 운동 탭');
+  fresh.state.workoutShowBasic = true;
+  fresh.openWeekPlanFromHome();
+  assert.equal(fresh.state.currentTab, 'workout');
+  assert.equal(fresh.state.workoutShowBasic, false, '주간 화면으로 간다');
+
+  fresh.state.weekPlan = weekPlanFixture(fresh, { deload: true });
+  assert.ok(fresh.renderHome().includes('<span class="week-tag">디로드</span>'), '디로드 꼬리표');
+
+  fresh.state.data.workoutLog = ['상체 A', '하체 A', '상체 B', '하체 B'].map((l, i) => ({ id: 'w' + i, date: ws, startTime: i, completed: true,
+    planWeek: ws, planLabel: l, planType: 'upper', exercises: [] }));
+  home = fresh.renderHome();
+  assert.ok(home.includes('>4 / 4<'), '다 끝남');
+  assert.ok(!home.includes('text-stone-400 mt-2') && !home.includes('모두 했어요'), '다 끝나면 남은 세션 줄을 비운다');
+
+  fresh.state.weekPlan = null;
+  home = fresh.renderHome();
+  assert.ok(home.includes('>계획이 없어요<'), '계획 없음');
+  assert.ok(!home.includes('openWeekPlanFromHome()'), '계획이 없으면 누를 곳이 없다');
+
+  // 오래 쉼 — 두 경우 모두 warn 색 한 줄
+  const old = fresh.addDaysStr(fresh.getTodayStr(), -15);
+  fresh.state.data.workoutLog = [{ id: 'w_old', date: old, startTime: 1, completed: true, exercises: [] }];
+  const idle = fresh.getIdleComebackMessage(fresh.state.data.workoutLog, fresh.getTodayStr()).message;
+  home = fresh.renderHome();
+  const idleLine = 'style="color: var(--warn);">' + fresh.icon('info', 14) + '<span>' + idle + '</span></p>';
+  assert.ok(home.includes(idleLine), '계획 없음 + 오래 쉼 (info 아이콘 + warn)');
+  fresh.state.weekPlan = weekPlanFixture(fresh);
+  home = fresh.renderHome();
+  assert.ok(home.includes('>0 / 4<') && home.includes(idleLine), '계획 있음 + 오래 쉼');
+});
+
+test('기록 탭 — 이번 주 부위별 세트: 목표 있음(실제/목표 오름차순)·목표 없음(실제 내림차순)·빈 경우', () => {
+  const fresh = loadApp();
+  const ws = fresh.getWeekStartStr(fresh.getTodayStr());
+  const rowNames = (html) => [...html.matchAll(/<p class="week-set-name">([^<]*)<\/p>/g)].map((m) => m[1]);
+  const rowNums = (html) => [...html.matchAll(/<p class="week-set-num">([^<]*)<\/p>/g)].map((m) => m[1]);
+
+  fresh.state.data.workoutLog = [];
+  fresh.state.weekPlan = null;
+  let card = fresh.weekSetsCardHtml();
+  assert.ok(card.includes('이번 주 부위별 세트') && card.includes('이번 주 세트 기록이 없어요'), '빈 경우 한 줄');
+
+  // 가슴 10 · 삼두 5 · 어깨 전면 5 (머신 체스트 프레스 10세트) / 광배 4 · 이두 2 (랫 풀 다운 4세트) / 둔근·햄 1.5 (레그 프레스 3세트)
+  fresh.state.data.workoutLog = [
+    { date: ws, completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 10 }, { name: '랫 풀 다운', setsCount: 4 }] },
+    { date: fresh.addDaysStr(ws, -3), completed: true, exercises: [{ name: '랫 풀 다운', setsCount: 9 }] },   // 지난 주 — 안 센다
+  ];
+  card = fresh.weekSetsCardHtml();
+  assert.deepEqual(rowNames(card), ['가슴', '어깨 전면', '삼두', '광배', '이두'], '목표 없음: 실제 내림차순');
+  assert.deepEqual(rowNums(card), ['10', '5', '5', '4', '2'], '목표가 없으면 실제만');
+  assert.ok(card.includes('width: 100.0%') && card.includes('width: 20.0%'), '목표가 없으면 카드의 최대 실제 대비');
+  assert.ok(!card.includes('var(--success)'), '목표가 없으면 도달 색 없음');
+
+  fresh.state.data.workoutLog[0].exercises.push({ name: '레그 프레스', setsCount: 3 });
+  fresh.state.weekPlan = weekPlanFixture(fresh, { targets: { chest: 10, lats: 10, quads: 8 } });
+  card = fresh.weekSetsCardHtml();
+  assert.deepEqual(rowNames(card).slice(0, 4), ['대퇴사두', '광배', '가슴', '어깨 전면'], '목표 있는 행: 실제/목표 오름차순 → 그다음 목표 없는 행');
+  assert.deepEqual(rowNums(card).slice(0, 3), ['3 / 8', '4 / 10', '10 / 10'], '실제 / 목표');
+  assert.ok(rowNums(card).includes('1.5'), '정수가 아니면 소수 한 자리');
+  const chestRow = card.split('week-set-row').find((r) => r.includes('>가슴<'));
+  assert.ok(chestRow.includes('var(--success)'), '목표 도달은 success');
+  const latsRow = card.split('week-set-row').find((r) => r.includes('>광배<'));
+  assert.ok(latsRow.includes('var(--stone-400)') && latsRow.includes('width: 40.0%'), '미달은 stone-400 · 실제/목표 폭');
+
+  // 다른 주 계획의 목표는 쓰지 않는다
+  fresh.state.weekPlan = weekPlanFixture(fresh, { weekStart: fresh.addDaysStr(ws, -7), targets: { chest: 10 } });
+  assert.ok(!fresh.weekSetsCardHtml().includes(' / '), '이번 주 계획이 아니면 실제만');
+  assert.ok(fresh.renderStats().includes('이번 주 부위별 세트'), '기록 탭에 붙어 있다');
+});
+
+test('사이클 삭제 — 사이클 칸·fitness_cycle_history 가 든 옛 백업도 오류 없이 가져온다', () => {
+  const fresh = loadApp();
+  fresh.localStorage.clear();
+  const old = { app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z', data: {
+    fitness_profile: { age: 40, height: 175, weight: 80, workoutFreq: 4, currentCycle: 2, currentWeek: 5, cyclePhase: '디로드', weekSessionsDone: 3 },
+    fitness_workout_log: [{ id: 'a', date: '2026-07-30', sessionKr: 'PUSH', exercises: [] }],
+    fitness_cycle_history: [{ cycle: 1, endedAt: '2026-07-01' }],
+  } };
+  const res = fresh.restoreFromBackup(JSON.stringify(old));
+  assert.equal(res.ok, true);
+  assert.equal(res.summary.workouts, 1);
+  assert.equal(fresh.localStorage.getItem('fitness_cycle_history'), null, '사이클 기록은 가져오지 않는다');
+  assert.doesNotThrow(() => fresh.init());
+  assert.equal(fresh.state.data.cycleHistory, undefined);
+  const screens = fresh.renderHome() + fresh.renderMore() + fresh.renderStats();
+  ['빌드', '디로드', '주차', '현재 사이클', 'Cycle'].forEach((w) => assert.ok(!screens.includes(w), '사이클 흔적: ' + w));
+});
+
+test('사이클 삭제 — finalizeSession 은 사이클 없이 기록만 남긴다', () => {
+  const fresh = loadApp();
+  fresh.localStorage.removeItem('fitness_cycle_history');
+  fresh.state.profile = { age: 37, height: 170, weight: 77.5 };
+  const toasts = [];
+  fresh.showToast = (m) => toasts.push(m);
+  fresh.selectBodyPart('push');
+  fresh.startGeneratedRoutine();
+  const s = fresh.state.activeSession;
+  s.warmup = null;
+  const ex = s.exercises[0];
+  ex.sets[ex.sets.findIndex((st) => !st.isWarmup)].completed = true;
+  const before = fresh.state.data.workoutLog.length;
+  fresh.finalizeSession();
+  assert.equal(fresh.state.data.workoutLog.length, before + 1);
+  const w = fresh.state.data.workoutLog[0];
+  assert.equal(w.sessionName, 'PUSH');
+  assert.equal(w.planWeek, undefined, '기본 루틴 기록에는 계획 표식이 없다');
+  assert.deepEqual(plain(fresh.state.profile), { age: 37, height: 170, weight: 77.5 }, '프로필에 사이클 칸이 생기지 않는다');
+  assert.equal(fresh.localStorage.getItem('fitness_cycle_history'), null);
+  assert.ok(!toasts.some((t) => /주차|사이클/.test(t)), '사이클 토스트 없음');
+  assert.ok(fresh.state.completedSession, '완료 화면으로');
+});
+
+test('사이클 삭제 — 더보기·프로필 시트에 사이클·주간 운동 횟수 흔적이 없다', () => {
+  const fresh = loadApp();
+  fresh.state.profile = { age: 37, height: 170, weight: 77.5, workoutFreq: 4, currentCycle: 1, currentWeek: 2, cyclePhase: '빌드' };
+  const more = fresh.renderMore();
+  ['사이클', 'Cycle', '회 운동', '주간 운동 횟수'].forEach((w) => assert.ok(!more.includes(w), '더보기: ' + w));
+  fresh.openProfileEditModal();
+  const sheet = fresh.renderProfileEditModal();
+  assert.ok(sheet.includes('프로필 수정') && sheet.includes('나이'), '시트가 안 그려졌다 — 이 검사가 헛돌고 있다');
+  ['주간 운동 횟수', 'workoutFreq', '회 / 주'].forEach((w) => assert.ok(!sheet.includes(w), '프로필 시트: ' + w));
+  assert.equal('workoutFreq' in fresh.state.profileEdit, false);
+  fresh.updateProfileEditField('age', '41');
+  fresh.saveProfileEdit();
+  assert.equal(fresh.state.profile.age, 41, '나이·키·체중만으로 저장된다');
+  assert.equal(fresh.storage.get('fitness_profile').age, 41);
+  assert.equal('workoutFreq' in fresh.DEFAULT_PROFILE, false, '기본 프로필에도 없다');
+});
+
+test('기록 탭 — 세트 막대는 한 카드 안 같은 절대 눈금 S = max(10, 목표, 실제), 목표는 세로 눈금', () => {
+  const fresh = loadApp();
+  const ws = fresh.getWeekStartStr(fresh.getTodayStr());
+  // 가슴 10 · 삼두 5 · 어깨 전면 5 / 광배 4 · 이두 2
+  fresh.state.data.workoutLog = [{ date: ws, completed: true, exercises: [{ name: '머신 체스트 프레스', setsCount: 10 }, { name: '랫 풀 다운', setsCount: 4 }] }];
+  fresh.state.weekPlan = weekPlanFixture(fresh, { targets: { chest: 20, lats: 4 } });   // S = 20
+  const card = fresh.weekSetsCardHtml();
+  const row = (kr) => card.split('week-set-row').find((r) => r.includes('>' + kr + '<'));
+  assert.ok(row('가슴').includes('width: 50.0%') && row('가슴').includes('class="week-set-tick" style="left: calc(min(100.0%, 100% - 2px));"'), '가슴 10/20: 채움 50% · 눈금 100%');
+  assert.ok(row('가슴').includes('var(--stone-400)'), '미달 색');
+  assert.ok(row('광배').includes('width: 20.0%') && row('광배').includes('left: calc(min(20.0%, 100% - 2px))') && row('광배').includes('var(--success)'), '광배 4/4: 도달 success');
+  assert.ok(row('삼두').includes('width: 25.0%') && !row('삼두').includes('week-set-tick'), '목표 없는 줄: 같은 눈금 · 눈금선 없음');
+  // 목표·실제가 모두 작으면 S = 10
+  fresh.state.weekPlan = null;
+  fresh.state.data.workoutLog = [{ date: ws, completed: true, exercises: [{ name: '랫 풀 다운', setsCount: 4 }] }];
+  const small = fresh.weekSetsCardHtml();
+  assert.ok(small.includes('width: 40.0%') && small.includes('width: 20.0%'), 'S 하한 10');
+});
+
+test('기록 탭 — 세션 타입 분배: 계획 운동은 planType 으로(전신 줄 포함), 없으면 sessionKr', () => {
+  const fresh = loadApp();
+  const today = fresh.getTodayStr();
+  const w = (label, planType, kr) => Object.assign({ id: 'w' + label, date: today, completed: true, sessionKr: kr || label, sessionName: kr || label, exercises: [] },
+    planType ? { planType, planLabel: label, planWeek: fresh.getWeekStartStr(today) } : {});
+  fresh.state.data.workoutLog = [w('상체 A', 'upper'), w('하체 A', 'lower'), w('전신 A', 'full'), w('PUSH', 'push'), w('x', null, 'PULL')];
+  fresh.state.statsPeriod = 'all';
+  const stats = fresh.renderStats();
+  const block = stats.slice(stats.indexOf('세션 타입 분배'));
+  const names = [...block.matchAll(/<p class="text-xs font-display">([^<]*)<\/p>/g)].map((m) => m[1]);
+  assert.deepEqual(names, ['PUSH', 'PULL', 'LEGS', 'UPPER', '전신'], '계획 운동 4회가 모두 잡힌다(전신은 UPPER 다음)');
+  assert.equal((block.match(/>1회</g) || []).length, 5);
 });

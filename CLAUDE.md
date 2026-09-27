@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 헬스앱 ("Health App") — a Korean-language, mobile-first **fitness PWA**. It tracks weight training, treadmill cardio (intervals / incline walking), and body metrics.
 
-**The AI coach is Claude, not the app.** The user's phone Claude app (Opus) reads the training record through a remote MCP connector in this repo (`api/`) and saves today's weight routine and cardio plan; the app fetches those plans and runs them as written. **The app records and executes; it makes no AI calls** (no API key, no in-app model calls, no coaching screens). See **Claude 커넥터** below and `docs/claude-connector-plan.md`.
+**The AI coach is Claude, not the app.** The user's phone Claude app (Opus) reads the training record through a remote MCP connector in this repo (`api/`) and saves **the week's weight plan** (3–5 sessions the user picks from day by day) and today's cardio plan; the app fetches those plans and runs them as written. **The app records and executes; it makes no AI calls** (no API key, no in-app model calls, no coaching screens). See **Claude 커넥터** below, `docs/claude-connector-plan.md`, and `docs/weekly-plan.md` (weekly plan — supersedes decision 6 of the connector plan).
 
 The five tabs are **홈 · 운동 · 러닝 · 기록 · 더보기**. There is **no food/nutrition feature** — it was removed in the remake, so ignore any older reference to a "연료" tab, `FOOD_DB`, or food analysis.
 
@@ -74,7 +74,7 @@ Visual/behavioral QA still needs a real browser — **hard-reload** (or enable D
 
 **Persistence: `localStorage` via the `storage` wrapper.** `storage.get/set` (`js/core.js`) JSON-serialize to keys defined in the `KEYS` map (all prefixed `fitness_`). `init()` (defined in `js/core.js`, called at the tail of `js/screens.js`) loads everything into `state` on startup and seeds demo data (`generateDemoData`) on first run. The active workout session, rest timer, and routine-builder wizard are persisted separately (`saveActiveSession`, `saveRestTimer`, `saveWizard`) so they survive backgrounding/refresh.
 
-The user's tracked data lives in `state.data`: `workoutLog`, `cardioLog`, `personalRecords`, `bodyLog`, `conditionLog`, `cycleHistory`.
+The user's tracked data lives in `state.data`: `workoutLog`, `cardioLog`, `personalRecords`, `bodyLog`, `conditionLog`. (The app's own 5-week build/deload cycle was removed — Claude plans deloads.)
 
 **Static data tables (`js/data.js`):**
 - UI icons: `ICONS` — 31 inline SVGs. **UI must use these, never emoji** (see 디자인 규칙 below).
@@ -88,27 +88,27 @@ The user's tracked data lives in `state.data`: `workoutLog`, `cardioLog`, `perso
 
 ## Claude 커넥터
 
-Design doc (source of truth): `docs/claude-connector-plan.md`. Goal: zero API cost in the app — Opus in the user's phone Claude app does the judging; the app records and executes.
+Design docs (source of truth): `docs/claude-connector-plan.md` + `docs/weekly-plan.md` (weekly plan; wins where they differ). Goal: zero API cost in the app — Opus in the user's phone Claude app does the judging; the app records and executes.
 
-**Flow.** App → `POST /api/snapshot` (raw data) → Opus calls MCP tools on `/api/mcp/<code>` → saves today's plans → app `GET /api/plan` → 운동 탭 「Claude 추천」 줄 / 러닝 탭 「Claude 유산소」 줄.
+**Flow.** App → `POST /api/snapshot` (raw data) → Opus calls MCP tools on `/api/mcp/<code>` → saves the week plan / today's cardio → app `GET /api/plan` → 운동 탭 주간 세션 카드 · 홈 「이번 주 계획」 카드 / 러닝 탭 「Claude 유산소」 줄.
 
 **Server (`api/`, Vercel functions, `.mjs`).**
-- `api/mcp/[token].mjs` — MCP endpoint (`mcp-handler@2.1.1` + `@modelcontextprotocol/server@2` + `zod@4`). The last path segment must equal the code, otherwise 404. Four tools: `get_training_context` (read), `save_today_routine`, `save_today_cardio` (write), `get_saved_plans` (read).
+- `api/mcp/[token].mjs` — MCP endpoint (`mcp-handler@2.1.1` + `@modelcontextprotocol/server@2` + `zod@4`). The last path segment must equal the code, otherwise 404. Five tools: `get_training_context` (read), `save_week_plan`, `update_week_sessions`, `save_today_cardio` (write), `get_saved_plans` (read).
 - `api/snapshot.mjs` — `POST`, `Authorization: Bearer <code>`, JSON up to 1MB, `schemaVersion:1` shape check.
-- `api/plan.mjs` — `GET` → `{routine, cardio}`, each only if dated KST today, else `null`.
+- `api/plan.mjs` — `GET` → `{week, cardio}`: `week` = the plan for the KST week (Mon–Sun) containing today, `cardio` = today's only; else `null`.
 - `api/_lib/auth.mjs` (constant-time compare; rejects everything if the env var is missing or under 20 chars) · `store.mjs` (`getJSON`/`setJSON`; memory store never used on Vercel) · `kst.mjs` · `tools.mjs` (pure tool logic + snapshot → readable text) · `guide.mjs`.
 - All responses `Cache-Control: no-store`.
 
 **Contracts.**
-- Snapshot: `{schemaVersion:1, uploadedAt, todayKst, appVersion, profile:{age,heightCm,weightKg}, equipment[], workouts[] (last 56 days, newest first), olderLastPerformed[], cardio[] (56 days), body[] (56 days + last one before), catalog:{push,pull,legs,upper,free}}`. **Raw data only** — no recommended weight, 1RM, plateau, weak parts, target sets, volume verdicts, or cycle info.
-- `RoutinePlan = {id, createdAt, date, session, title, note, exercises:[{name, note, sets:[{weight, reps(string), warmup, restSec}]}]}`; `CardioPlan = {id, createdAt, date, mode, title, note, segments:[{type, sec, speed, incline}]}`. Saving the same kind overwrites.
+- Snapshot: `{schemaVersion:1, uploadedAt, todayKst, appVersion, profile:{age,heightCm,weightKg}, equipment[], workouts[] (last 56 days, newest first; plan sessions carry planWeek/planLabel/planType), olderLastPerformed[], cardio[] (56 days), body[] (56 days + last one before), catalog:{push,pull,legs,upper,free}, weekSets:{weekStart, byGroup}, muscleWeights:{name:{group:1|0.5}}}`. **Raw data only** — no recommended weight, 1RM, plateau, weak parts, target sets, or volume verdicts. The only counted values are `weekSets` (this week's working sets per group, the same number the app shows) and the per-exercise `muscleWeights` table they are counted with (`exerciseGroupWeights` / `getWeekGroupSets` in `js/domain.js` are the source of truth).
+- `WeekPlan = {id, createdAt, updatedAt, weekStart(Monday), days(3|4|5), deload, note, targets:{group:sets}, sessions:[{label, type(full|upper|lower|push|pull), note, updatedAt, exercises:[{name, note, sets:[{weight, reps(string), warmup, restSec}]}]}]}` — one per week (Blob `fitness/week/<weekStart>.json`); sessions already done that week (per the latest snapshot) are kept by the server and cannot be changed. `CardioPlan = {id, createdAt, date, mode, title, note, segments:[{type, sec, speed, incline}]}` — saving overwrites.
 
 **Guide text.** claude.ai ignores server `instructions`, so the coach guide is returned inside the `get_training_context` result. **Edit it only in `api/_lib/guide.mjs`** (minimal guide — design doc decision 6).
 
-**Config & storage.** Env var `HEALTH_SYNC_TOKEN` (the connector code, 20+ chars; same value in the MCP URL path and the app's Bearer header). Storage is **Vercel Blob, private** (`useCache:false`), keys `fitness/snapshot.json` · `fitness/plan-routine.json` · `fitness/plan-cardio.json`.
+**Config & storage.** Env var `HEALTH_SYNC_TOKEN` (the connector code, 20+ chars; same value in the MCP URL path and the app's Bearer header). Storage is **Vercel Blob, private** (`useCache:false`), keys `fitness/snapshot.json` · `fitness/week/<weekStart>.json` · `fitness/plan-cardio.json`.
 
-**App side (`js/ai.js`).** The file name stays; its content is connector sync only. `KEYS.SYNC_TOKEN` (the code) and `KEYS.CLAUDE_SYNC` (`{lastUploadAt, lastUploadHash, lastImportedRoutineId, lastImportedCardioId}`) are device-only and excluded from backups. `buildClaudeSnapshot` · `uploadClaudeSnapshot({force})` (skips when the hash is unchanged; failures are silent, only [지금 보내기] toasts) · `fetchClaudePlans` (today's plans with an id not yet imported → `state.claudeRoutine` / `state.claudeCardio`). Timing: end of `init()`, `visibilitychange` (at most once per 60 s), and upload-only after saving a workout or cardio session. **No code → no requests.**
-Claude routines open step 2 as `generatedRoutine={source:'claude', …, exercises[{name, note, claudeSets}]}`; `startGeneratedRoutine` builds the sets exactly as saved (weight snapped to equipment units only — no `getSessionSetPlan`, set schemes, auto warm-up sets, or superset suggestions), and a session with `source:'claude'` turns off in-session auto-adjustments (top-set miss backoff deload, +30 s rest autoregulation). Manual edits still work. Claude cardio goes through `cardioNormalizePlan` into the preview.
+**App side (`js/ai.js`).** The file name stays; its content is connector sync only. `KEYS.SYNC_TOKEN` (the code), `KEYS.CLAUDE_SYNC` (`{lastUploadAt, lastUploadHash, lastImportedCardioId}`), `KEYS.WEEK_PLAN` (this week's plan) and `KEYS.WEEK_EDITS` (hand edits per session, dropped when Claude re-saves that session) are device-only and excluded from backups. `buildClaudeSnapshot` · `uploadClaudeSnapshot({force})` (skips when the hash is unchanged; failures are silent, only [지금 보내기] toasts) · `fetchClaudePlans` (this week's plan → `state.weekPlan`; today's cardio with an id not yet imported → `state.claudeCardio`). Timing: end of `init()`, `visibilitychange` (at most once per 60 s), and upload-only after saving a workout or cardio session. **No code → no requests.**
+Picking a week session (운동 탭 cards, ordered so sessions not overlapping the last workout's muscles come first; done = a saved workout with that `planWeek`+`planLabel`) opens step 2 as `generatedRoutine={source:'claude', planWeek, planLabel, planType, …, exercises[{name, note, claudeSets}]}`; `startGeneratedRoutine` builds the sets exactly as saved (weight snapped to equipment units only — no `getSessionSetPlan`, set schemes, auto warm-up sets, or superset suggestions), and a session with `source:'claude'` turns off in-session auto-adjustments (top-set miss backoff deload, +30 s rest autoregulation). Manual edits still work. Claude cardio goes through `cardioNormalizePlan` into the preview.
 
 ## 디자인 규칙 (감사 후 확정 — docs/research/design-audit.md §5)
 
@@ -189,8 +189,8 @@ js/ai.js        → Claude connector sync: buildClaudeSnapshot, uploadClaudeSnap
 js/screens.js   → renderX() builders + render() + window.* onclick handlers +
                   workout-session logic + swipe/touch init + the init() call (load tail)
 
-api/mcp/[token].mjs → MCP endpoint (4 tools)      api/snapshot.mjs → POST snapshot
-api/plan.mjs        → GET today's plans           api/_lib/        → auth · store · kst · guide · tools
+api/mcp/[token].mjs → MCP endpoint (5 tools)      api/snapshot.mjs → POST snapshot
+api/plan.mjs        → GET this week's plan + today's cardio           api/_lib/        → auth · store · kst · guide · tools
 scripts/dev-server.mjs → local dev server only (static + api/, memory store)
 ```
 
@@ -217,15 +217,17 @@ Each `js/*.js` begins with `'use strict'` (the original was one strict script �
 
 ## 작업 규칙
 
-### 분할·주간 루틴은 처방하지 않기
-- 운동 분할과 주간 루틴은 처방하지 않는다. 세션 종류(푸쉬·풀·레그·상체 등)는 재료로만 주고, 매주 루틴은 사용자가 자유롭게 구성한다.
-- 새 세션 종류는 추가하되 주간 스케줄은 강제하지 않는다.
-- "균형 맞추게 하체도 넣자" 같은 참견을 하지 않는다. 하체는 레그와 같이 쓴다.
-- 종목 구성은 Claude 앱의 Opus가 짠다. 자동 추천은 힌트일 뿐이며 수동 선택이 항상 우선이다.
-- 이유: 사용자가 자율을 선호한다.
+### 주간 계획 (docs/weekly-plan.md)
+- 웨이트는 Claude가 한 주(월~일, KST) 단위로 계획한다. 주 일수(3·4·5)는 사용자가 Claude 대화에서 말한다.
+- 분할은 고정: 3일 전신 A·B·C / 4일 상체 A·하체 A·상체 B·하체 B / 5일 PUSH·PULL·하체 A·상체·하체 B. 바꾸려면 사용자 확인.
+- 순서는 사용자가 날마다 고른다. 앱은 정렬로 권할 뿐 막지 않는다. 「기본 루틴」(부위 카드)은 늘 열 수 있다.
+- 세트 기준은 바닥선만(부위당 주 10세트 이상·주 2회 이상, ACSM 2026). 그 위 목표는 Claude가 targets로 정한다.
+- 세트 세기(본 세트만, 주동 1·보조 0.5)는 `exerciseGroupWeights`·`getWeekGroupSets` 한 곳. 앱 카드와 스냅샷이 같은 숫자를 쓴다.
+- 앱 자체 사이클·주기화·주 목표 횟수는 없다. 되살리지 않는다(ACSM 2026: 볼륨이 같으면 주기화 차이 없음).
+- 이유: 사용자가 주당 세트 수 기준의 한 주 계획을 원하고, 날마다 어느 세션을 할지는 스스로 고르고 싶어 한다.
 
 ### 브라우저마다 저장소가 따로
 - 헬스앱 PWA는 브라우저마다 localStorage가 완전히 따로다. 삼성 인터넷과 Chrome은 데이터와 연결 코드를 공유하지 않는다.
 - 안드로이드 뒤로가기: 앱은 history 트랩으로 뒤로가기를 가로채는데, 삼성 인터넷의 화면 옆 스와이프 제스처는 트랩을 무시하고 앱을 바로 닫는다. Chrome PWA에서는 같은 트랩이 정상 작동하므로 Chrome으로 홈에 추가해 쓰라고 안내한다.
 - 브라우저를 바꾸면 새 저장소는 비어 있다. 이관은 옛 브라우저 앱의 더보기 > 데이터 내보내기 → 새 브라우저 앱의 더보기 > 데이터 가져오기로 한다.
-- 연결 코드는 백업에서 빠지므로 새 브라우저에서 더보기 > Claude 연결에 다시 넣는다. 유산소·운동 기록과 사이클은 백업에 들어간다.
+- 연결 코드는 백업에서 빠지므로 새 브라우저에서 더보기 > Claude 연결에 다시 넣는다. 유산소·운동 기록은 백업에 들어간다. 이번 주 계획(`fitness_week_plan`)과 손 편집본은 기기 전용이라 빠지고, 연결 코드를 넣으면 다시 받아 온다.

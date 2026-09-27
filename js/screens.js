@@ -30,26 +30,9 @@ function renderHome() {
   var todayDayIdx = dayOfWeek === 7 ? 6 : dayOfWeek - 1;
   var recentPRs = data.personalRecords.slice(0, 2);
   
-  // 사이클 도트 (5주: 빌드 4 + 디로드 1). 마지막(디로드)은 빈 점으로 구분.
-  var weekDots = '';
-  for (var i = 0; i < CYCLE_LENGTH; i++) {
-    var isCur = i === profile.currentWeek - 1;
-    var isDeloadDot = i === CYCLE_LENGTH - 1;
-    var dotStyle = (!isCur && isDeloadDot) ? ' style="border:1px solid var(--bg-4);background:transparent;"' : '';
-    weekDots += '<div class="dot ' + (isCur ? 'dot-ideal' : 'dot-pending') + '"' + dotStyle + '></div>';
-    if (i < CYCLE_LENGTH - 1) weekDots += '<div class="flex-1 h-px bg-stone-800"></div>';
-  }
-  // 사이클 단계 안내 + 이번 주 진행
-  var isDeloadWeek = profile.currentWeek >= CYCLE_LENGTH;
-  var phaseHint = isDeloadWeek ? '가볍게 · 건너뛰기 가능' : '조금씩 늘리기';
-  var weekGoal = profile.workoutFreq || 4;
-  var doneTowardWeek = profile.weekSessionsDone || 0; // 이번 주차 완료 수(캘린더 아님)
+  // 이번 주 계획 카드 — 끝낸 세션 수/전체, 남은 세션 이름, 디로드 꼬리표, 오래 쉬었으면 복귀 안내.
   var idleMsg = getIdleComebackMessage(data.workoutLog, getTodayStr());
-  var cycleStatusLine = idleMsg
-    ? idleMsg.message
-    : (doneTowardWeek >= weekGoal
-        ? '이번 주차 목표 달성 — 다음 운동이면 다음 주차로'
-        : '이번 주차 ' + weekGoal + '회 중 ' + doneTowardWeek + '회 · 다 하면 다음 주차로');
+  var weekPlanCard = homeWeekPlanCardHtml(idleMsg);
   
   // 주간 요일 박스
   var weekBoxes = '';
@@ -93,24 +76,10 @@ function renderHome() {
 
     '<div class="px-5 pb-32">' +
       
-      // 사이클 카드
-      '<div class="card-accent mb-4">' +
-        '<div class="relative">' +
-          '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">현재 단계</p>' +
-          '<div class="flex items-end justify-between mb-4">' +
-            '<h2 class="font-bebas text-4xl">' + escapeHtml(profile.cyclePhase) + (isDeloadWeek ? '' : ' ' + escapeHtml(profile.currentWeek) + '주차') + '</h2>' +
-            '<p class="text-xs text-stone-500 font-mono">' + phaseHint + '</p>' +
-          '</div>' +
-          '<div class="flex items-center gap-1.5">' + weekDots + '</div>' +
-          '<div class="flex items-center justify-between mt-2">' +
-            '<p class="text-[11px] text-stone-600 font-mono uppercase">빌드 1~4주</p>' +
-            '<p class="text-[11px] text-stone-600 font-mono uppercase">디로드</p>' +
-          '</div>' +
-          '<p class="text-[11px] font-mono mt-3 ' + (idleMsg ? 'text-amber-400' : 'text-stone-400') + '">' + cycleStatusLine + '</p>' +
-        '</div>' +
-      '</div>' +
-      
-      // 이번 주 — 횟수/목표 숫자는 위 사이클 카드가 이미 말한다(같은 사실 두 번 금지).
+      // 이번 주 계획 카드
+      weekPlanCard +
+
+      // 이번 주 — 끝낸 세션 수는 위 계획 카드가 이미 말한다(같은 사실 두 번 금지).
       //          여기는 "어느 요일에 했나"만 보여준다.
       '<div class="card mb-4">' +
         '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-3">이번 주</p>' +
@@ -140,6 +109,103 @@ function renderHome() {
     '</div>';
 }
 
+// 홈 「이번 주 계획」 카드. idleMsg = getIdleComebackMessage 결과(없으면 null).
+function homeWeekPlanCardHtml(idleMsg) {
+  var plan = state.weekPlan;
+  var idleLine = idleMsg
+    ? '<p class="text-[11px] font-mono mt-3 flex items-center gap-1" style="color: var(--warn);">' +
+        icon('info', 14) + '<span>' + escapeHtml(idleMsg.message) + '</span></p>'
+    : '';
+  if (!plan || !Array.isArray(plan.sessions)) {
+    return '<div class="card-accent mb-4">' +
+        '<div class="relative">' +
+          '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">이번 주 계획</p>' +
+          '<p class="text-sm text-stone-400 mt-2">계획이 없어요</p>' +
+          idleLine +
+        '</div>' +
+      '</div>';
+  }
+  var doneMap = weekPlanDoneMap(plan, state.data.workoutLog);
+  // 계획에서 빠졌지만 이번 주에 끝낸 세션도 끝낸 수·전체 수에 더한다
+  var extraDone = weekPlanExtraDoneLabels(plan, doneMap);
+  var doneCount = plan.sessions.filter(function(s) { return s && doneMap[s.label]; }).length + extraDone.length;
+  var totalCount = plan.sessions.length + extraDone.length;
+  var remaining = orderRemainingSessions(plan, doneMap, lastWorkoutPlanType(state.data.workoutLog));
+  // 다 끝났으면 줄 자체를 비운다(숫자가 이미 말한다)
+  var remainLine = remaining.length
+    ? '<p class="text-[11px] font-mono text-stone-400 mt-2">' +
+        remaining.map(function(s) { return escapeHtml(s.label); }).join(' · ') + '</p>'
+    : '';
+  return '<div class="card-accent mb-4" role="button" tabindex="0" onclick="openWeekPlanFromHome()" style="cursor: pointer;">' +
+      '<div class="relative">' +
+        '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">이번 주 계획</p>' +
+        '<div class="flex items-center gap-2">' +
+          '<h2 class="font-bebas text-4xl">' + doneCount + ' / ' + totalCount + '</h2>' +
+          (plan.deload ? '<span class="week-tag">디로드</span>' : '') +
+        '</div>' +
+        remainLine +
+        idleLine +
+      '</div>' +
+    '</div>';
+}
+
+// ═══════════════════════════════════════════════
+// 운동 탭 — 이번 주 계획 (주간 화면)
+// 남은 세션 카드(지난번과 주동 부위가 안 겹치는 세션이 위) → 끝난 세션 줄 → 기본 루틴 한 줄.
+// 세로 스크롤 없이 한 화면(390×844)에 남은 5장 + 기본 루틴 줄이 들어와야 한다.
+// ═══════════════════════════════════════════════
+function renderWeekPlan() {
+  var plan = state.weekPlan;
+  if (!plan || !Array.isArray(plan.sessions)) return '';
+  var log = state.data.workoutLog;
+  var doneMap = weekPlanDoneMap(plan, log);
+  var remaining = orderRemainingSessions(plan, doneMap, lastWorkoutPlanType(log));
+  // 끝난 순서대로 (같은 날이면 계획 순서, 계획에서 빠진 끝난 세션은 그 뒤)
+  var doneItems = [];
+  plan.sessions.forEach(function(s, i) { if (s && doneMap[s.label]) doneItems.push({ label: s.label, i: i }); });
+  weekPlanExtraDoneLabels(plan, doneMap).forEach(function(l, j) { doneItems.push({ label: l, i: plan.sessions.length + j }); });
+  var doneOrdered = doneItems.sort(function(a, b) {
+    var byDate = doneMap[a.label].localeCompare(doneMap[b.label]);
+    return byDate !== 0 ? byDate : a.i - b.i;
+  }).map(function(x) { return x.label; });
+
+  // 카드를 누르면 openWeekSession(label). label 은 Claude 가 쓴 글자라 속성에 직접 넣지 않고
+  // 계획 안의 순번으로 가리킨다(core.js escapeHtml 주석 — JS 문자열 자리 탈출 방지).
+  var cards = remaining.map(function(s) {
+    var idx = plan.sessions.indexOf(s);
+    var exs = claudeWeekSessionExercises(plan, s);
+    var setCount = exs.reduce(function(n, ex) { return n + claudeWorkingSets(ex).length; }, 0);
+    return '<div class="week-session-card" role="button" tabindex="0" ' +
+        'onclick="openWeekSession(state.weekPlan.sessions[' + idx + '].label)">' +
+        '<p class="week-session-label">' + escapeHtml(s.label) + '</p>' +
+        '<p class="week-session-meta">' + exs.length + '종목 · ' + setCount + '세트</p>' +
+      '</div>';
+  }).join('');
+
+  var doneRows = doneOrdered.map(function(label) {
+    return '<div class="week-done-row">' +
+        icon('check', 14) +
+        '<span>' + escapeHtml(label) + ' · ' + weekdayKrOf(doneMap[label]) + '</span>' +
+      '</div>';
+  }).join('');
+
+  return '' +
+    '<div class="px-5 pt-12 screen-center">' +
+      '<div class="screen-center-inner">' +
+        '<div class="flex items-center gap-2 mb-3 px-1">' +
+          '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">이번 주</p>' +
+          (plan.deload ? '<span class="week-tag">디로드</span>' : '') +
+        '</div>' +
+        (cards ? '<div class="week-session-list">' + cards + '</div>' : '') +
+        (doneRows ? '<div class="week-done-list">' + doneRows + '</div>' : '') +
+        '<button class="week-basic-row" onclick="showBasicRoutine()">' +
+          '<span>기본 루틴</span>' +
+          '<span class="week-basic-arrow">' + icon('chevron', 16) + '</span>' +
+        '</button>' +
+      '</div>' +
+    '</div>';
+}
+
 // ═══════════════════════════════════════════════
 // 운동 탭 (STEP 1 — 부위 선택)
 // ═══════════════════════════════════════════════
@@ -149,11 +215,16 @@ function renderWorkout() {
     return renderWorkoutStep2();
   }
 
+  // 이번 주 계획이 있으면 주간 화면. 맨 아래 「기본 루틴」 줄로 부위 카드에 들어간다.
+  if (state.weekPlan && !state.workoutShowBasic) {
+    return renderWeekPlan();
+  }
+
   // STEP 1: 부위 선택 — 이 화면이 하는 일은 부위를 고르는 것 하나다.
   // 부위 카드 — 이름과 부위 설명만. 네 장이 한 화면에 들어와야 고르기가 한 번에 끝난다.
   // '이번 주 N' 배지와 '추천' 배지는 뺐다(사용자 결정) — 이번 주 횟수는 홈·기록 탭에 있다.
   function partCard(key, name, koreanName) {
-    return '<div class="body-part-card" onclick="selectBodyPart(\'' + key + '\')">' +
+    return '<div class="body-part-card" role="button" tabindex="0" onclick="selectBodyPart(\'' + key + '\')">' +
       '<p class="body-part-name">' + name + '</p>' +
       '<p class="body-part-desc">' + koreanName + '</p>' +
     '</div>';
@@ -163,18 +234,17 @@ function renderWorkout() {
   // 네 장이 스크롤 없이 한 화면에 들어와야 그게 한 번에 끝난다.
   // 카드를 화면 위에 붙이면 아래쪽 절반이 통째로 비어 화면이 미완성으로 보였다 →
   // 탭바 위 남은 영역의 세로 가운데에 둔다(글자 정렬은 왼쪽 그대로).
-  // Claude 앱이 저장한 오늘 루틴이 있을 때만 부위 카드 위에 한 줄. 한 번 열면 사라진다.
-  var claudeRow = state.claudeRoutine
-    ? '<button class="claude-plan-row mb-3" onclick="openClaudeRoutine()">' +
-        '<span class="claude-plan-text">' + escapeHtml(claudeRoutineRowText(state.claudeRoutine)) + '</span>' +
-        '<span class="claude-plan-arrow">' + icon('chevron', 16) + '</span>' +
+  // 이번 주 계획이 있는데 기본 루틴을 보는 중이면 맨 위에 되돌아가는 한 줄.
+  var backRow = state.weekPlan
+    ? '<button class="week-back-row mb-3" onclick="showWeekPlan()">' +
+        icon('arrowLeft', 16) + '<span>이번 주 계획</span>' +
       '</button>'
     : '';
 
   return '' +
     '<div class="px-5 pt-12 screen-center">' +
       '<div class="screen-center-inner">' +
-        claudeRow +
+        backRow +
         '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest mb-3 px-1">부위 선택</p>' +
         '<div class="body-part-grid">' +
           partCard('push', 'PUSH', '가슴 · 어깨 · 삼두') +
@@ -229,17 +299,47 @@ window.backToStep1 = function() {
   render();
 };
 
-// Claude 추천 줄 → 받은 루틴을 그대로 2단계에 띄운다 (한 번 열면 줄은 사라진다).
-window.openClaudeRoutine = function() {
-  var plan = state.claudeRoutine;
-  if (!plan) return;
-  state.generatedRoutine = claudeRoutineToGenerated(plan);
-  state.selectedBodyPart = plan.session;
+// 주간 세션 카드 → 그 세션을 그대로 2단계에 띄운다. 손으로 고친 편집본이 살아 있으면 그것을 연다.
+window.openWeekSession = function(label) {
+  var plan = state.weekPlan;
+  if (!plan || !Array.isArray(plan.sessions)) return;
+  var session = null;
+  plan.sessions.forEach(function(s) { if (s && s.label === label) session = s; });
+  if (!session) return;
+  var bodyPart = PLAN_TYPE_CATALOG[session.type];
+  state.generatedRoutine = {
+    source: 'claude',
+    planWeek: plan.weekStart,
+    planLabel: session.label,
+    planType: session.type,
+    planRev: session.updatedAt,     // 손 편집 기준값 — 열 때의 세션 updatedAt (saveWizard)
+    bodyPart: bodyPart,
+    headline: session.label,
+    note: session.note,
+    exercises: claudeWeekSessionExercises(plan, session)
+  };
+  state.selectedBodyPart = bodyPart;
   state.workoutWizardStep = 2;
-  setClaudeSyncState({ lastImportedRoutineId: plan.id });
-  state.claudeRoutine = null;
   saveWizard();
   render();
+};
+
+// 주간 화면 맨 아래 「기본 루틴」 → 부위 카드
+window.showBasicRoutine = function() {
+  state.workoutShowBasic = true;
+  render();
+};
+
+// 기본 루틴 화면 맨 위 「이번 주 계획」 → 주간 화면
+window.showWeekPlan = function() {
+  state.workoutShowBasic = false;
+  render();
+};
+
+// 홈 「이번 주 계획」 카드 → 운동 탭 주간 화면
+window.openWeekPlanFromHome = function() {
+  state.workoutShowBasic = false;
+  setTab('workout');
 };
 
 
@@ -335,6 +435,14 @@ window.startGeneratedRoutine = function() {
     }
   };
   if (isClaude) state.activeSession.source = 'claude';
+  // 주간 계획 세션: 기록 이름 = 세션 label, 끝난 세션 판정용 표식(planWeek·planLabel·planType)
+  if (r.planLabel) {
+    state.activeSession.sessionName = r.planLabel;
+    state.activeSession.sessionKr = r.planLabel;
+    state.activeSession.planWeek = r.planWeek;
+    state.activeSession.planLabel = r.planLabel;
+    state.activeSession.planType = r.planType;
+  }
   // FREE·AI 루틴은 세션 타입이 없을 수 있어, 종목 목록에서 웜업 부위를 유도한다(buildWarmupPlan 내부).
   attachWarmupToSession(state.activeSession);
   saveActiveSession();
@@ -776,37 +884,6 @@ window.endSession = function(fromBack) {
   finalizeSession();
 };
 
-// 사이클/주차 진행: "완료 세션 수" 기준(캘린더 아님). 며칠 쉬어도 진행도(weekSessionsDone)가
-// 유지되어 이어서 채울 수 있다 — 프로그램이 사용자를 기다린다(REMAKE-PLAN ③).
-// 이번 주차 완료 수가 목표(workoutFreq)에 도달하면 다음 주차로, 5주차(디로드) 완료 시 새 사이클.
-function advanceCycleIfWeekComplete() {
-  var profile = state.profile;
-  if (!profile) return;
-  var goal = profile.workoutFreq || 4;
-  var done = (profile.weekSessionsDone || 0) + 1; // 이번 세션 포함
-  if (done < goal) {
-    profile.weekSessionsDone = done; // 진행도 누적(주차 유지)
-    storage.set(KEYS.PROFILE, profile);
-    return;
-  }
-  // 목표 달성 → 다음 주차(또는 새 사이클), 진행도 리셋
-  var updated = advanceCycleOnSessionComplete(profile, done);
-  var newCycleStarted = updated.currentCycle > (profile.currentCycle || 1);
-  profile.currentCycle = updated.currentCycle;
-  profile.currentWeek = updated.currentWeek;
-  profile.cyclePhase = updated.cyclePhase;
-  profile.weekSessionsDone = 0;
-  storage.set(KEYS.PROFILE, profile);
-  if (newCycleStarted) {
-    state.data.cycleHistory = state.data.cycleHistory || [];
-    state.data.cycleHistory.unshift({ cycle: updated.currentCycle - 1, endedAt: getTodayStr() });
-    storage.set(KEYS.CYCLE_HISTORY, state.data.cycleHistory);
-    showToast('새 사이클 ' + updated.currentCycle + ' 시작');
-  } else {
-    showToast(updated.currentWeek + '주차로 진행 · ' + updated.cyclePhase);
-  }
-}
-
 // 세션 마무리: 통계 계산 + 저장 + 완료 화면
 function finalizeSession() {
   var session = state.activeSession;
@@ -903,6 +980,12 @@ function finalizeSession() {
     sets: completedSets,
     completed: true
   };
+  // 주간 계획 세션으로 한 운동 — 끝난 세션 판정(weekPlanDoneMap)과 스냅샷이 이 세 칸을 본다
+  if (session.planLabel) {
+    newWorkout.planWeek = session.planWeek;
+    newWorkout.planLabel = session.planLabel;
+    newWorkout.planType = session.planType;
+  }
   
   state.data.workoutLog.unshift(newWorkout);
   storage.set(KEYS.WORKOUT_LOG, state.data.workoutLog);
@@ -929,9 +1012,6 @@ function finalizeSession() {
 
   // ── 1RM rolling max 보정 (이번 세션 종목들; 상승 즉시·하락 느리게) ──
   reconcile1RMFromLog(exercisesDone.map(function(e) { return e.name; }));
-
-  // ── 사이클/주차 자동 진행 (그 주 목표 운동 완료 기준, 날짜로 안 넘김) ──
-  advanceCycleIfWeekComplete();
 
   // 완료 화면용 데이터 저장
   state._celebratePending = true; // 6-C① 축하 연출은 완료 첫 진입 1회만(평점 탭 재렌더 시 반복 방지)
@@ -3906,13 +3986,12 @@ function renderClaudeSyncSheet() {
 }
 
 // ═══════════════════════════════════════════════
-// 프로필 수정 모달 (묶음1): 기본(나이·키·체중) + 주간 운동 횟수
+// 프로필 수정 모달 (묶음1): 나이·키·체중
 // ═══════════════════════════════════════════════
 window.openProfileEditModal = function() {
   var p = state.profile || {};
   state.profileEdit = {
-    age: p.age, height: p.height, weight: p.weight,
-    workoutFreq: p.workoutFreq
+    age: p.age, height: p.height, weight: p.weight
   };
   state.profileEditModalOpen = true;
   render();
@@ -3936,8 +4015,7 @@ window.saveProfileEdit = function() {
   var fields = [
     { k: 'age', label: '나이', min: 10, max: 120, int: true },
     { k: 'height', label: '키(cm)', min: 100, max: 250 },
-    { k: 'weight', label: '체중(kg)', min: 25, max: 300 },
-    { k: 'workoutFreq', label: '주간 운동 횟수', min: 1, max: 14, int: true }
+    { k: 'weight', label: '체중(kg)', min: 25, max: 300 }
   ];
   for (var i = 0; i < fields.length; i++) {
     var f = fields[i];
@@ -3951,7 +4029,6 @@ window.saveProfileEdit = function() {
   state.profile.age = e.age;
   state.profile.height = e.height;
   state.profile.weight = e.weight;
-  state.profile.workoutFreq = e.workoutFreq;
   storage.set(KEYS.PROFILE, state.profile);
   state.profileEditModalOpen = false;
   state.profileEdit = null;
@@ -3984,7 +4061,6 @@ function renderProfileEditModal() {
       field('나이', 'age', '세', '1') +
       field('키', 'height', 'cm', '0.1') +
       field('체중', 'weight', 'kg', '0.1') +
-      field('주간 운동 횟수', 'workoutFreq', '회 / 주', '1') +
       '<button class="sheet-submit mt-2" onclick="saveProfileEdit()">저장</button>' +
       '<button class="mt-2" onclick="closeProfileEditModal()" style="width:100%;padding:12px;border-radius:14px;background:transparent;border:1px solid var(--bg-4);color:var(--text-soft);font-family:var(--font);font-weight:700;font-size:13px;">취소</button>' +
     '</div>' +
@@ -4282,9 +4358,6 @@ function renderMore() {
           '<div class="flex-1">' +
             '<p class="font-display font-bold text-base">사용자</p>' +
             '<p class="text-[11px] font-mono text-stone-500 mt-1">' + escapeHtml(profile.age) + '세 · ' + escapeHtml(profile.height) + 'cm · ' + escapeHtml(profile.weight) + 'kg</p>' +
-            '<div class="flex items-center gap-2 mt-1">' +
-              '<span class="text-[11px] font-mono text-stone-500">주 ' + (profile.workoutFreq || 4) + '회 운동</span>' +
-            '</div>' +
           '</div>' +
           '<div class="menu-arrow">' + icon('chevron', 18) + '</div>' +
         '</div>' +
@@ -4305,18 +4378,11 @@ function renderMore() {
         '</div>' +
       '</div>' +
 
-      // 내 데이터 — 사이클·1RM·데이터 백업·초기화를 한 목록으로
+      // 내 데이터 — 1RM·데이터 백업·초기화를 한 목록으로
       '<div>' +
         '<p class="section-label">내 데이터 · 백업</p>' +
         backupReminderHtml +
         '<div class="section-group">' +
-          '<div class="menu-row" style="cursor: default;">' +
-            '<div class="menu-icon-sm">' + icon('refresh', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">현재 사이클</p>' +
-              '<p class="text-[11px] font-mono text-stone-500 mt-0.5">Cycle ' + escapeHtml(profile.currentCycle) + ' · ' + escapeHtml(profile.cyclePhase) + ' · ' + escapeHtml(profile.currentWeek) + '/' + CYCLE_LENGTH + '주</p>' +
-            '</div>' +
-          '</div>' +
           '<div class="menu-row" onclick="openOneRMList()">' +
             '<div class="menu-icon-sm">' + icon('trophy', 18) + '</div>' +
             '<div class="menu-row-content">' +
@@ -4517,7 +4583,7 @@ function renderStats() {
     weekWorkoutData.push({ week: w === 0 ? '이번주' : 'W' + (4 - w), count: weekCount, isCurrent: w === 0 });
   }
   
-  var maxWeekCount = Math.max.apply(null, weekWorkoutData.map(function(w) { return w.count; }).concat([profile.workoutFreq]));
+  var maxWeekCount = Math.max.apply(null, weekWorkoutData.map(function(w) { return w.count; }).concat([state.weekPlan ? state.weekPlan.sessions.length : 1]));
   var weekBarHeight = 100;
   
   var weekBarsHtml = '';
@@ -4533,13 +4599,17 @@ function renderStats() {
       '</div>';
   });
   
-  // 부위별 분배 (전체 기간 또는 선택 기간)
-  var pushCount = workoutLog.filter(function(w) { return w.sessionKr === 'PUSH'; }).length;
-  var pullCount = workoutLog.filter(function(w) { return w.sessionKr === 'PULL'; }).length;
-  var legsCount = workoutLog.filter(function(w) { return w.sessionKr === 'LEGS'; }).length;
-  var upperCount = workoutLog.filter(function(w) { return w.sessionKr === 'UPPER'; }).length;
-  var freeCount = workoutLog.filter(function(w) { return w.sessionKr === 'FREE'; }).length;
-  var totalCount = pushCount + pullCount + legsCount + upperCount + freeCount;
+  // 부위별 분배 (전체 기간 또는 선택 기간). 주간 계획 운동은 이름이 label 이라 planType 으로 나눈다.
+  var PLAN_TYPE_KIND = { push: 'PUSH', pull: 'PULL', lower: 'LEGS', upper: 'UPPER', full: '전신' };
+  function kindOf(w) { return (w.planType && PLAN_TYPE_KIND[w.planType]) || w.sessionKr; }
+  function countKind(k) { return workoutLog.filter(function(w) { return kindOf(w) === k; }).length; }
+  var pushCount = countKind('PUSH');
+  var pullCount = countKind('PULL');
+  var legsCount = countKind('LEGS');
+  var upperCount = countKind('UPPER');
+  var fullCount = countKind('전신');
+  var freeCount = countKind('FREE');
+  var totalCount = pushCount + pullCount + legsCount + upperCount + fullCount + freeCount;
   
   // 0회 항목은 빈 막대로 자리만 차지한다 → 한 번이라도 한 타입만 보여준다.
   function partRow(name, count) {
@@ -4554,7 +4624,7 @@ function renderStats() {
     '</div>';
   }
 
-  var partsHtml = partRow('PUSH', pushCount) + partRow('PULL', pullCount) + partRow('LEGS', legsCount) + partRow('UPPER', upperCount) + partRow('FREE', freeCount);
+  var partsHtml = partRow('PUSH', pushCount) + partRow('PULL', pullCount) + partRow('LEGS', legsCount) + partRow('UPPER', upperCount) + partRow('전신', fullCount) + partRow('FREE', freeCount);
   var partsBlock = partsHtml
     ? '<div class="border-t pt-4 mt-5">' +
         '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest mb-3">세션 타입 분배</p>' +
@@ -4660,8 +4730,8 @@ function renderStats() {
         partsBlock +
       '</div>' +
 
-      // 부위별 주간 볼륨 (최근 2주)
-      volumeByPartCardHtml() +
+      // 이번 주 부위별 세트 (Claude 목표 / 실제)
+      weekSetsCardHtml() +
 
       // 유산소 요약(기록 있을 때만)
       cardioSummaryCardHtml(period) +
@@ -4714,153 +4784,61 @@ function renderStats() {
             : '') +
         '</div>' : '') +
       
-      // 사이클 카드는 홈 첫 화면에 이미 있다 → 여기서는 뺀다(같은 사실 두 번 금지).
 
     '</div>';
 }
 
 // ═══════════════════════════════════════════════
-// 부위별 주간 볼륨 카드 (STATS)
-//  - 기간 탭(state.statsPeriod)과 무관하게 항상 최근 2주 평균이다.
-//  - 상한 초과는 '과잉'이 아니라 '이득 완만' — 볼륨-근비대 곡선이 꺾이는 지점은 아직 확인된 적이 없다
-//    (Pelland 2025/2026, 67개 연구·2,058명: 기울기>0 사후확률 100%).
+// 이번 주 부위별 세트 카드 (STATS) — docs/weekly-plan.md 결정 7
+//  - 실제 = getWeekGroupSets(이번 주 월요일) — 스냅샷 weekSets 와 같은 숫자(본 세트, 주동 1 · 보조 0.5)
+//  - 목표 = 이번 주 계획의 targets (Claude 가 정한다). 계획이 없으면 실제만.
 // ═══════════════════════════════════════════════
-function volumeByPartCardHtml() {
-  var WEEKS = 2;
-  var log = (state.data && state.data.workoutLog) ? state.data.workoutLog : [];
-  if (!log.length) return '';
+function weekSetsCardHtml() {
+  var weekStart = getWeekStartStr(getTodayStr());
+  var actual = getWeekGroupSets(weekStart);
+  var plan = state.weekPlan;
+  var targets = (plan && plan.weekStart === weekStart && plan.targets && typeof plan.targets === 'object') ? plan.targets : {};
+  function fmt(n) { return (Math.round(n) === n) ? String(n) : n.toFixed(1); }
 
-  // 최소 표본 가드 — 두 조건을 **모두** 만족해야 판정한다.
-  //  (1) 첫 기록부터 오늘까지 14일 이상: 볼륨은 항상 2로 나눈 주간 평균이라 3일 쓴 사용자는
-  //      전 부위가 '부족'으로 보인다.
-  //  (2) 최근 2주 창 안에 운동이 2회 이상: (1)만 보면 1년 전에 한 번 기록한 복귀 사용자가
-  //      복귀 첫날 바로 전 부위 '부족' 빨간 배지를 보게 된다 — 가드가 막으려던 바로 그 오해다.
-  var dates = log.map(function(w) { return String(w.date || ''); }).filter(function(s) { return s; }).sort();
-  var todayD = new Date(getTodayStr() + 'T00:00:00');
-  var spanDays = 0;
-  if (dates.length > 0) {
-    var firstD = new Date(dates[0] + 'T00:00:00');
-    spanDays = Math.floor((todayD.getTime() - firstD.getTime()) / 86400000) + 1;
-  }
-  var windowStartStr = getDateStr(new Date(todayD.getTime() - WEEKS * 7 * 86400000));
-  var sessionsInWindow = dates.filter(function(d) { return d >= windowStartStr; }).length;
-  var enoughData = spanDays >= WEEKS * 7 && sessionsInWindow >= 2;
-
-  var split = getRecentVolumeSplitByPart(WEEKS);
-  var groupedFrac = groupVolumeBy(split.fractional);
-  var groupedDirect = groupVolumeBy(split.direct);
-
-  // 판정은 도메인의 getVolumeDiagnosis 한 곳에서만 — 프롬프트와 같은 버킷을 쓴다
-  var diag = getVolumeDiagnosis(split.fractional, WEEKS, split.direct);
-  var verdictOf = {};
-  var buckets = [
-    ['lacking',      '부족',      'var(--danger)',  'var(--danger-rgb)'],
-    ['belowOptimal', '하한 미달', 'var(--warn)',    'var(--warn-rgb)'],
-    ['optimal',      '적정',      'var(--success)', 'var(--success-rgb)'],
-    ['excessive',    '이득 완만', 'var(--purple)',  'var(--purple-rgb)']
-  ];
-  buckets.forEach(function(b) {
-    (diag[b[0]] || []).forEach(function(e) {
-      verdictOf[e.group] = { text: b[1], color: b[2], rgb: b[3] };
-    });
-  });
-
-  // 그룹별 행 (주간 평균 = 최근 2주 누적 / 2)
-  var rows = [];
-  var untouched = [];
+  var withTarget = [];
+  var noTarget = [];
   Object.keys(BODY_PART_GROUPS).forEach(function(g) {
-    var frac = (groupedFrac[g] || 0) / WEEKS;
-    if (frac <= 0) { untouched.push(BODY_PART_GROUPS[g].kr); return; }
-    var th = getVolumeThresholds(g);
-    rows.push({
-      kr: BODY_PART_GROUPS[g].kr,
-      frac: frac,
-      direct: (groupedDirect[g] || 0) / WEEKS,
-      th: th,
-      verdict: verdictOf[g] || null
-    });
+    var t = (typeof targets[g] === 'number' && targets[g] > 0) ? targets[g] : 0;
+    var a = actual[g] || 0;
+    if (!(t > 0) && !(a > 0)) return;
+    var row = { kr: BODY_PART_GROUPS[g].kr, actual: a, target: t };
+    (t > 0 ? withTarget : noTarget).push(row);
   });
+  withTarget.sort(function(x, y) { return (x.actual / x.target) - (y.actual / y.target); });
+  noTarget.sort(function(x, y) { return y.actual - x.actual; });
+  var rows = withTarget.concat(noTarget);
 
-  var head =
-    '<div class="flex items-center justify-between mb-1">' +
-      '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono">부위별 주간 볼륨</p>' +
-      '<p class="text-[11px] font-mono text-stone-500">최근 2주 평균</p>' +
-    '</div>';
-
-  if (rows.length === 0) {
+  var head = '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-3">이번 주 부위별 세트</p>';
+  if (!rows.length) {
     return '<div class="card mb-4">' + head +
-        '<p class="text-xs text-stone-500 font-mono text-center" style="padding: 16px 0;">최근 2주 세트 기록이 없어요</p>' +
+        '<p class="text-xs text-stone-500 font-mono text-center" style="padding: 16px 0;">이번 주 세트 기록이 없어요</p>' +
       '</div>';
   }
 
-  // 모자란 부위가 위로 (숫자는 그대로, 보는 순서만 바꾼다)
-  rows.sort(function(a, b) { return (a.frac / a.th.optimalLow) - (b.frac / b.th.optimalLow); });
+  // 한 카드 안 모든 줄이 같은 절대 눈금 — S = max(10, 모든 목표, 모든 실제). 목표는 세로 눈금으로.
+  var scale = Math.max.apply(null, [10].concat(rows.map(function(r) { return r.actual; }), rows.map(function(r) { return r.target; })));
+  var rowsHtml = rows.map(function(r) {
+    var pct = (r.actual / scale) * 100;
+    var color = (r.target > 0 && r.actual >= r.target) ? 'var(--success)' : 'var(--stone-400)';
+    var tick = r.target > 0
+      ? '<div class="week-set-tick" style="left: calc(min(' + ((r.target / scale) * 100).toFixed(1) + '%, 100% - 2px));"></div>'
+      : '';
+    return '<div class="week-set-row">' +
+        '<p class="week-set-name">' + escapeHtml(r.kr) + '</p>' +
+        '<div class="week-set-bar flex-1">' +
+          '<div class="week-set-fill" style="width: ' + pct.toFixed(1) + '%; background: ' + color + ';"></div>' +
+          tick +
+        '</div>' +
+        '<p class="week-set-num">' + fmt(r.actual) + (r.target > 0 ? ' / ' + fmt(r.target) : '') + '</p>' +
+      '</div>';
+  }).join('');
 
-  // 한 행 = 부위명 + 상태 배지 + 가로 막대(적정 범위 밴드) + 직접/간접 세트 수
-  function volRow(r) {
-    var color = 'var(--text-muted)';
-    var rgb = 'var(--muted-rgb)';
-    var pill = '';
-    if (enoughData && r.verdict) {
-      color = r.verdict.color;
-      rgb = r.verdict.rgb;
-      pill = '<span class="meal-status-pill" style="color: ' + color + '; background: rgba(' + rgb + ', 0.15);">' + r.verdict.text + '</span>';
-    }
-    // 눈금 상한 = 적정 상한 × 1.4 → 큰/작은 근육 모두 밴드가 같은 위치(36%~71%)에 와서 한눈에 비교된다
-    var scaleMax = r.th.optimalTop * 1.4;
-    var pctFrac = Math.min(100, (r.frac / scaleMax) * 100);
-    var pctDirect = Math.min(100, (r.direct / scaleMax) * 100);
-    var bandL = (r.th.optimalLow / scaleMax) * 100;
-    var bandR = (r.th.optimalTop / scaleMax) * 100;
-
-    return '<div style="margin-bottom: 12px;">' +
-      '<div class="flex items-center justify-between mb-1">' +
-        '<p class="text-xs font-display font-bold">' + r.kr + '</p>' +
-        pill +
-      '</div>' +
-      '<div class="progress-bg" style="position: relative; height: 9px;">' +
-        // 적정 범위 밴드
-        '<div style="position: absolute; top: 0; bottom: 0; left: ' + bandL.toFixed(1) + '%; width: ' + (bandR - bandL).toFixed(1) + '%; background: rgba(var(--success-rgb), 0.16);"></div>' +
-        // 간접 포함(분할환산) — 연한 막대
-        '<div style="position: absolute; top: 0; bottom: 0; left: 0; width: ' + pctFrac.toFixed(1) + '%; border-radius: 9999px; background: rgba(' + rgb + ', 0.38);"></div>' +
-        // 직접 세트(primary) — 진한 막대
-        '<div style="position: absolute; top: 0; bottom: 0; left: 0; width: ' + pctDirect.toFixed(1) + '%; border-radius: 9999px; background: ' + color + ';"></div>' +
-        // 적정 하한/상한 눈금
-        '<div style="position: absolute; top: 0; bottom: 0; left: ' + bandL.toFixed(1) + '%; width: 1px; background: rgba(var(--white-rgb), 0.45);"></div>' +
-        '<div style="position: absolute; top: 0; bottom: 0; left: ' + bandR.toFixed(1) + '%; width: 1px; background: rgba(var(--white-rgb), 0.45);"></div>' +
-      '</div>' +
-      '<div class="flex items-center justify-between mt-1">' +
-        '<p class="text-[11px] font-mono text-stone-500">직접 ' + r.direct.toFixed(1) + ' · 간접 포함 ' + r.frac.toFixed(1) + '세트/주</p>' +
-        '<p class="text-[11px] font-mono text-stone-600 flex-shrink-0">적정 ' + r.th.optimalLow + '~' + r.th.optimalTop + '</p>' +
-      '</div>' +
-    '</div>';
-  }
-
-  // 판정 보류 안내는 접어 둔다 — 판정 배지가 없다는 것 자체가 이미 신호다.
-  var guardHtml = enoughData ? '' :
-    noteBlock('아직 판단하기 일러요 — 세트 수만 보여줘요',
-      '부족·적정 판정은 기록 2주치부터예요.');
-
-  // 직접 세트 부족(환산은 찼지만 직접 고립이 부족한 부위) — 코치 프롬프트와 같은 diag.directShort 사용(M1)
-  var directShortHtml = '';
-  if (enoughData && diag.directShort && diag.directShort.length > 0) {
-    var dsText = '직접 세트 부족: ' + diag.directShort.map(function(e) {
-      return e.label + ' ' + e.direct.toFixed(1);
-    }).join(' · ');
-    if (dsText.length > 40) {
-      dsText = '직접 세트 부족: ' + diag.directShort.map(function(e) { return e.label; }).join(' · ');
-    }
-    directShortHtml = '<p class="text-[11px] font-mono mt-2" style="color:var(--warn)">' + dsText + '</p>';
-  }
-
-  return '<div class="card mb-4">' + head +
-      guardHtml +
-      rows.map(volRow).join('') +
-      directShortHtml +
-      (untouched.length > 0 ? '<p class="text-[11px] font-mono text-stone-600 mt-2">주 0세트: ' + untouched.join(' · ') + '</p>' : '') +
-      noteBlock('이 범위는 어디서 왔나요?',
-        '기준은 평균이라 본인 반응은 다를 수 있어요. 간접 세트에서 보조근은 0.5세트로 쳐요.') +
-    '</div>';
+  return '<div class="card mb-4">' + head + rowsHtml + '</div>';
 }
 
 
@@ -6094,6 +6072,8 @@ window.setTab = function(tabId, fromNav) {
   console.log('[setTab] ' + tabId + ' - 운동:' + state.data.workoutLog.length);
 
   // 운동 탭 진입 시 마법사는 이전 진행 단계를 그대로 유지 (저장된 state 복원됨)
+  // 다른 탭으로 옮기면 기본 루틴 보기는 풀린다 — 다시 오면 이번 주 계획부터.
+  if (tabId !== state.currentTab) state.workoutShowBasic = false;
   state.currentTab = tabId;
   // 뒤로가기용 탭 방문 순서 기록 (fromNav=뒤로가기가 부른 경우는 기록 안 함)
   if (!fromNav) {
@@ -6162,6 +6142,8 @@ function getTopLayer() {
   if (state.cardio && state.cardio.phase === 'running') return 'cardioSession';
   // 루틴 만들기 마법사 (운동 탭 내부 단계). STEP1은 탭 자체라 'tab'으로 처리.
   if (state.currentTab === 'workout' && state.workoutWizardStep === 2) return 'wizard2';
+  // 이번 주 계획이 있는데 기본 루틴(부위 카드)을 보는 중 → 뒤로 = 주간 화면
+  if (state.currentTab === 'workout' && state.weekPlan && state.workoutShowBasic) return 'weekBasic';
   // 일반 탭 / 루트(홈)
   if (state.currentTab !== 'home') return 'tab';
   return 'root';
@@ -6203,6 +6185,7 @@ function navBack() {
     case 'cardioRpe': window.submitCardioRpe(null); break;
     // 마법사 단계
     case 'wizard2': backToStep1(); break;
+    case 'weekBasic': showWeekPlan(); break;
     // 일반 탭 → 방문 순서상 직전 탭으로
     case 'tab': {
       var stack = state._navTabStack;
@@ -6289,6 +6272,29 @@ function ensureBackTrap() {
       try { history.back(); } catch (e) {}           // 홈에서 종료 → 실제로 앱을 떠난다
     }
   });
+})();
+
+// ═══════════════════════════════════════════════
+// 키보드 완전 조작 — role="button" 인 div(홈 카드·세션 카드·부위 카드·종목 줄 등)를 Enter/Space 로 누른다.
+// 입력칸·진짜 버튼은 브라우저가 알아서 하므로 건드리지 않는다. 자기 onkeydown 이 이미 처리했으면
+// (preventDefault) 두 번 누르지 않는다.
+// ═══════════════════════════════════════════════
+function handleRoleButtonKeydown(e) {
+  if (!e || e.defaultPrevented) return;
+  if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+  var t = e.target;
+  if (!t || typeof t.closest !== 'function') return;
+  var tag = String(t.tagName || '').toUpperCase();
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') return;
+  var el = t.closest('[role="button"]');
+  if (!el || typeof el.click !== 'function') return;
+  e.preventDefault();
+  el.click();
+}
+
+(function() {
+  if (typeof document === 'undefined' || !document || typeof document.addEventListener !== 'function') return;
+  document.addEventListener('keydown', handleRoleButtonKeydown);
 })();
 
 // ═══════════════════════════════════════════════

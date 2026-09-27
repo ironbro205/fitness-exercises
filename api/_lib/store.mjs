@@ -6,8 +6,12 @@
 // @vercel/blob is imported dynamically inside the Blob branch so zero-dependency tests run without node_modules.
 
 export const KEY_SNAPSHOT = 'fitness/snapshot.json';
-export const KEY_PLAN_ROUTINE = 'fitness/plan-routine.json';
 export const KEY_PLAN_CARDIO = 'fitness/plan-cardio.json';
+
+// One weekly weight plan per week: 'fitness/week/<Monday YYYY-MM-DD>.json'.
+export function weekKey(weekStart) {
+  return 'fitness/week/' + weekStart + '.json';
+}
 
 var memoryMap = new Map();
 
