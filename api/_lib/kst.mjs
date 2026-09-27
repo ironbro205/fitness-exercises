@@ -20,3 +20,23 @@ export function weekdayKr(dateStr) {
   if (isNaN(t)) return '';
   return WEEKDAYS[new Date(t).getUTCDay()];
 }
+
+// Calendar arithmetic on 'YYYY-MM-DD' strings (UTC-based, so the device/server time zone never matters).
+function parseDay(dateStr) {
+  var t = Date.parse(String(dateStr) + 'T00:00:00Z');
+  if (isNaN(t)) throw new Error('bad date string: ' + dateStr);
+  return new Date(t);
+}
+
+// 'YYYY-MM-DD' n days after dateStr (n may be negative).
+export function kstAddDays(dateStr, n) {
+  var d = parseDay(dateStr);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+// Monday of the Mon–Sun week containing dateStr. Sunday belongs to the week that started 6 days earlier.
+export function kstWeekStart(dateStr) {
+  var dow = parseDay(dateStr).getUTCDay(); // 0 = Sunday
+  return kstAddDays(dateStr, dow === 0 ? -6 : 1 - dow);
+}

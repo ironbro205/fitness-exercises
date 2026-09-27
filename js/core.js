@@ -20,14 +20,17 @@ var KEYS = {
   ACTIVE_CARDIO_RUN: 'fitness_active_cardio_run',
   REST_TIMER: 'fitness_rest_timer',
   WORKOUT_WIZARD: 'fitness_workout_wizard',
-  CYCLE_HISTORY: 'fitness_cycle_history',
   LAST_BACKUP: 'fitness_last_backup',
   // 종목별 사용자 지정 세트법 { "핵 스쿼트": "straight", ... }. 없으면 클래스 기본값(EXERCISE_CLASS_RULES.scheme).
   SET_SCHEMES: 'fitness_set_schemes',
   // Claude 커넥터 연결 코드 (이 기기 전용 · 백업 제외). js/ai.js
   SYNC_TOKEN: 'fitness_sync_token',
-  // 커넥터 동기화 상태 { lastUploadAt, lastUploadHash, lastImportedRoutineId, lastImportedCardioId } (백업 제외)
-  CLAUDE_SYNC: 'fitness_claude_sync'
+  // 커넥터 동기화 상태 { lastUploadAt, lastUploadHash, lastImportedCardioId } (백업 제외)
+  CLAUDE_SYNC: 'fitness_claude_sync',
+  // 이번 주 계획 WeekPlan (서버에서 받아 온 것 · 백업 제외). docs/weekly-plan.md
+  WEEK_PLAN: 'fitness_week_plan',
+  // 주간 세션 손 편집 { 'weekStart|label': { rev: 세션 updatedAt, exercises } } (백업 제외)
+  WEEK_EDITS: 'fitness_week_edits'
 };
 
 var storage = {
@@ -131,6 +134,14 @@ function saveWizard() {
     selectedBodyPart: state.selectedBodyPart,
     generatedRoutine: state.generatedRoutine
   });
+  // 주간 세션을 2단계에서 손으로 고치면 그 세션에 남긴다. rev = **열 때의** 세션 updatedAt(planRev) —
+  // 연 채로 Claude 가 세션을 다시 저장해도 옛 편집이 새 판을 덮지 않는다(다시 열면 새 원본).
+  var r = state.generatedRoutine;
+  if (r && r.planLabel && r.planWeek) {
+    var edits = storage.get(KEYS.WEEK_EDITS, {}) || {};
+    edits[r.planWeek + '|' + r.planLabel] = { rev: r.planRev, exercises: r.exercises };
+    storage.set(KEYS.WEEK_EDITS, edits);
+  }
 }
 function clearWizard() {
   storage.set(KEYS.WORKOUT_WIZARD, null);
@@ -162,7 +173,7 @@ var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v70';
+var APP_VERSION = 'v71';
 // 백업에 담지 않는 키. 두 부류:
 // (1) 로컬 전용·민감 → 복원해도 그대로 보존 (Claude 연결 코드·동기화 상태)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
@@ -170,7 +181,9 @@ var APP_VERSION = 'v70';
 // 옛 백업 파일에 들어 있어도 sanitizeBackupData 가 알려진 키만 골라 담으므로 조용히 무시된다.
 var BACKUP_LOCAL_ONLY_KEYS = [
   KEYS.SYNC_TOKEN,         // 연결 코드 — 새 브라우저에서 더보기 > Claude 연결에 다시 넣는다
-  KEYS.CLAUDE_SYNC         // 이 기기의 전송·가져오기 기록
+  KEYS.CLAUDE_SYNC,        // 이 기기의 전송·가져오기 기록
+  KEYS.WEEK_PLAN,          // 이번 주 계획 — 서버에서 다시 받는다
+  KEYS.WEEK_EDITS          // 주간 세션 손 편집
 ];
 var BACKUP_TRANSIENT_KEYS = [
   KEYS.ACTIVE_SESSION,     // 진행 중 세션
@@ -268,7 +281,7 @@ function parseBackupFile(input) {
 
 // 백업에 담기는 "목록형" 키 (모양 검사·빈 파일 판단에 함께 쓴다)
 var BACKUP_LIST_KEYS = [KEYS.WORKOUT_LOG, KEYS.CARDIO_LOG, KEYS.BODY_LOG, KEYS.PERSONAL_RECORDS,
-                        KEYS.CONDITION_LOG, KEYS.CYCLE_HISTORY];
+                        KEYS.CONDITION_LOG];
 
 // 파일 안의 값들을 저장해도 안전한 형태로 정리 (알려진 키만, 종류별 규칙 적용)
 function sanitizeBackupData(raw) {
@@ -371,7 +384,7 @@ function sanitizeRestoredOneRM(map) {
   return out;
 }
 
-// 기본 프로필 "복사본" — 전역 DEFAULT_PROFILE 을 그대로 state 에 물리면 사이클 정규화가
+// 기본 프로필 "복사본" — 전역 DEFAULT_PROFILE 을 그대로 state 에 물리면 프로필 수정이
 // 전역 기본값을 통째로 바꿔버린다(그 뒤로는 앱 어디서든 오염된 기본값을 쓰게 됨).
 function cloneDefaultProfile() {
   var copy = {};
@@ -428,7 +441,7 @@ function restoreFromBackup(input) {
       var val = parsed.data[key];
       if (val === undefined) {
         // 백업에 없는 항목 → 지움(진짜 덮어쓰기). 단 프로필은 비워두면 안 된다 —
-        // 저장된 프로필이 없으면 앱이 기본값을 물고 돌면서 나이·키·사이클이 매번 초기화된다.
+        // 저장된 프로필이 없으면 앱이 기본값을 물고 돌면서 나이·키·체중이 매번 초기화된다.
         if (key === KEYS.PROFILE) {
           if (!storage.set(key, cloneDefaultProfile())) failed = true;
           return;
@@ -553,6 +566,30 @@ function getKstHour(d) {
   return new Date(d.getTime() + 9 * 60 * 60 * 1000).getUTCHours();
 }
 
+// ── 주 계산 (KST 날짜 문자열끼리 · 기기 시간대 무관) — 주는 월요일 시작 ──
+// 그 날짜가 속한 주의 월요일 'YYYY-MM-DD'. 일요일은 6일 전 월요일.
+function getWeekStartStr(dateStr) {
+  var t = Date.parse(String(dateStr) + 'T00:00:00Z');
+  if (isNaN(t)) return dateStr;
+  var dow = new Date(t).getUTCDay();              // 0=일 … 6=토
+  var back = dow === 0 ? 6 : dow - 1;
+  return new Date(t - back * 86400000).toISOString().split('T')[0];
+}
+
+// 'YYYY-MM-DD' + n일
+function addDaysStr(dateStr, n) {
+  var t = Date.parse(String(dateStr) + 'T00:00:00Z');
+  if (isNaN(t)) return dateStr;
+  return new Date(t + n * 86400000).toISOString().split('T')[0];
+}
+
+// 'YYYY-MM-DD' → '월' 같은 요일 한 글자
+function weekdayKrOf(dateStr) {
+  var t = Date.parse(String(dateStr) + 'T00:00:00Z');
+  if (isNaN(t)) return '';
+  return ['일', '월', '화', '수', '목', '금', '토'][new Date(t).getUTCDay()];
+}
+
 function fmtDate(d) {
   if (!d) d = new Date();
   var dt = new Date(d);
@@ -598,7 +635,7 @@ function noteBlock(summary, detailHtml) {
 var state = {
   currentTab: 'home',
   profile: null,
-  data: { workoutLog: [], cardioLog: [], personalRecords: [], bodyLog: [], conditionLog: [], cycleHistory: [] },
+  data: { workoutLog: [], cardioLog: [], personalRecords: [], bodyLog: [], conditionLog: [] },
   // 운동 세션 진행 중 상태
   activeSession: null,
   editingSet: null,
@@ -629,8 +666,10 @@ var state = {
   workoutWizardStep: 1,
   selectedBodyPart: null,
   generatedRoutine: null,
-  // Claude 커넥터 (js/ai.js) — 오늘 받아 온, 아직 열지 않은 계획. 저장하지 않는다(열 때마다 다시 받는다).
-  claudeRoutine: null,
+  // 이번 주 계획 (js/ai.js 가 받아 KEYS.WEEK_PLAN 에 둔다). 없으면 운동 탭은 기본 부위 카드.
+  weekPlan: null,
+  workoutShowBasic: false,      // 계획이 있어도 기본 루틴(부위 카드)을 보는 중 — 저장 안 함
+  // Claude 커넥터 (js/ai.js) — 오늘 받아 온, 아직 열지 않은 유산소. 저장하지 않는다(열 때마다 다시 받는다).
   claudeCardio: null,
   claudeSyncSheetOpen: false,   // 더보기 > Claude 연결 시트
   claudeSyncInput: '',
@@ -801,22 +840,32 @@ function init() {
   }
 
   // 저장된 프로필이 없으면 기본값을 "복사해서" 쓴다 — 전역 DEFAULT_PROFILE 을 그대로 물면
-  // 바로 아래 사이클 정규화가 전역 기본값을 오염시킨다.
+  // 프로필 수정이 전역 기본값을 오염시킨다.
   state.profile = storage.get(KEYS.PROFILE, null) || cloneDefaultProfile();
   state.data = {
     workoutLog: storage.get(KEYS.WORKOUT_LOG, []),
     cardioLog: storage.get(KEYS.CARDIO_LOG, []),
     personalRecords: storage.get(KEYS.PERSONAL_RECORDS, []),
     bodyLog: storage.get(KEYS.BODY_LOG, []),
-    conditionLog: storage.get(KEYS.CONDITION_LOG, []),
-    cycleHistory: storage.get(KEYS.CYCLE_HISTORY, [])
+    conditionLog: storage.get(KEYS.CONDITION_LOG, [])
   };
 
-  // 사이클 필드 정규화 (구 7주/4단계 데이터 → 5주 빌드/디로드). cyclePhase는 주차에서 파생.
-  if (state.profile) {
-    if (!state.profile.currentCycle) state.profile.currentCycle = 1;
-    if (!state.profile.currentWeek || state.profile.currentWeek > CYCLE_LENGTH) state.profile.currentWeek = 1;
-    state.profile.cyclePhase = getPhaseByWeek(state.profile.currentWeek);
+  // 이번 주 계획 — 이번 주(월요일 기준) 것이 아니면 버린다. 손 편집도 이번 주 것만 남긴다.
+  var thisWeekStart = getWeekStartStr(getTodayStr());
+  var savedWeek = storage.get(KEYS.WEEK_PLAN, null);
+  if (savedWeek && typeof savedWeek === 'object' && savedWeek.weekStart === thisWeekStart && Array.isArray(savedWeek.sessions)) {
+    state.weekPlan = savedWeek;
+  } else {
+    state.weekPlan = null;
+    if (savedWeek) { try { localStorage.removeItem(KEYS.WEEK_PLAN); } catch (e) {} }
+  }
+  var weekEdits = storage.get(KEYS.WEEK_EDITS, null);
+  if (weekEdits && typeof weekEdits === 'object') {
+    var editsChanged = false;
+    Object.keys(weekEdits).forEach(function(k) {
+      if (k.split('|')[0] !== thisWeekStart) { delete weekEdits[k]; editsChanged = true; }
+    });
+    if (editsChanged) storage.set(KEYS.WEEK_EDITS, weekEdits);
   }
 
   // 설정 로드

@@ -114,13 +114,73 @@ test('snapshot — 올바르면 200, 저장소에 들어간다', async () => {
   assert.deepEqual(await storeMod.getStore().getJSON(storeMod.KEY_SNAPSHOT), snap);
 });
 
+test('snapshot — 새 선택 필드(planWeek·planLabel·planType·weekSets·muscleWeights)가 있어도 200', async () => {
+  storeMod.resetMemoryStore();
+  var snap = validSnapshot();
+  Object.assign(snap.workouts[0], { planWeek: '2026-09-21', planLabel: '상체 A', planType: 'upper' });
+  snap.weekSets = { weekStart: '2026-09-21', byGroup: { chest: 6, triceps: 1.5 } };
+  snap.muscleWeights = { '벤치프레스': { chest: 1, triceps: 0.5, shoulders_front: 0.5 } };
+  var res = await snapshotMod.default.fetch(post(snap, TOKEN));
+  assert.equal(res.status, 200);
+  assert.deepEqual(await storeMod.getStore().getJSON(storeMod.KEY_SNAPSHOT), snap);
+  var empty = validSnapshot();
+  empty.weekSets = { weekStart: '2026-09-21', byGroup: {} };
+  empty.muscleWeights = {};
+  assert.equal((await snapshotMod.default.fetch(post(empty, TOKEN))).status, 200);
+});
+
+test('snapshot — plan 필드가 null이어도 200 (없는 것과 같게)', async () => {
+  storeMod.resetMemoryStore();
+  var snap = validSnapshot();
+  Object.assign(snap.workouts[0], { planWeek: null, planLabel: null, planType: null });
+  var res = await snapshotMod.default.fetch(post(snap, TOKEN));
+  assert.equal(res.status, 200);
+  assert.deepEqual(await storeMod.getStore().getJSON(storeMod.KEY_SNAPSHOT), snap);
+});
+
+test('snapshot — 세트 drop은 선택: true/false면 200, boolean이 아니면 400', async () => {
+  storeMod.resetMemoryStore();
+  var snap = validSnapshot();
+  snap.workouts[0].exercises[0].sets.push({ weight: 40, reps: 12, warmup: false, drop: true });
+  snap.olderLastPerformed = [{ name: '딥스', date: '2026-06-01', assist: false, sets: [{ weight: null, reps: 6, warmup: false, drop: false }] }];
+  assert.equal((await snapshotMod.default.fetch(post(snap, TOKEN))).status, 200);
+  for (var v of ['yes', 1, null]) {
+    var bad = validSnapshot();
+    bad.workouts[0].exercises[0].sets[0].drop = v;
+    assert.equal((await snapshotMod.default.fetch(post(bad, TOKEN))).status, 400, 'drop=' + v);
+  }
+});
+
+test('snapshot — 새 선택 필드의 모양이 틀리면 400', async () => {
+  storeMod.resetMemoryStore();
+  function withWorkout(extra) { var s = validSnapshot(); Object.assign(s.workouts[0], extra); return s; }
+  var bad = [
+    withWorkout({ planWeek: 20260921 }),
+    withWorkout({ planLabel: 5 }),
+    withWorkout({ planType: ['upper'] }),
+    Object.assign(validSnapshot(), { weekSets: [] }),
+    Object.assign(validSnapshot(), { weekSets: null }),
+    Object.assign(validSnapshot(), { weekSets: { weekStart: 1, byGroup: {} } }),
+    Object.assign(validSnapshot(), { weekSets: { weekStart: '2026-09-21' } }),
+    Object.assign(validSnapshot(), { weekSets: { weekStart: '2026-09-21', byGroup: { chest: '6' } } }),
+    Object.assign(validSnapshot(), { muscleWeights: [] }),
+    Object.assign(validSnapshot(), { muscleWeights: { '벤치프레스': 1 } }),
+    Object.assign(validSnapshot(), { muscleWeights: { '벤치프레스': { chest: '1' } } })
+  ];
+  for (var i = 0; i < bad.length; i++) {
+    var res = await snapshotMod.default.fetch(post(bad[i], TOKEN));
+    assert.equal(res.status, 400, 'case ' + i);
+  }
+  assert.equal(await storeMod.getStore().getJSON(storeMod.KEY_SNAPSHOT), null);
+});
+
 test('snapshot — POST 외에는 405', async () => {
   var res = await snapshotMod.default.fetch(new Request('http://localhost/api/snapshot', { headers: { Authorization: 'Bearer ' + TOKEN } }));
   assert.equal(res.status, 405);
   assertNoStore(res);
 });
 
-test('plan — 401, 저장 전 null, 저장 뒤 오늘 것', async () => {
+test('plan — 401, 저장 전 null, 저장 뒤 {week: 이번 주 계획, cardio: 오늘 것}, routine 없음', async () => {
   storeMod.resetMemoryStore();
   var r401 = await planMod.default.fetch(getPlan('nope'));
   assert.equal(r401.status, 401);
@@ -129,30 +189,39 @@ test('plan — 401, 저장 전 null, 저장 뒤 오늘 것', async () => {
   var empty = await planMod.default.fetch(getPlan(TOKEN));
   assert.equal(empty.status, 200);
   assertNoStore(empty);
-  assert.deepEqual(await empty.json(), { routine: null, cardio: null });
+  assert.deepEqual(await empty.json(), { week: null, cardio: null });
 
   var store = storeMod.getStore();
   await store.setJSON(storeMod.KEY_SNAPSHOT, validSnapshot());
   var tools = toolsMod.createTools({ store: store });
-  var saved = await tools.saveTodayRoutine({ session: 'push', title: '오늘', exercises: [{ name: '벤치프레스', sets: [{ weight: 60, reps: '8-10' }] }] });
-  assert.ok(!saved.isError);
+  var session = { label: '상체 A', type: 'upper', exercises: [{ name: '벤치프레스', sets: [{ weight: 60, reps: '8-10' }] }] };
+  var next = await tools.saveWeekPlan({ week: 'next', days: 3, targets: {}, sessions: [Object.assign({}, session, { label: '다음 주' })] });
+  assert.ok(!next.isError, next.content[0].text);
+  var onlyNext = await (await planMod.default.fetch(getPlan(TOKEN))).json();
+  assert.equal(onlyNext.week, null, '다음 주 계획은 오지 않는다');
+
+  var saved = await tools.saveWeekPlan({ week: 'this', days: 4, targets: { chest: 10 }, sessions: [session] });
+  assert.ok(!saved.isError, saved.content[0].text);
   await tools.saveTodayCardio({ mode: 'walk', title: '걷기', segments: [{ type: 'walk', sec: 600, speed: 5, incline: 6 }] });
 
   var res = await planMod.default.fetch(getPlan(TOKEN));
   assert.equal(res.status, 200);
+  assertNoStore(res);
   var body = await res.json();
-  assert.equal(body.routine.title, '오늘');
-  assert.equal(body.routine.exercises[0].sets[0].reps, '8-10');
+  assert.deepEqual(Object.keys(body).sort(), ['cardio', 'week']);
+  assert.ok(!('routine' in body));
+  assert.equal(body.week.weekStart, kstMod.kstWeekStart(kstMod.kstDateStr(new Date())));
+  assert.equal(body.week.sessions[0].label, '상체 A');
+  assert.equal(body.week.sessions[0].exercises[0].sets[0].reps, '8-10');
   assert.equal(body.cardio.segments[0].incline, 6);
 
-  // A plan dated another day is hidden.
-  var old = await store.getJSON(storeMod.KEY_PLAN_ROUTINE);
+  // A cardio plan dated another day is hidden.
+  var old = await store.getJSON(storeMod.KEY_PLAN_CARDIO);
   old.date = '2000-01-01';
-  await store.setJSON(storeMod.KEY_PLAN_ROUTINE, old);
-  var res2 = await planMod.default.fetch(getPlan(TOKEN));
-  var body2 = await res2.json();
-  assert.equal(body2.routine, null);
-  assert.equal(body2.cardio.title, '걷기');
+  await store.setJSON(storeMod.KEY_PLAN_CARDIO, old);
+  var body2 = await (await planMod.default.fetch(getPlan(TOKEN))).json();
+  assert.equal(body2.cardio, null);
+  assert.equal(body2.week.sessions[0].label, '상체 A');
 });
 
 test('plan — GET 외에는 405', async () => {

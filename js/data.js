@@ -6,12 +6,7 @@
 var DEFAULT_PROFILE = {
   age: 37,
   height: 170,
-  weight: 77.5,
-  workoutFreq: 4,
-  currentCycle: 1,
-  currentWeek: 1,
-  cyclePhase: '빌드',
-  weekSessionsDone: 0
+  weight: 77.5
 };
 
 // ═══════════════════════════════════════════════
@@ -762,10 +757,27 @@ var BODY_PART_GROUPS = {
   adductors:       { kr: '내전근',     subParts: ['adductors'], size: 'small' },
   // 종아리: 어떤 종목도 calves를 보조근(secondary)으로 두지 않아 복합운동 간접자극이 거의 0 →
   // '작은 근육=간접자극으로 목표 낮춤' 전제가 성립 안 함. 볼륨 목표는 큰 근육 수준으로 둔다(고볼륨 내성).
-  // 이 size 값은 해부학적 크기가 아니라 '직접 볼륨 목표' 분류이며, getVolumeDiagnosis·ai.js 볼륨 임계가 함께 참조. 근거: RP/Schoenfeld.
+  // 이 size 값은 해부학적 크기가 아니라 '직접 볼륨 목표' 분류다. 근거: RP/Schoenfeld.
   calves:          { kr: '종아리',     subParts: ['calves'], size: 'large' },
   abs:             { kr: '복근',       subParts: ['abs', 'obliques'], size: 'small' }
 };
+
+// 주간 계획(docs/weekly-plan.md) — 세션 type → 스냅샷 종목 목록(catalog) 키
+var PLAN_TYPE_CATALOG = { full: 'free', upper: 'upper', lower: 'legs', push: 'push', pull: 'pull' };
+// 세션 type → 주동 부위 그룹 (운동 탭 정렬의 겹침 판정용). upper = push ∪ pull, full = 14개 전부.
+var PLAN_TYPE_GROUPS = (function() {
+  var push = ['chest', 'shoulders_front', 'shoulders_side', 'triceps'];
+  var pull = ['lats', 'upper_back', 'biceps', 'shoulders_rear'];
+  return {
+    push: push,
+    pull: pull,
+    upper: push.concat(pull),
+    lower: ['quads', 'hamstrings', 'glutes', 'adductors', 'calves'],
+    full: Object.keys(BODY_PART_GROUPS)
+  };
+})();
+// 옛 운동 기록(기본 루틴)의 session 값 → 세션 type
+var LEGACY_SESSION_PLAN_TYPE = { push: 'push', pull: 'pull', legs: 'lower', upper: 'upper', free: 'full' };
 
 // 부위 한국어
 var BODY_PART_KR = {

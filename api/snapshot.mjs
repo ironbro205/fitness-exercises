@@ -44,17 +44,33 @@ function isDate(v) { return isStr(v) && DATE_RE.test(v); }
 function arrOf(v, pred) { return Array.isArray(v) && v.every(pred); }
 
 function isSet(s) {
-  return isObj(s) && numOrNull(s.weight) && numOrNull(s.reps) && typeof s.warmup === 'boolean';
+  return isObj(s) && numOrNull(s.weight) && numOrNull(s.reps) && typeof s.warmup === 'boolean' &&
+    optional(s.drop, isBool);
 }
 
 function isExercise(e) {
   return isObj(e) && isStr(e.name) && typeof e.assist === 'boolean' && arrOf(e.sets, isSet);
 }
 
+// Optional field: absent is fine (older app), present must pass pred.
+function optional(v, pred) { return v === undefined || pred(v); }
+function isBool(v) { return typeof v === 'boolean'; }
+function strOrNull(v) { return v === null || isStr(v); }
+function objOf(v, pred) { return isObj(v) && Object.keys(v).every(function (k) { return pred(v[k]); }); }
+
 function isWorkout(w) {
   return isObj(w) && isDate(w.date) && isStr(w.session) && isStr(w.sessionName) &&
     numOrNull(w.durationMin) && numOrNull(w.rpe) && numOrNull(w.condition) &&
-    arrOf(w.exercises, isExercise);
+    arrOf(w.exercises, isExercise) &&
+    optional(w.planWeek, strOrNull) && optional(w.planLabel, strOrNull) && optional(w.planType, strOrNull);
+}
+
+function isWeekSets(v) {
+  return isObj(v) && isStr(v.weekStart) && objOf(v.byGroup, isNum);
+}
+
+function isMuscleWeights(v) {
+  return objOf(v, function (g) { return objOf(g, isNum); });
 }
 
 function isOlder(o) {
@@ -90,6 +106,8 @@ export function validateSnapshot(s) {
   for (var i = 0; i < SESSIONS.length; i++) {
     if (!arrOf(s.catalog[SESSIONS[i]], isStr)) return 'catalog.' + SESSIONS[i] + ' shape';
   }
+  if (!optional(s.weekSets, isWeekSets)) return 'weekSets shape';
+  if (!optional(s.muscleWeights, isMuscleWeights)) return 'muscleWeights shape';
   return null;
 }
 

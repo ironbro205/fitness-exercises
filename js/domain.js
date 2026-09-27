@@ -2004,37 +2004,6 @@ function pruneReverseProgression1RM() {
   return changed;
 }
 
-// ═══════════════════════════════════════════════
-// 사이클 / 주차 진행 (묶음2: 4주 빌드 + 1주 디로드 = 5주)
-// 주차는 "날짜"가 아니라 "그 주 목표 운동 완료"로 넘어간다. REMAKE-PLAN.md 묶음2 ②③.
-// ═══════════════════════════════════════════════
-var CYCLE_LENGTH = 5; // 빌드 4주 + 디로드 1주
-
-// 주차 → 단계 라벨 (1~4 빌드, 5 디로드)
-function getPhaseByWeek(week) {
-  return week >= CYCLE_LENGTH ? '디로드' : '빌드';
-}
-
-// 이번 주 완료 세션 수가 목표(workoutFreq) 이상이면 다음 주차로. 5주차(디로드) 완료 시 새 사이클.
-// 순수 함수: profile(+이번주 완료수)를 받아 갱신된 사이클 필드만 반환 (저장은 호출자 책임).
-function advanceCycleOnSessionComplete(profile, sessionsCompletedThisWeek) {
-  var wf = profile.workoutFreq || 4;
-  var out = {
-    currentCycle: profile.currentCycle || 1,
-    currentWeek: profile.currentWeek || 1,
-    cyclePhase: profile.cyclePhase || '빌드'
-  };
-  if (sessionsCompletedThisWeek >= wf) {
-    out.currentWeek += 1;
-    if (out.currentWeek > CYCLE_LENGTH) {
-      out.currentCycle += 1;
-      out.currentWeek = 1;
-    }
-    out.cyclePhase = getPhaseByWeek(out.currentWeek);
-  }
-  return out;
-}
-
 // 휴식 감시자: 마지막 운동이 10일 이상 지났으면 복귀 안내 메시지, 아니면 null.
 function getIdleComebackMessage(workoutLog, todayStr) {
   var log = workoutLog || [];
@@ -2197,95 +2166,89 @@ function getVolumeSplitSince(sinceStr) {
   return { direct: direct, fractional: fractional };
 }
 
-// 부위 그룹 → 주간 볼륨 임계(세트). getVolumeDiagnosis와 STATS 화면이 같은 숫자를 쓰도록 한 곳에만 둔다.
-//   large: 부족<4 / 하한미달 4~10 / 적정 10~20 / 이득 완만 20+, 목표 12
-//   small: 부족<3 / 하한미달 3~8 / 적정 8~20 / 이득 완만 20+, 목표 10
-//   size는 BODY_PART_GROUPS[group].size, 없거나 'small'이 아니면 'large'로 안전 처리
-// 2026-09-02(선별안 B3): 작은 근육 목표 8→10, 수확 체감선 16→20. 옛 값은 "간접자극을 받으니 목표를 낮춘다"였는데
-// 간접 세트는 이미 0.5로 환산해 더해져 있어 이중 차감이었다. Pelland 2026(67연구)은 근육 크기별 곡선을 나누지 않고,
-// RP 랜드마크도 측면삼각·이두가 가슴보다 낮지 않다. 하한(8)·부족선(3)은 시간 예산 우선순위로 유지.
-function getVolumeThresholds(group) {
-  var g = BODY_PART_GROUPS[group];
-  var size = (g && g.size === 'small') ? 'small' : 'large';
-  return {
-    size: size,
-    lackBelow:  size === 'small' ? 3 : 4,
-    optimalLow: size === 'small' ? 8 : 10,
-    optimalTop: 20,
-    target:     size === 'small' ? 10 : 12
-  };
+// ═══════════════════════════════════════════════
+// 주간 계획 — 부위별 세트 세기 · 끝난 세션 · 세션 순서 (docs/weekly-plan.md)
+// 세트 세는 법의 정본은 exerciseGroupWeights·getWeekGroupSets 두 함수다. 기록 탭 카드와
+// 스냅샷(weekSets·muscleWeights)이 모두 이것을 쓴다 — 본 세트만, 주동 1 · 보조 0.5.
+// ═══════════════════════════════════════════════
+
+// 종목 이름 → { 그룹: 무게 }. 주동 부위가 속한 그룹 +1, 보조 부위마다 속한 그룹 +0.5.
+// 어느 그룹에도 없는 부위(전완·요추 등)는 버린다. 정보가 없으면 {}.
+function exerciseGroupWeights(name) {
+  var out = {};
+  var info = getExercisePart(name);
+  if (!info) return out;
+  function add(sub, w) {
+    Object.keys(BODY_PART_GROUPS).forEach(function(g) {
+      if (BODY_PART_GROUPS[g].subParts.indexOf(sub) !== -1) out[g] = (out[g] || 0) + w;
+    });
+  }
+  add(info.primary, 1);
+  (info.secondary || []).forEach(function(sub) { add(sub, 0.5); });
+  return out;
 }
 
-// 직접 세트 하한(선별안 B4): 복합운동에서 0.5씩만 쌓이는 부위는 환산 볼륨이 🟢여도 직접 고립이 0~2세트일 수 있다.
-// Pelland 2026 direct/fractional 구분 · Mannarino 2021(컬 > 로우 약 2배) · Kassiano 2024(종아리 12 > 6세트).
-var DIRECT_MIN_SETS = 4;
-var DIRECT_MIN_GROUPS = ['shoulders_side', 'shoulders_rear', 'biceps', 'triceps', 'calves'];
+// weekStartStr(포함) 이후 기록의 그룹별 세트 — 0보다 큰 그룹만.
+function getWeekGroupSets(weekStartStr) {
+  var grouped = groupVolumeBy(getVolumeSplitSince(weekStartStr).fractional);
+  var out = {};
+  Object.keys(grouped).forEach(function(g) { if (grouped[g] > 0) out[g] = grouped[g]; });
+  return out;
+}
+
+// 끝난 세션 { label: 가장 이른 date } — 그 주 계획(planWeek === plan.weekStart)으로 저장한 운동.
+function weekPlanDoneMap(plan, workoutLog) {
+  var out = {};
+  if (!plan || !plan.weekStart) return out;
+  (Array.isArray(workoutLog) ? workoutLog : []).forEach(function(w) {
+    if (!w || w.planWeek !== plan.weekStart || !w.planLabel || typeof w.date !== 'string') return;
+    if (!out[w.planLabel] || w.date < out[w.planLabel]) out[w.planLabel] = w.date;
+  });
+  return out;
+}
+
+// 끝난 세션 중 지금 계획(sessions)에 없는 label — 스냅샷이 서버에 닿기 전에 Claude 가 주를 다시 저장한 경우.
+// 끝난 날짜 순(같은 날이면 label 순). 화면은 이것도 끝난 세션으로 센다.
+function weekPlanExtraDoneLabels(plan, doneMap) {
+  var inPlan = {};
+  ((plan && plan.sessions) || []).forEach(function(s) { if (s) inPlan[s.label] = true; });
+  return Object.keys(doneMap || {}).filter(function(l) { return !inPlan[l]; }).sort(function(a, b) {
+    var byDate = doneMap[a].localeCompare(doneMap[b]);
+    return byDate !== 0 ? byDate : (a < b ? -1 : a > b ? 1 : 0);
+  });
+}
+
+// 가장 최근 운동(날짜·startTime 기준)의 세션 type. planType 이 없으면 옛 session 값으로, 모르면 null.
+function lastWorkoutPlanType(workoutLog) {
+  var log = (Array.isArray(workoutLog) ? workoutLog : []).filter(function(w) { return w && typeof w.date === 'string'; });
+  if (!log.length) return null;
+  var last = sortByDateDesc(log)[0];
+  if (last.planType && PLAN_TYPE_GROUPS[last.planType]) return last.planType;
+  return LEGACY_SESSION_PLAN_TYPE[last.session || last.sessionType] || null;
+}
+
+// 안 끝난 세션 — 지난번 운동과 주동 부위가 겹치지 않는 세션을 앞에, 겹치는 세션을 뒤에.
+// 각 무리 안은 계획 순서. lastType 이 없으면 계획 순서 그대로(막지는 않는다 — 정렬만).
+function orderRemainingSessions(plan, doneMap, lastType) {
+  var done = doneMap || {};
+  var remaining = ((plan && plan.sessions) || []).filter(function(s) { return s && !done[s.label]; });
+  var lastGroups = lastType ? PLAN_TYPE_GROUPS[lastType] : null;
+  if (!lastGroups) return remaining;
+  var fresh = [];
+  var overlap = [];
+  remaining.forEach(function(s) {
+    var groups = PLAN_TYPE_GROUPS[s.type] || [];
+    var hit = groups.some(function(g) { return lastGroups.indexOf(g) !== -1; });
+    (hit ? overlap : fresh).push(s);
+  });
+  return fresh.concat(overlap);
+}
 
 // 신규 종목 첫 시도 비율 — 클래스 미상이면 중강도 복합 값.
 function firstAttemptPct(cls) {
   return FIRST_ATTEMPT_PCT[cls] || FIRST_ATTEMPT_PCT.compound_moderate;
 }
 
-
-// 부족/과잉 부위 식별 (그룹 합산 기반)
-// volumeByPart는 세부 부위 단위 → 가슴(chest+chest_upper+chest_lower) 합산해서 진단
-// directByPart(선택): 직접 세트(primary만) 맵. 주면 DIRECT_MIN_GROUPS 부위의 직접 세트 하한 미달을 directShort로 따로 돌려준다.
-function getVolumeDiagnosis(volumeByPart, weeks, directByPart) {
-  var lacking = [];
-  var optimal = [];
-  var excessive = [];
-  var belowOptimal = []; // MEV 통과·최적 하한(주10세트) 미달 (🟡)
-  var untouched = []; // 주0세트 미접촉 (저우선 참고 — '최우선' 도배 방지)
-  var directShort = []; // 환산은 찼는데 직접 세트가 주 4세트 미만 (팔·측면/후면 어깨·종아리)
-  
-  // 그룹 합산
-  var groupedVol = groupVolumeBy(volumeByPart);
-  var groupedDirect = directByPart ? groupVolumeBy(directByPart) : null;
-  
-  // 모든 그룹 평가 — 부위 크기(size)별 임계 적용 (임계·목표는 getVolumeThresholds 주석 참조)
-  //   large(가슴·등·대퇴사두·햄스트링·둔근): 부족<4 / 하한미달 4~10 / 적정 10~20 / 수확체감 20+, 목표 12
-  //   small(어깨·이두·삼두·복근·내전근): 부족<3 / 하한미달 3~8 / 적정 8~20 / 수확체감 20+, 목표 10
-  //   size는 BODY_PART_GROUPS[group].size, 없거나 'small'이 아니면 'large'로 안전 처리
-  Object.keys(BODY_PART_GROUPS).forEach(function(g) {
-    var weeklyVol = (groupedVol[g] || 0) / weeks;
-    var label = BODY_PART_GROUPS[g].kr;
-    var th = getVolumeThresholds(g);             // 임계는 getVolumeThresholds 한 곳에서만 정의
-    var lackBelow  = th.lackBelow;               // 부족(🔴) 상한
-    var optimalLow = th.optimalLow;              // 최적 하한(미달 시 🟡)
-    var optimalTop = th.optimalTop;              // 최적 상한(초과 시 수확 체감 🔥)
-    var entry = { group: g, label: label, vol: weeklyVol, size: th.size, target: th.target };
-
-    if (weeklyVol === 0) {
-      // 미접촉: 저우선 참고 버킷(전완·복근 등이 매번 '최우선'으로 도배되는 노이즈 방지)
-      untouched.push(entry);
-    } else if (weeklyVol < lackBelow) {
-      entry.label += ' (주' + weeklyVol.toFixed(1) + '세트)';
-      lacking.push(entry);
-    } else if (weeklyVol < optimalLow) {
-      // MEV는 넘었지만 최적 하한 미달 → 🟡 별도 등급
-      entry.label += ' (주' + weeklyVol.toFixed(1) + '세트·하한 미달)';
-      belowOptimal.push(entry);
-    } else if (weeklyVol <= optimalTop) {
-      entry.label += ' (주' + weeklyVol.toFixed(1) + '세트)';
-      optimal.push(entry);
-    } else {
-      // 간접(보조근 0.5)까지 최적 상한 초과 = 수확 체감 구간(하드컷 아님)
-      entry.label += ' (주' + weeklyVol.toFixed(1) + '세트)';
-      excessive.push(entry);
-    }
-
-    // 직접 세트 하한 — 환산이 최적 하한 이상(🟢·🔥)인데 직접 고립이 부족한 경우만 별도 표식.
-    // 환산 자체가 하한 미달·부족(🔴·🟡)이면 그 버킷이 이미 부족을 말하므로 여기서 또 잡지 않는다.
-    if (groupedDirect && weeklyVol >= optimalLow && DIRECT_MIN_GROUPS.indexOf(g) !== -1) {
-      var directWeekly = (groupedDirect[g] || 0) / weeks;
-      if (directWeekly < DIRECT_MIN_SETS) {
-        directShort.push({ group: g, label: BODY_PART_GROUPS[g].kr, direct: directWeekly, min: DIRECT_MIN_SETS });
-      }
-    }
-  });
-  
-  return { lacking: lacking, belowOptimal: belowOptimal, untouched: untouched, optimal: optimal, excessive: excessive, directShort: directShort };
-}
 
 // SVG path 생성 (선 그래프)
 function generateLinePath(data, width, height, padding) {
