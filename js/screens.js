@@ -10,21 +10,6 @@ function renderHome() {
   var tdStr = getTodayStr();
   var dayOfWeek = today.getDay() || 7;
   var dayNames = ['일','월','화','수','목','금','토'];
-  
-  // 주간 리뷰 자동 로드 (백그라운드, 일요일)
-  if (state.apiKey && !state.weeklyReview && !state.weeklyReviewLoading && shouldShowWeeklyReview()) {
-    loadWeeklyReviewIfNeeded();
-  }
-  
-  // 정체기 자동 체크 (백그라운드)
-  if (state.apiKey && !state.plateauCheck && !state.plateauCheckLoading) {
-    loadPlateauCheckIfNeeded();
-  }
-
-  // 오늘의 추천은 화면에서 뺐다(홈 카드·부위 배지 모두). 그래서 배경 로드도 멈춘다 —
-  // 아무 데도 안 쓰는 값을 하루 한 번 API 로 받아 오면 요금만 나간다.
-  // 엔진(fetchAIRecommendation·loadAIRecommendationIfNeeded)은 2026-09-02에 삭제했다(죽은 코드 유지 비용).
-  // 되살리려면 git 기록(PR #84 이전(main 커밋 0648697 이전))에서 복원한다.
 
   var monday = new Date(today);
   monday.setDate(today.getDate() - (dayOfWeek - 1));
@@ -57,25 +42,6 @@ function renderHome() {
   // 사이클 단계 안내 + 이번 주 진행
   var isDeloadWeek = profile.currentWeek >= CYCLE_LENGTH;
   var phaseHint = isDeloadWeek ? '가볍게 · 건너뛰기 가능' : '조금씩 늘리기';
-  // 디로드 앞당기기 제안(선별안 D2): 정체 엔진(4세션·28일 가드)을 통과한 종목이 2개 이상이면 달력을 기다리지 않아도
-  // 되게 "제안"만 한다(강제 아님 — Rogerson 2024 실측 트리거). 디로드 주에는 뜨지 않는다.
-  // 마지막 디로드 후 21일 안에는 다시 뜨지 않는다 — 디로드 주는 정체 판정이 그대로 남기 때문(F4).
-  var recentlyDeloaded = false;
-  if (profile.lastDeloadAt) {
-    var daysSinceProfileDeload = Math.floor((new Date(tdStr) - new Date(profile.lastDeloadAt)) / 86400000);
-    if (daysSinceProfileDeload < 21) recentlyDeloaded = true;
-  }
-  if (!recentlyDeloaded && data.cycleHistory && data.cycleHistory[0] && data.cycleHistory[0].endedAt) {
-    var daysSinceCycleEnd = Math.floor((new Date(tdStr) - new Date(data.cycleHistory[0].endedAt)) / 86400000);
-    if (daysSinceCycleEnd < 21) recentlyDeloaded = true;
-  }
-  var stalledForDeload = (!isDeloadWeek && !recentlyDeloaded && typeof getStalledLifts === 'function') ? getStalledLifts() : [];
-  var earlyDeloadHtml = (stalledForDeload.length >= 2)
-    ? '<div class="flex items-center justify-between mt-3">' +
-        '<p class="text-[11px] font-mono text-stone-400">정체 ' + stalledForDeload.length + '종목 · 디로드를 앞당길 수 있어요</p>' +
-        '<button class="session-fact-btn" style="min-height:32px;padding:6px 10px;" onclick="startEarlyDeload()">디로드 시작</button>' +
-      '</div>'
-    : '';
   var weekGoal = profile.workoutFreq || 4;
   var doneTowardWeek = profile.weekSessionsDone || 0; // 이번 주차 완료 수(캘린더 아님)
   var idleMsg = getIdleComebackMessage(data.workoutLog, getTodayStr());
@@ -141,7 +107,6 @@ function renderHome() {
             '<p class="text-[11px] text-stone-600 font-mono uppercase">디로드</p>' +
           '</div>' +
           '<p class="text-[11px] font-mono mt-3 ' + (idleMsg ? 'text-amber-400' : 'text-stone-400') + '">' + cycleStatusLine + '</p>' +
-          earlyDeloadHtml +
         '</div>' +
       '</div>' +
       
@@ -172,92 +137,44 @@ function renderHome() {
           '</div>' : '') +
       '</div>' +
       
-      // 주간 리뷰 카드 (일요일 또는 새 주차)
-      (state.weeklyReview ? 
-        '<div class="weekly-review-card mb-4" onclick="openWeeklyReview()">' +
-          '<div class="relative">' +
-            '<div class="flex items-center justify-between mb-2">' +
-              '<span class="ai-badge">' + icon('chart', 12) + '주간 리뷰</span>' +
-              '<p class="text-[11px] font-mono text-stone-500">' + state.weeklyReview.monday.substring(5) + ' ~ ' + state.weeklyReview.sunday.substring(5) + '</p>' +
-            '</div>' +
-            '<div class="flex items-baseline gap-3 mb-2">' +
-              '<p class="font-bebas text-5xl" style="color: ' + gradeColor(state.weeklyReview.grade) + ';">' + escapeHtml(state.weeklyReview.grade) + '</p>' +
-              '<p class="text-sm font-display font-bold leading-tight">' + escapeHtml(state.weeklyReview.headline) + '</p>' +
-            '</div>' +
-            '<p class="text-[11px] font-mono accent">자세히 보기 →</p>' +
-          '</div>' +
-        '</div>'
-      : (state.weeklyReviewLoading ? 
-        '<div class="weekly-review-card mb-4">' +
-          '<div class="flex items-center gap-3">' +
-            '<div class="loading-spinner"></div>' +
-            '<div>' +
-              '<p class="text-sm font-display font-bold">주간 리뷰 분석 중</p>' +
-              '<p class="text-[11px] font-mono text-stone-500 mt-0.5">이번 주 데이터 종합 중...</p>' +
-            '</div>' +
-          '</div>' +
-        '</div>'
-      : '')) +
-      
-      // 정체기 경고 카드 (감지 시)
-      (state.plateauCheck ? 
-        '<div class="plateau-card mb-4" onclick="openPlateauDetail()">' +
-          '<div class="flex items-start gap-3">' +
-            '<div style="color: var(--warn); flex-shrink: 0;">' + icon('info', 22) + '</div>' +
-            '<div class="flex-1">' +
-              '<div class="flex items-center justify-between mb-1">' +
-                '<p class="text-xs font-display font-bold" style="color: var(--warn);">정체기 신호 감지</p>' +
-                '<p class="text-[11px] font-mono text-stone-500">' + state.plateauCheck.signals.length + '개 신호</p>' +
-              '</div>' +
-              '<p class="text-sm text-stone-200 leading-relaxed mb-2">' + escapeHtml(state.plateauCheck.primary_cause || '진행이 정체되고 있어요.') + '</p>' +
-              '<p class="text-[11px] font-mono" style="color: var(--warn);">분석 보기 →</p>' +
-            '</div>' +
-          '</div>' +
-        '</div>'
-      : '') +
-      
-      // 정체기 경고 카드 끝 → 바로 컨테이너 닫힘 (코치/최근PR/빠른입력 제거: 묶음5)
-      
     '</div>';
-}
-
-// 주간 리뷰 등급 → 색상. AI가 준 grade 를 **객체 키로 그냥 조회하면** 프로토타입까지 훑는다
-// (grade='__proto__' 면 [object Object], 'constructor' 면 함수 소스가 색상 자리에 들어가 CSS가 깨진다).
-// 소유 속성일 때만 인정하고 아니면 기본색 — S/A/B/C/D 외에는 전부 기본색이라는 뜻이다.
-var GRADE_COLORS = { S: 'var(--accent)', A: 'var(--accent)', B: 'var(--purple)', C: 'var(--warn)', D: 'var(--danger)' };
-function gradeColor(grade) {
-  return Object.prototype.hasOwnProperty.call(GRADE_COLORS, grade) ? GRADE_COLORS[grade] : 'var(--purple)';
 }
 
 // ═══════════════════════════════════════════════
 // 운동 탭 (STEP 1 — 부위 선택)
 // ═══════════════════════════════════════════════
 function renderWorkout() {
-  // STEP 2/3는 다른 함수에서 처리, 여기는 STEP 1 (부위 선택)
-  if (state.workoutWizardStep === 2) {
+  // STEP 2는 다른 함수에서 처리, 여기는 STEP 1 (부위 선택)
+  if (state.workoutWizardStep === 2 && state.generatedRoutine) {
     return renderWorkoutStep2();
-  }
-  if (state.workoutWizardStep === 3) {
-    return renderWorkoutStep3();
   }
 
   // STEP 1: 부위 선택 — 이 화면이 하는 일은 부위를 고르는 것 하나다.
-  // 부위 카드 — 이름과 부위 설명만. 다섯 장이 한 화면에 들어와야 고르기가 한 번에 끝난다.
+  // 부위 카드 — 이름과 부위 설명만. 네 장이 한 화면에 들어와야 고르기가 한 번에 끝난다.
   // '이번 주 N' 배지와 '추천' 배지는 뺐다(사용자 결정) — 이번 주 횟수는 홈·기록 탭에 있다.
-  function partCard(key, name, koreanName, wide) {
-    return '<div class="body-part-card' + (wide ? ' wide' : '') + '" onclick="selectBodyPart(\'' + key + '\')">' +
+  function partCard(key, name, koreanName) {
+    return '<div class="body-part-card" onclick="selectBodyPart(\'' + key + '\')">' +
       '<p class="body-part-name">' + name + '</p>' +
       '<p class="body-part-desc">' + koreanName + '</p>' +
     '</div>';
   }
 
   // 단계 표시와 '이번 주 기록'(7일 막대)은 걷었다 — 이 화면이 할 일은 부위를 고르는 것 하나고,
-  // 다섯 장이 스크롤 없이 한 화면에 들어와야 그게 한 번에 끝난다.
-  // 다섯 장을 화면 위에 붙이면 아래쪽 절반이 통째로 비어 화면이 미완성으로 보였다 →
+  // 네 장이 스크롤 없이 한 화면에 들어와야 그게 한 번에 끝난다.
+  // 카드를 화면 위에 붙이면 아래쪽 절반이 통째로 비어 화면이 미완성으로 보였다 →
   // 탭바 위 남은 영역의 세로 가운데에 둔다(글자 정렬은 왼쪽 그대로).
+  // Claude 앱이 저장한 오늘 루틴이 있을 때만 부위 카드 위에 한 줄. 한 번 열면 사라진다.
+  var claudeRow = state.claudeRoutine
+    ? '<button class="claude-plan-row mb-3" onclick="openClaudeRoutine()">' +
+        '<span class="claude-plan-text">' + escapeHtml(claudeRoutineRowText(state.claudeRoutine)) + '</span>' +
+        '<span class="claude-plan-arrow">' + icon('chevron', 16) + '</span>' +
+      '</button>'
+    : '';
+
   return '' +
     '<div class="px-5 pt-12 screen-center">' +
       '<div class="screen-center-inner">' +
+        claudeRow +
         '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest mb-3 px-1">부위 선택</p>' +
         '<div class="body-part-grid">' +
           partCard('push', 'PUSH', '가슴 · 어깨 · 삼두') +
@@ -265,7 +182,6 @@ function renderWorkout() {
           partCard('legs', 'LEGS', '하체 · 코어') +
           partCard('upper', 'UPPER', '상체 전체') +
         '</div>' +
-        partCard('free', 'FREE', '직접 종목 선택', true) +
       '</div>' +
     '</div>';
 }
@@ -275,98 +191,32 @@ function renderWorkout() {
 // 운동 마법사 - 핸들러
 // ═══════════════════════════════════════════════
 
-window.selectBodyPart = async function(part) {
+window.selectBodyPart = function(part) {
   state.selectedBodyPart = part;
-  state.generatedRoutine = null;
-  
-  // FREE는 STEP 3 (대화형)로 바로 이동 — 빈 루틴부터 대화로 채워감
-  if (part === 'free') {
-    state.workoutWizardStep = 3;
-    state.routineLoading = false;
-    state.routineChatHistory = [];
-    state.routineChatInput = '';
-    state.routinePreviewExpanded = false;
-    
-    // 빈 루틴 초기화
-    state.generatedRoutine = {
-      bodyPart: 'free',
-      headline: '자유 루틴 구성 중',
-      duration: 60,
-      totalSets: 0,
-      intensity: 'moderate',
-      caution: '',
-      exercises: [],
-      isFree: true
-    };
-    
-    // AI 첫 메시지
-    state.routineChatHistory = [
-      {
-        role: 'assistant',
-        // 예시는 바로 아래 퀵칩과 글자까지 겹쳤다 → 말풍선에서는 뺀다(예시는 칩으로만).
-        content: '부위·시간·강도를 알려 주세요.'
-      }
-    ];
-
-    saveWizard();
-    render();
-    setTimeout(function() {
-      var input = document.getElementById('rc-input');
-      if (input) input.focus();
-    }, 100);
-    return;
-  }
-  
-  // 정형 (PUSH/PULL/LEGS): STEP 2 → AI 루틴 생성
+  // 부위 카드는 SESSIONS 기본 틀을 곧바로 2단계에 띄운다. 무게·세트는 [시작] 때
+  // getSessionSetPlan(앱 점진 과부하)이 기록 기반으로 다시 계산한다.
+  var tpl = SESSIONS[part];
+  state.generatedRoutine = {
+    bodyPart: part,
+    headline: tpl.description,
+    duration: tpl.duration,
+    totalSets: tpl.setCount,
+    intensity: 'moderate',
+    caution: '',
+    exercises: tpl.exercises.map(function(ex) {
+      return {
+        name: ex.name,
+        type: ex.type,
+        isMain: false,
+        sets: ex.sets,
+        reps: ex.reps,
+        weight: ex.lastWeight,
+        rir: 2,
+        note: ''
+      };
+    })
+  };
   state.workoutWizardStep = 2;
-  state.routineLoading = true;
-  saveWizard();
-  render();
-  
-  if (!state.apiKey) {
-    // API 키 없을 시 폴백 (SESSIONS에서 가져오기)
-    var fallback = SESSIONS[part];
-    state.generatedRoutine = {
-      bodyPart: part,
-      headline: fallback.description,
-      reason: '더보기에서 API 키를 넣으면 내 1RM에 맞춰 짜여요.',
-      duration: fallback.duration,
-      totalSets: fallback.setCount,
-      intensity: 'moderate',
-      caution: '',
-      exercises: fallback.exercises.map(function(ex) {
-        return {
-          name: ex.name,
-          type: ex.type,
-          isMain: false,
-          sets: ex.sets,
-          reps: ex.reps,
-          weight: ex.lastWeight,
-          rir: 2,
-          note: ''
-        };
-      }),
-      isFallback: true
-    };
-    state.routineLoading = false;
-    saveWizard();
-    render();
-    return;
-  }
-
-  // AI 루틴 생성
-  var routine = await generateFullRoutine(part);
-
-  if (routine && !routine.error) {
-    state.generatedRoutine = routine;
-  } else {
-    state.generatedRoutine = {
-      error: routine ? routine.error : '루틴 생성 실패',
-      bodyPart: part
-    };
-  }
-
-  state.routineLoading = false;
   saveWizard();
   render();
 };
@@ -375,386 +225,23 @@ window.backToStep1 = function() {
   state.workoutWizardStep = 1;
   state.selectedBodyPart = null;
   state.generatedRoutine = null;
-  state.routineLoading = false;
   saveWizard();
   render();
 };
 
-window.regenerateRoutine = async function() {
-  if (!state.selectedBodyPart) return;
-  state.routineLoading = true;
-  state.generatedRoutine = null;
-  saveWizard();
-  render();
-
-  var routine = await generateFullRoutine(state.selectedBodyPart);
-  if (routine && !routine.error) {
-    state.generatedRoutine = routine;
-  } else {
-    state.generatedRoutine = {
-      error: routine ? routine.error : '루틴 생성 실패',
-      bodyPart: state.selectedBodyPart
-    };
-  }
-  state.routineLoading = false;
-  saveWizard();
-  render();
-};
-
-window.goToStep3 = function() {
-  if (!state.generatedRoutine) return;
-
-  state.workoutWizardStep = 3;
-  state.routinePreviewExpanded = false;
-
-  // 첫 진입 시 첫 봇 메시지
-  if (state.routineChatHistory.length === 0) {
-    var partKor = { push: '가슴/어깨/삼두', pull: '등/이두', legs: '하체/코어', upper: '가슴/등/어깨/팔', free: '자유' };
-    var part = state.selectedBodyPart;
-
-    state.routineChatHistory = [
-      {
-        role: 'assistant',
-        // 예시는 바로 아래 퀵칩과 겹친다 → 말풍선에서는 뺀다(예시는 칩으로만).
-        content: '어디를 바꿀까요? 제안이 오면 [적용하기]로 반영돼요.'
-      }
-    ];
-  }
-
-  saveWizard();
-  render();
-  setTimeout(function() {
-    var input = document.getElementById('rc-input');
-    if (input) input.focus();
-    scrollRoutineChatToBottom();
-  }, 100);
-};
-
-window.backToStep2 = function() {
-  // FREE는 STEP 2가 없으므로 STEP 1로 직행
-  if (state.selectedBodyPart === 'free') {
-    state.workoutWizardStep = 1;
-    state.selectedBodyPart = null;
-    state.generatedRoutine = null;
-    state.routineChatHistory = [];
-    state.routineChatInput = '';
-    state.routinePreviewExpanded = false;
-    saveWizard();
-    render();
-    return;
-  }
+// Claude 추천 줄 → 받은 루틴을 그대로 2단계에 띄운다 (한 번 열면 줄은 사라진다).
+window.openClaudeRoutine = function() {
+  var plan = state.claudeRoutine;
+  if (!plan) return;
+  state.generatedRoutine = claudeRoutineToGenerated(plan);
+  state.selectedBodyPart = plan.session;
   state.workoutWizardStep = 2;
+  setClaudeSyncState({ lastImportedRoutineId: plan.id });
+  state.claudeRoutine = null;
   saveWizard();
   render();
 };
 
-window.toggleRoutinePreview = function() {
-  state.routinePreviewExpanded = !state.routinePreviewExpanded;
-  saveWizard();
-  render();
-};
-
-window.updateRoutineChatInput = function(text) {
-  state.routineChatInput = text;
-  var sendBtn = document.getElementById('rc-send-btn');
-  if (sendBtn) sendBtn.disabled = !text.trim() || state.routineChatThinking;
-};
-
-
-window.clearRoutineChat = function() {
-  if (!confirm('대화를 초기화하시겠어요?')) return;
-  state.routineChatHistory = [];
-  saveWizard();
-  goToStep3();
-};
-
-window.sendRoutineModification = async function() {
-  if (state.routineChatThinking) return;
-  
-  var text = state.routineChatInput.trim();
-  if (!text) {
-    var input = document.getElementById('rc-input');
-    if (input) text = input.value.trim();
-    if (!text) return;
-  }
-  
-  // 사용자 메시지 추가
-  state.routineChatHistory.push({ role: 'user', content: text });
-  state.routineChatInput = '';
-  state.routineChatThinking = true;
-  saveWizard();
-  render();
-  scrollRoutineChatToBottom();
-  
-  if (!state.apiKey) {
-    state.routineChatHistory.push({
-      role: 'assistant',
-      content: 'API 키가 필요해요. 더보기 → Anthropic API 키에서 설정해 주세요.'
-    });
-    state.routineChatThinking = false;
-    render();
-    scrollRoutineChatToBottom();
-    return;
-  }
-  
-  // AI 수정 요청
-  var result = await modifyRoutineWithAI(
-    state.generatedRoutine,
-    text,
-    state.routineChatHistory.slice(0, -1) // 마지막 user 메시지 제외 (위에서 별도 전달)
-  );
-  
-  state.routineChatThinking = false;
-  
-  if (result.error) {
-    state.routineChatHistory.push({
-      role: 'assistant',
-      content: '수정 실패: ' + result.error
-    });
-  } else if (result.intent === 'question') {
-    // 일반 질문/대화 - 답변만 표시, 변경안 없음
-    state.routineChatHistory.push({
-      role: 'assistant',
-      content: result.reply,
-      changes: [],
-      pendingRoutine: null,
-      approvalStatus: null
-    });
-  } else {
-    // 루틴 수정 (modify) - 변경 카드 + 대기 중인 변경안
-    // 새 변경안이 생기면, 아직 적용 안 한 이전 pending 카드를 '대체됨'으로 내린다.
-    // (옛 카드를 나중에 눌러 방금 적용한 변경을 조용히 되돌리는 사고 방지)
-    if (result.updatedRoutine) {
-      state.routineChatHistory.forEach(function(m) {
-        if (m.approvalStatus === 'pending') m.approvalStatus = 'superseded';
-      });
-    }
-    state.routineChatHistory.push({
-      role: 'assistant',
-      content: result.reply,
-      changes: result.changes,
-      pendingRoutine: result.updatedRoutine,  // 사용자 승인 대기
-      approvalStatus: result.updatedRoutine ? 'pending' : null  // pending | applied | cancelled | superseded
-    });
-    // 루틴은 자동 업데이트 X - 사용자가 [적용] 눌러야 반영
-  }
-
-  saveWizard();
-  render();
-  scrollRoutineChatToBottom();
-};
-
-// 변경안 적용
-window.approveRoutineChange = function(msgIdx) {
-  var msg = state.routineChatHistory[msgIdx];
-  if (!msg || !msg.pendingRoutine) return;
-  
-  var pr = msg.pendingRoutine;
-  state.generatedRoutine = Object.assign({}, state.generatedRoutine, {
-    headline: pr.headline || state.generatedRoutine.headline,
-    duration: pr.duration || state.generatedRoutine.duration,
-    totalSets: pr.totalSets || state.generatedRoutine.totalSets,
-    intensity: pr.intensity || state.generatedRoutine.intensity,
-    exercises: pr.exercises || state.generatedRoutine.exercises,
-    wasModified: true
-  });
-  
-  msg.approvalStatus = 'applied';
-  saveWizard();
-  render();
-};
-
-// 변경안 취소
-window.cancelRoutineChange = function(msgIdx) {
-  var msg = state.routineChatHistory[msgIdx];
-  if (!msg) return;
-  msg.approvalStatus = 'cancelled';
-  saveWizard();
-  render();
-};
-
-// STEP 3: 대화 수정 화면
-function renderWorkoutStep3() {
-  var routine = state.generatedRoutine;
-  if (!routine) {
-    return '<div class="px-5 pt-12 text-center"><p class="text-sm text-stone-400">루틴이 없어요</p>' +
-      '<button onclick="backToStep1()" class="text-xs accent mt-4">처음으로</button></div>';
-  }
-  
-  var partNames = { push: 'PUSH', pull: 'PULL', legs: 'LEGS', upper: 'UPPER', free: 'FREE' };
-  var partName = partNames[state.selectedBodyPart] || routine.bodyPart || '';
-  
-  // 미리보기 - 종목 리스트
-  var previewExHtml = '';
-  if (state.routinePreviewExpanded) {
-    routine.exercises.forEach(function(ex, idx) {
-      // 2단계 처방 표와 **같은 계획**에서 값을 뽑는다 — 두 미리보기가 다른 숫자를 말하면 안 된다.
-      var previewPlan = getRoutinePreviewPlan(ex);
-      var p = buildPrescriptionValues(ex, previewPlan);
-      var weight = (p.weight !== null && p.weight !== '')
-        ? (isReverseProgression(ex.name) ? '보조 ' : '') + escapeHtml(p.weight) + 'kg × ' : '';
-      // 종목 줄을 누르면 종목 편집 시트가 열린다 — 자극 근육 인체도도 그 안에 있다.
-      // 자유 구성은 2단계(처방 표)를 건너뛰므로 세트법을 알 자리가 여기뿐이다.
-      // 한 줄에 들어가야 해서 짧은 이름(탑+백오프)만 붙이고, 스트레이트면 아무것도 안 붙인다.
-      var schemeShort = (previewPlan && previewPlan.scheme !== 'straight' && SET_SCHEMES[previewPlan.scheme])
-        ? ' · ' + SET_SCHEMES[previewPlan.scheme].short : '';
-      previewExHtml +=
-        '<div class="routine-preview-ex" onclick="openExerciseEdit(\'preview\', ' + idx + ')">' +
-          '<span class="flex-1"><strong>' + (idx + 1) + '. ' + escapeHtml(ex.name) + '</strong></span>' +
-          '<span class="routine-preview-ex-stat text-stone-400 font-mono text-[11px]">' + weight + escapeHtml(p.reps) + ' · ' + escapeHtml(p.sets) + '세트' + escapeHtml(schemeShort) + '</span>' +
-        '</div>';
-    });
-  }
-  
-  // 채팅 메시지
-  var messagesHtml = '';
-  state.routineChatHistory.forEach(function(msg, idx) {
-    if (msg.role === 'assistant') {
-      var changesHtml = '';
-      var hasChanges = msg.changes && msg.changes.length > 0;
-      // 변경 카드는 (1) 변경 목록이 있거나 (2) 승인 대기/완료/취소 상태가 있으면 표시한다.
-      // pendingRoutine 은 있는데 changes 가 비어도 [✓ 적용하기] 버튼이 사라지지 않게 한다(버그 수정).
-      if (hasChanges || msg.approvalStatus) {
-        var changeLines = '';
-        if (hasChanges) {
-          changeLines = msg.changes.map(function(c) {
-            var iconCls = c.type === 'add' ? 'add' : c.type === 'remove' ? 'remove' : 'modify';
-            var sym = c.type === 'add' ? '+' : c.type === 'remove' ? '−' : '~';
-            return '<div class="change-line">' +
-              '<div class="change-icon ' + iconCls + '">' + sym + '</div>' +
-              '<span class="text-stone-200"><strong>' + escapeHtml(c.exercise) + '</strong> ' + escapeHtml(c.detail) + '</span>' +
-            '</div>';
-          }).join('');
-        }
-
-        // 승인 상태별 액션 버튼
-        var actionHtml = '';
-        if (msg.approvalStatus === 'pending') {
-          actionHtml = 
-            '<div class="change-approval-actions">' +
-              '<button class="change-approval-btn cancel" onclick="cancelRoutineChange(' + idx + ')">취소</button>' +
-              '<button class="change-approval-btn apply" onclick="approveRoutineChange(' + idx + ')">' + icon('check', 14) + ' 적용하기</button>' +
-            '</div>';
-        } else if (msg.approvalStatus === 'applied') {
-          actionHtml = 
-            '<div class="change-approval-actions" style="grid-template-columns: 1fr;">' +
-              '<button class="change-approval-btn applied">' + icon('check', 14) + ' 적용 완료</button>' +
-            '</div>';
-        } else if (msg.approvalStatus === 'cancelled') {
-          actionHtml =
-            '<div class="change-approval-actions" style="grid-template-columns: 1fr;">' +
-              '<button class="change-approval-btn cancel" style="pointer-events: none; opacity: 0.6;">취소됨</button>' +
-            '</div>';
-        } else if (msg.approvalStatus === 'superseded') {
-          actionHtml =
-            '<div class="change-approval-actions" style="grid-template-columns: 1fr;">' +
-              '<button class="change-approval-btn cancel" style="pointer-events: none; opacity: 0.6;">최신 제안으로 대체됨</button>' +
-            '</div>';
-        }
-        
-        var cardLabel = hasChanges ? '제안된 변경사항' : '새 루틴 준비됨';
-        changesHtml = '<div class="routine-change-card">' +
-          '<p class="text-[11px] font-mono accent uppercase tracking-widest mb-1.5">' + cardLabel + '</p>' +
-          changeLines +
-          actionHtml +
-        '</div>';
-      }
-      
-      messagesHtml += 
-        '<div class="rc-msg-bot">' +
-          '<p class="text-sm">' + renderMarkdown(msg.content) + '</p>' +
-          changesHtml +
-        '</div>';
-    } else {
-      messagesHtml += 
-        '<div class="rc-msg-user">' +
-          '<p class="text-sm">' + renderMarkdown(msg.content) + '</p>' +
-        '</div>';
-    }
-  });
-  
-  // 생각 중
-  if (state.routineChatThinking) {
-    messagesHtml += 
-      '<div class="rc-msg-bot">' +
-        '<div class="flex items-center gap-2">' +
-          '<div class="loading-spinner"></div>' +
-          '<p class="text-sm text-stone-400">수정 중...</p>' +
-        '</div>' +
-      '</div>';
-  }
-  
-  // 빠른 칩은 걷었다 — 무엇을 물어야 하는지는 입력칸 placeholder 가 예시로 보여 준다
-  // (디자인 규칙: 예시는 본문이 아니라 placeholder·퀵칩 자리에서만, 그리고 여긴 자리가 아깝다).
-
-  var sendDisabled = !state.routineChatInput.trim() || state.routineChatThinking;
-  
-  var isFree = state.selectedBodyPart === 'free';
-  var exCount = routine.exercises.length;
-  var isEmpty = exCount === 0;
-  
-  return '' +
-    '<div class="routine-chat-screen">' +
-      
-      // 헤더
-      '<div class="px-5 pt-12 pb-3" style="border-bottom: 1px solid var(--bg-3);">' +
-        '<div class="flex items-center justify-between">' +
-          '<button onclick="backToStep2()" class="session-header-btn" title="뒤로">' + icon('arrowLeft', 18) + '</button>' +
-          '<div class="text-center">' +
-            '<p class="text-[11px] font-mono text-stone-500" style="letter-spacing: 0.2em;">' + (isFree ? '자유 구성' : '3단계 · 대화 수정') + '</p>' +
-            '<p class="text-[11px] font-mono text-stone-600 mt-0.5">' + escapeHtml(partName) + '</p>' +
-          '</div>' +
-          '<div style="width: 36px;"></div>' +
-        '</div>' +
-        '<div class="step-indicator mt-3" style="margin-bottom: 0;">' +
-          '<div class="step-dot completed"></div>' +
-          (isFree 
-            ? '<div class="step-line active"></div><div class="step-dot active"></div><div class="step-line active"></div><div class="step-dot active"></div>' 
-            : '<div class="step-line active"></div><div class="step-dot completed"></div><div class="step-line active"></div><div class="step-dot active"></div>') +
-        '</div>' +
-      '</div>' +
-      
-      // 루틴 미리보기 (접힘/펼침)
-      '<div class="routine-preview">' +
-        '<div class="routine-preview-collapsed" onclick="' + (isEmpty ? '' : 'toggleRoutinePreview()') + '">' +
-          '<div class="flex items-center gap-2">' +
-            '<span class="ai-badge">' + escapeHtml(partName) + '</span>' +
-            '<div>' +
-              '<p class="text-xs font-display font-bold">' + (isEmpty ? '아직 종목이 없어요' : escapeHtml(routine.headline)) + '</p>' +
-              '<p class="text-[11px] font-mono text-stone-500">' + (isEmpty ? '대화로 종목을 추가해 주세요' : exCount + '개 종목 · ' + escapeHtml(routine.totalSets) + '세트 · ' + escapeHtml(routine.duration) + '분' + (routine.wasModified ? ' · 수정됨' : '')) + '</p>' +
-            '</div>' +
-          '</div>' +
-          (isEmpty ? '' : '<div class="chevron-icon ' + (state.routinePreviewExpanded ? 'expanded' : '') + '" style="color: var(--text-muted);">' + icon('chevron', 16) + '</div>') +
-        '</div>' +
-        (state.routinePreviewExpanded && !isEmpty ? '<div class="routine-preview-expanded">' + previewExHtml + '</div>' : '') +
-      '</div>' +
-      
-      // 채팅 영역
-      '<div class="routine-chat-area" id="rc-area">' + messagesHtml + '</div>' +
-      
-      // 하단 입력 + 시작
-      '<div class="routine-chat-bottom">' +
-        '<div class="routine-chat-input-row">' +
-          '<div class="routine-chat-input-bar">' +
-            '<input type="text" id="rc-input" placeholder="' + (state.apiKey ? (isFree ? '예: 어깨 위주 30분' : '예: 전체 무게 살짝 가볍게') : 'API 키 필요') + '" value="' + escapeHtml(state.routineChatInput) + '" oninput="updateRoutineChatInput(this.value)" onkeydown="if(event.key===\'Enter\') sendRoutineModification()" ' + (state.routineChatThinking ? 'disabled' : '') + ' />' +
-          '</div>' +
-          '<button class="rc-send-btn" id="rc-send-btn" onclick="sendRoutineModification()"' + (sendDisabled ? ' disabled' : '') + '>' +
-            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
-              '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>' +
-            '</svg>' +
-          '</button>' +
-        '</div>' +
-        '<button class="routine-final-start" onclick="startGeneratedRoutine()"' + (isEmpty ? ' disabled style="opacity: 0.4; cursor: not-allowed; box-shadow: none;"' : '') + '>' +
-          icon('play', 16) + ' ' + (isEmpty ? '종목을 먼저 추가하세요' : '이 루틴으로 시작') +
-        '</button>' +
-      '</div>' +
-
-    '</div>' +
-    // 미리보기 위에 뜨는 시트들 — 종목 편집과 그 안에서 이어지는 종목 고르기.
-    buildExerciseEditSheetHtml() +
-    buildPreviewSwapSheetHtml() +
-    buildMuscleMapZoomHtml();
-}
 
 // 미리보기용 종목 고르기 시트 — 운동 중 화면의 것과 같은 목록·검색을 쓴다(buildSwapListHtml).
 function buildPreviewSwapSheetHtml() {
@@ -797,8 +284,12 @@ window.startGeneratedRoutine = function() {
     setCount: r.totalSets || r.exercises.length * 3
   };
   
+  // Claude 루틴: 받은 세트를 그대로 쓰고(무게만 장비 단위), 자동 슈퍼세트·운동 중 자동 조정을 끈다.
+  var isClaude = r.source === 'claude';
+
   // 종목 데이터를 운동 세션 형식으로 변환
   var exercises = r.exercises.map(function(ex, idx) {
+    if (ex.claudeSets) return buildClaudeSessionExercise(ex);
     // 가드레일 + 추천 일치: 세트 시작 무게·횟수를 추천 카드와 같은 계산(getSessionSetPlan)으로.
     // (AI 무게를 따로 스냅하면 "5kg 유지" 카드 옆 세트가 6kg로 어긋나는 문제 방지)
     // 세트 배열 자체도 여기서 나온다 — 세트법(스킴)별 무게·횟수·역할이 세트마다 개별로 붙는다.
@@ -828,7 +319,7 @@ window.startGeneratedRoutine = function() {
   });
 
   // 길항근 슈퍼세트 자동 제안 (사용자가 종목 메뉴에서 해제 가능)
-  applySupersetSuggestions(exercises);
+  if (!isClaude) applySupersetSuggestions(exercises);
 
   state.activeSession = {
     sessionType: sessionType,
@@ -843,6 +334,7 @@ window.startGeneratedRoutine = function() {
       reason: r.reason
     }
   };
+  if (isClaude) state.activeSession.source = 'claude';
   // FREE·AI 루틴은 세션 타입이 없을 수 있어, 종목 목록에서 웜업 부위를 유도한다(buildWarmupPlan 내부).
   attachWarmupToSession(state.activeSession);
   saveActiveSession();
@@ -851,19 +343,13 @@ window.startGeneratedRoutine = function() {
   state.workoutWizardStep = 1;
   state.generatedRoutine = null;
   state.selectedBodyPart = null;
-  state.routineChatHistory = [];
-  state.routineChatInput = '';
-  state.routinePreviewExpanded = false;
   clearWizard();
 
   render();
 };
 
-// STEP 2: AI 루틴 분석 결과 화면
+// STEP 2: 루틴 미리보기 화면
 function renderWorkoutStep2() {
-  var partNames = { push: 'PUSH', pull: 'PULL', legs: 'LEGS', upper: 'UPPER', free: 'FREE' };
-  var partKor = { push: '가슴 · 어깨 · 삼두', pull: '등 · 이두', legs: '하체 · 코어', upper: '가슴 · 등 · 어깨 · 팔', free: '자유 구성' };
-  var part = state.selectedBodyPart;
   var routine = state.generatedRoutine;
   
   // 헤더 — '뒤로' 와 요약 한 줄만. 단계 표시(2단계 · 루틴 분석)와 진행 점은 걷었다:
@@ -875,15 +361,18 @@ function renderWorkoutStep2() {
   // 적으면, 같은 화면의 편집 시트에서 세트를 늘려도 헤더만 옛 숫자를 말한다(출처가 둘이면
   // 반드시 어긋난다). 종목이 빈 경우도 여기서 정직하게 걸러진다.
   var summaryLine = '';
-  if (!state.routineLoading && routine && !routine.error) {
+  if (routine) {
     if (exCount === 0) summaryLine = '종목이 없어요';
     else {
       var setSum = routine.exercises.reduce(function(n, e) {
+        if (e.claudeSets) return n + claudeWorkingSets(e).length;   // Claude 종목은 받은 작업 세트 수
         var plan = getRoutinePreviewPlan(e);
         var w = plan ? plan.sets.filter(function(st) { return st && !st.isWarmup && !isSetExtension(st); }).length : 0;
         return n + (w || parseInt(e.sets, 10) || 0);
       }, 0);
-      summaryLine = exCount + '종목 · ' + setSum + '세트 · ' + escapeHtml(routine.duration) + '분';
+      // Claude 루틴에는 예상 시간이 없다 — 없는 값은 적지 않는다.
+      summaryLine = exCount + '종목 · ' + setSum + '세트' +
+        (routine.source === 'claude' ? '' : ' · ' + escapeHtml(routine.duration) + '분');
     }
   }
 
@@ -898,33 +387,6 @@ function renderWorkoutStep2() {
     '</div>' +
     '<div class="px-5 pb-32">';
   
-  // 로딩 화면 — 부위 선택 화면과 같은 기준으로, 헤더 아래 남은 영역의 세로 가운데에 둔다.
-  // 바깥 래퍼의 pb-32(128px)를 쓰면 화면 높이를 두 번 세게 되어(가운데 계산 + 아래 여백)
-  // 스크롤할 내용이 없는데도 42px 이 남는다 → 이 화면만 래퍼 없이 조립한다.
-  if (state.routineLoading) {
-    return headerHtml.replace('<div class="px-5 pb-32">', '') +
-      '<div class="px-5 screen-center-rest">' +
-      '<div class="routine-loading-card">' +
-        '<div class="loading-spinner"></div>' +
-        '<p class="font-bebas text-3xl mb-1" style="color: var(--accent);">' + partNames[part] + '</p>' +
-        '<p class="text-xs text-stone-400 mb-1">' + partKor[part] + '</p>' +
-        '<p class="text-sm text-stone-300 mt-4">AI가 맞춤 루틴 분석 중...</p>' +
-      '</div>' +
-      '</div>' +
-      '</div>';
-  }
-  
-  // 에러 화면
-  if (!routine || routine.error) {
-    return headerHtml +
-      '<div class="card-warning text-center" style="padding: 40px 20px;">' +
-        '<p class="font-bebas text-2xl mb-2" style="color: var(--warn);">루틴 생성 실패</p>' +
-        '<p class="text-sm text-stone-400 mb-4">' + escapeHtml(routine ? routine.error : '알 수 없는 오류') + '</p>' +
-        '<button class="routine-btn-modify" onclick="regenerateRoutine()">다시 시도</button>' +
-      '</div>' +
-      '</div>';
-  }
-  
   // ── 처방은 종목 카드마다 **한 줄**로 적는다: "20kg × 8~12회 × 3세트 · 휴식 2분".
   //    표(머리글 + 5열 격자)는 종목 6개면 라벨 24개짜리 격자가 되어, 정작 읽어야 할
   //    "무엇을 몇 번" 이 숫자 더미에 묻혔다. 단위를 값에 붙이면 머리글 없이도 읽힌다.
@@ -932,8 +394,9 @@ function renderWorkoutStep2() {
   // 적는 값은 전부 **[시작]을 누르면 실제로 만들어질 세트**에서 온다(getRoutinePreviewPlan).
   // AI가 준 원본(ex.weight/ex.rest)을 그대로 적으면 화면이 거짓말을 한다 — 세션은
   // 기록 기반 추천 무게로 시작하고, 휴식은 종목 클래스와 세트 역할이 정한다.
-  var plans = exList.map(function(ex) { return getRoutinePreviewPlan(ex); });
-  var pres = exList.map(function(ex, i) { return buildPrescriptionValues(ex, plans[i]); });
+  // Claude 종목은 계획을 세우지 않는다 — 받은 세트가 곧 [시작] 이 만들 세트다(claudeSetsSummary).
+  var plans = exList.map(function(ex) { return ex.claudeSets ? null : getRoutinePreviewPlan(ex); });
+  var pres = exList.map(function(ex, i) { return ex.claudeSets ? null : buildPrescriptionValues(ex, plans[i]); });
   // 값이 없는 조각은 통째로 뺀다 — '—' 를 채워 넣으면 없는 정보를 있는 척하게 된다.
   var prescriptionLine = function(p, ex) {
     var parts = [];
@@ -963,7 +426,8 @@ function renderWorkoutStep2() {
     var plan = plans[idx];
     var schemeShort = (plan && plan.scheme !== 'straight' && SET_SCHEMES[plan.scheme])
       ? ' · ' + SET_SCHEMES[plan.scheme].short : '';
-    var line = prescriptionLine(pres[idx], ex) + escapeHtml(schemeShort);
+    var line = ex.claudeSets ? escapeHtml(claudeSetsSummary(ex))
+      : prescriptionLine(pres[idx], ex) + escapeHtml(schemeShort);
 
     exercisesHtml +=
       '<div class="' + cardCls + '" role="button" tabindex="0" aria-label="종목 편집" ' +
@@ -976,7 +440,7 @@ function renderWorkoutStep2() {
       '</div>';
   });
   
-  // 종목이 하나도 없으면 시작할 게 없다 — 3단계와 같은 규칙으로 [시작] 을 잠근다.
+  // 종목이 하나도 없으면 시작할 게 없다 — [시작] 을 잠근다.
   var isEmpty = exList.length === 0;
   var startBtn = isEmpty
     ? '<button class="routine-btn-start" disabled style="opacity: 0.4; cursor: not-allowed; box-shadow: none;">' +
@@ -989,28 +453,11 @@ function renderWorkoutStep2() {
   // 분석 헤더 카드(AI 분석 완료 배지 · 다시 분석 아이콘 · 큰 부위명 · 헤드라인)와 주의사항 박스는
   // 걷었다. 화면이 시작되자마자 **오늘 뭘 할지**가 보여야 하는데, 그 위를 설명이 덮고 있었다.
   // 종목 수·세트·시간은 헤더 오른쪽 한 줄로 옮겼다.
-  // 앱이 부상·장비 때문에 종목을 바꿨다면 그 사실은 알린다. 걷어낸 건 AI 가 쓴 '주의사항'
-  // 산문이지, **앱이 사용자 루틴에 한 일**이 아니다(사용자 지시: 주의사항 삭제).
-  //
-  // API 키가 없어 템플릿으로 짠 루틴이면 그것도 같은 자리에서 알린다. 옛 '기본 루틴' 배지는
-  // 'AI 분석 완료' 배지와 한 몸이라 같이 걷혔는데, 이건 정반대 뜻이라 없으면 사용자가
-  // 템플릿 루틴을 AI 맞춤으로 오해한다. 문구는 '지금 뭘 하면 되는지' 한 줄이다.
-  var notes = [];
-  if (routine.isFallback) notes.push('기본 루틴 — 더보기에서 API 키를 넣으면 내 1RM에 맞춰 짜여요');
-  if (routine.swaps && routine.swaps.length) notes.push(routine.swaps.join(' · '));
-  var swapNote = notes.length
-    ? '<p class="routine-swap-note">' + icon('info', 13) + escapeHtml(notes.join(' · ')) + '</p>'
-    : '';
-
   return headerHtml +
-    swapNote +
     exercisesHtml +
 
-    // 액션 버튼 (수정/시작)
+    // 액션 버튼 (시작)
     '<div class="routine-actions">' +
-      '<button class="routine-btn-modify" onclick="goToStep3()">' +
-        icon('msg', 16) + ' 수정하기' +
-      '</button>' +
       startBtn +
     '</div>' +
 
@@ -1306,10 +753,7 @@ window.endSession = function(fromBack) {
     state.exerciseSwapOpen = false;
     state.exerciseMenuOpen = false;
     state.exercisePickerMode = 'swap';
-    state.sessionChatOpen = false;      // 세트 사이 채팅은 세션과 함께 소멸
-    state.sessionChatPending = null;
-    state._sessionChatStreaming = false;
-    invalidateSessionChat();            // 아직 도착 안 한 스트림·신호 콜백 무효화
+    state.claudeSyncSheetOpen = false;
     saveActiveSession();
     saveRestTimer();
     if (restTickerInterval) { clearInterval(restTickerInterval); restTickerInterval = null; }
@@ -1352,7 +796,6 @@ function advanceCycleIfWeekComplete() {
   profile.currentWeek = updated.currentWeek;
   profile.cyclePhase = updated.cyclePhase;
   profile.weekSessionsDone = 0;
-  if (newCycleStarted) profile.lastDeloadAt = getTodayStr();
   storage.set(KEYS.PROFILE, profile);
   if (newCycleStarted) {
     state.data.cycleHistory = state.data.cycleHistory || [];
@@ -1363,20 +806,6 @@ function advanceCycleIfWeekComplete() {
     showToast(updated.currentWeek + '주차로 진행 · ' + updated.cyclePhase);
   }
 }
-
-// 디로드 앞당기기(선별안 D2): 사용자가 홈 카드의 제안을 눌렀을 때만. 현재 사이클의 디로드 주차로 바로 넘긴다.
-// 디로드는 근성장을 늘리지도 깎지도 않으므로(Coleman 2024·Pancar 2026) 앞당겨도 손해가 없고, 잦은 디로드만 피한다.
-window.startEarlyDeload = function() {
-  var profile = state.profile;
-  if (!profile || (profile.currentWeek || 1) >= CYCLE_LENGTH) return;
-  profile.currentWeek = CYCLE_LENGTH;
-  profile.cyclePhase = getPhaseByWeek(CYCLE_LENGTH);
-  profile.weekSessionsDone = 0;
-  profile.lastDeloadAt = getTodayStr();
-  storage.set(KEYS.PROFILE, profile);
-  showToast('디로드 주간으로 넘어갔어요');
-  render();
-};
 
 // 세션 마무리: 통계 계산 + 저장 + 완료 화면
 function finalizeSession() {
@@ -1418,10 +847,6 @@ function finalizeSession() {
         lastReps: ex.lastReps,
         isMain: !!ex.isMain
       };
-      // 세트 사이 채팅에서 확인 후 저장된 신호 (3단계) — 통증 게이트·다음 추천이 읽는다
-      if (ex.painFlag) { doneEntry.painFlag = true; if (ex.painNote) doneEntry.painNote = ex.painNote; }
-      if (ex.feel) doneEntry.feel = ex.feel;
-      if (ex.chatRpe) doneEntry.chatRpe = ex.chatRpe;
       exercisesDone.push(doneEntry);
 
       // PR 감지
@@ -1461,8 +886,6 @@ function finalizeSession() {
         });
       }
     }
-    // 완료 세트 0개 종목·취소된 세션의 채팅 신호는 여기 안 담겨도 유실되지 않는다 —
-    // 확인 시점에 recordChatSignal이 전용 저장소(CHAT_SIGNALS)에 이미 기록했다.
   });
   
   // workoutLog에 추가
@@ -1536,15 +959,15 @@ function finalizeSession() {
   state.exerciseSwapOpen = false;
   state.exerciseMenuOpen = false;
   state.exercisePickerMode = 'swap';
-  state.sessionChatOpen = false;        // 세트 사이 채팅은 세션과 함께 소멸
-  state.sessionChatPending = null;
-  state._sessionChatStreaming = false;
-  invalidateSessionChat();              // 아직 도착 안 한 스트림·신호 콜백 무효화
+  state.claudeSyncSheetOpen = false;
   saveActiveSession();
   saveRestTimer();
   if (restTickerInterval) { clearInterval(restTickerInterval); restTickerInterval = null; }
 
   render();
+
+  // 저장 뒤 Claude 커넥터로 기록만 보낸다(코드가 없으면 요청 없음). js/ai.js
+  uploadClaudeSnapshot();
 }
 
 // 완료 화면 → 홈으로
@@ -1603,6 +1026,8 @@ function saveCompletionCondition() {
   if (!state.data.conditionLog) state.data.conditionLog = [];
   state.data.conditionLog.unshift(entry);
   storage.set(KEYS.CONDITION_LOG, state.data.conditionLog);
+  // RPE·컨디션도 스냅샷에 들어간다 — 다시 보낸다(내용이 같으면 알아서 건너뛴다). js/ai.js
+  uploadClaudeSnapshot();
 }
 
 // 세트 클릭 → 편집 시트 열기
@@ -1778,6 +1203,11 @@ window.addSetToExercise = function(exerciseIdx) {
   if (!state.activeSession) return;
   var exercise = state.activeSession.exercises[exerciseIdx];
   if (!exercise) return;
+  // Claude 세션: 편집 시트의 세트 +1 과 같은 문 — 마지막 작업 세트를 그대로 복제한다(설계서 결정 5).
+  if (isClaudeSession()) {
+    if (applyClaudeSessionEdit(exercise, 'sets', 1)) { saveActiveSession(); render(); }
+    return;
+  }
   // 드롭·마이오렙은 마지막 워킹세트의 연장이라 이어받을 기준이 아니다 — 본 워킹세트에서 이어받는다.
   var working = exercise.sets.filter(function(s) {
     return !s.isWarmup && !isSetExtension(s);
@@ -1855,7 +1285,8 @@ window.completeSet = function() {
   // [v2 §2-E③] 탑세트가 목표 반복에 못 미치면 남은 백오프를 한 스텝 더 내린다 (Khairallah 2009).
   // 백오프 비율(90%·경량 85%)은 탑세트를 채웠을 때를 전제로 계산된 값이라(v2 §1-B), 탑에서 이미 무너진 날엔
   // 백오프에서 반복이 또 무너진다 — 그날 컨디션에 맞춰 감량폭을 키우는 자가조절이다.
-  if (set.role === 'top') {
+  // Claude 세션은 Opus 가 정한 숫자 그대로 — 자동 조정을 하지 않는다.
+  if (set.role === 'top' && !isClaudeSession()) {
     // 재저장(반복 수를 고쳐 저장)에도 적용된다 — 이미 낮춰 뒀으면 0을 돌려주므로 토스트가 반복되지 않는다.
     if (applyTopSetAutoDeload(exercise) > 0) showToast('탑세트가 목표에 못 미쳐 백오프를 한 칸 낮췄어요');
   }
@@ -1888,7 +1319,8 @@ window.completeSet = function() {
   // 기본값도 근거보다 짧았다(고립 90초 → 120초, 고중량 복합 150초 → 180초).
   // 세트가 지정한 rest(탑세트·백오프·드롭 사이 등) > AI 지정 rest > 클래스 기본값,
   // 그 위에 §3-C 자가조절(직전 세트가 목표 하단 미달이면 +30초, 상한 240초).
-  var restDuration = resolveRestSec(exercise, set);
+  // Claude 세션은 세트에 적힌 휴식 그대로(미달 +30초 자가조절 없음).
+  var restDuration = isClaudeSession() ? claudeRestSec(exercise, set) : resolveRestSec(exercise, set);
   var nextExerciseIdx = null;
 
   // 길항근 슈퍼세트: 페어의 앞 종목을 끝냈으면 짧게 쉬고 상대 종목으로 넘어간다.
@@ -1959,9 +1391,8 @@ function startRestTimerTick() {
       saveRestTimer();
       clearInterval(restTickerInterval);
       restTickerInterval = null;
-      // 시트(편집/종목변경/채팅)가 열려 있으면 전체 렌더 대신 타이머 UI만 제거
-      // (채팅 입력·스트리밍 중 전체 렌더는 키보드/포커스/말풍선을 끊는다)
-      if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.topSetSheet || state.sessionChatOpen || state.muscleMapZoom || state.lastRecordOpen || state.exerciseEdit) {
+      // 시트(편집/종목변경)가 열려 있으면 전체 렌더 대신 타이머 UI만 제거
+      if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.topSetSheet || state.muscleMapZoom || state.lastRecordOpen || state.exerciseEdit) {
         var wrapEl = document.querySelector('.rest-timer-wrap');
         if (wrapEl && wrapEl.parentNode) wrapEl.parentNode.removeChild(wrapEl);
       } else {
@@ -1969,9 +1400,8 @@ function startRestTimerTick() {
       }
       return;
     }
-    // 시트(편집/종목변경/세트사이채팅)가 열려 있으면 시트가 깜빡이지 않도록 타이머만 부분 갱신
-    // (채팅은 입력·스트리밍 중이라 전체 렌더가 매초 돌면 입력이 초기화된다)
-    if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.topSetSheet || state.sessionChatOpen || state.muscleMapZoom || state.lastRecordOpen || state.exerciseEdit) {
+    // 시트(편집/종목변경)가 열려 있으면 시트가 깜빡이지 않도록 타이머만 부분 갱신
+    if (state.editingSet || state.exerciseMenuOpen || state.exerciseSwapOpen || state.setSchemeOpen || state.topSetSheet || state.muscleMapZoom || state.lastRecordOpen || state.exerciseEdit) {
       var remaining = state.restTimer.duration - elapsed;
       var el = document.getElementById('rest-time-text');
       if (el) {
@@ -2026,14 +1456,8 @@ window.closeExerciseMenu = function() {
   render();
 };
 
-// 운동 중 현재 종목을 다른 종목으로 교체
-// 종목 메뉴에서 이어지는 두 갈래. 메뉴를 닫고 시트를 연다 —
+// 종목 메뉴에서 이어지는 갈래. 메뉴를 닫고 시트를 연다 —
 // 안 닫으면 시트 뒤에 메뉴가 남아 뒤로가기를 두 번 눌러야 세션으로 돌아온다.
-window.openSessionChatFromMenu = function() {
-  state.exerciseMenuOpen = false;
-  openSessionChat();
-};
-
 window.openSetSchemeFromMenu = function() {
   state.exerciseMenuOpen = false;
   openSetSchemeSheet();
@@ -2135,7 +1559,7 @@ function rebuildPendingSets(ex, opts) {
   ex.sets = doneSets.concat(keptWarmups, plan.sets);
   // 자동 디로드는 완료된 탑세트의 반복 수를 보고 남은 백오프를 깎는다 — 교체 뒤에 돌리면
   // 옛 종목의 실패 판정으로 새 종목의 첫 세트가 감량된다.
-  if (!fresh) applyTopSetAutoDeload(ex);
+  if (!fresh && !isClaudeSession()) applyTopSetAutoDeload(ex);   // Claude 세션은 자동 조정 없음
   return plan;
 }
 
@@ -2152,6 +1576,7 @@ function unlinkSuperset(exercises, idx) {
 }
 
 window.openSetSchemeSheet = function() {
+  if (isClaudeSession()) return;   // Claude 세션은 세트법 재배정 없음 (설계서 결정 5)
   state.setSchemeOpen = true;
   state.exerciseSwapOpen = false;
   state.exerciseMenuOpen = false;
@@ -2199,6 +1624,7 @@ function schemeBaseSet(ex) {
 // 사다리(배율)만 새로 만든다. 그래서 손수 고친 무게·자동 디로드가 전환으로 사라지지 않는다.
 // baseWeight를 넘기는 곳은 탑세트 무게 입력 하나뿐이고, 그 값은 사용자가 확정한 숫자다.
 function applySchemeToSession(ex, schemeId, baseWeight) {
+  if (isClaudeSession()) return null;   // Claude 세션은 세트법 재배정 없음 (설계서 결정 5)
   // 저장 자체가 거부되면(재활 잠금·없는 스킴 id) 세트도 건드리지 않는다. 반환값을 버리면
   // 시트를 거쳐 들어온 경로가 재활 종목의 세트법을 바꿔 버린다(3차 H2).
   if (!setSetSchemeOverride(ex.name, schemeId)) {
@@ -2225,7 +1651,7 @@ function applySchemeToSession(ex, schemeId, baseWeight) {
 // 사용자가 세트법을 고름 — 종목별 override로 저장되어 다음 세션에도 유지된다.
 window.applySetScheme = function(schemeId) {
   var session = state.activeSession;
-  if (!session) return;
+  if (!session || isClaudeSession()) return;
   var ex = session.exercises[session.currentExerciseIdx];
   if (!ex) return;
   // setSetSchemeOverride 와 같은 판정 (재활 잠금 · 없는 스킴 id). 아래 가드보다 먼저 걸러야
@@ -2291,7 +1717,7 @@ window.applySetScheme = function(schemeId) {
 
 window.openTopSetWeightSheet = function() {
   var session = state.activeSession;
-  if (!session) return;
+  if (!session || isClaudeSession()) return;
   var idx = session.currentExerciseIdx;
   var ex = session.exercises[idx];
   if (!ex) return;
@@ -2343,12 +1769,10 @@ function topSetPrefill(ex) {
 
   var recent = recentTopWeight(ex.name);
   if (typeof recent === 'number') {
-    // 지난 세션 실측은 안전 게이트를 모른다. 통증으로 증량이 잠긴 종목이면 그 처방(prog.weight)을
-    // 넘지 못하게 맞춘다 — 아니면 "증량 보류"를 말하면서 증량을 그리게 된다(3차 H1).
+    // 2세션 연속 하한 미달로 감량이 확정된 종목이면 그 처방(prog.weight)을 넘지 못하게 잘라낸다 —
+    // 아니면 지난 실측(더 무거운 값)을 미리 채워 놓고 감량 안내와 반대되는 무게를 보여주게 된다.
     var prog = getProgressiveRecommendation(ex.name, ex.targetReps);
-    // 2세션 연속 하한 미달로 감량이 확정된 종목도 같은 방식으로 잘라낸다 — 아니면 지난
-    // 실측(더 무거운 값)을 미리 채워 놓고 감량 안내와 반대되는 무게를 보여주게 된다.
-    if (prog && (prog.painGated || prog.source === 'regress') && typeof prog.weight === 'number') {
+    if (prog && prog.source === 'regress' && typeof prog.weight === 'number') {
       var clamped = isReverseProgression(ex.name)
         ? Math.max(recent, prog.weight)     // 역방향은 보조가 적을수록 어렵다
         : Math.min(recent, prog.weight);
@@ -2646,6 +2070,15 @@ function swapPreviewExercise(ctx, newName) {
   var ex = ctx.exercise;
   if (!name || name === ex.name) { closeExerciseSwap(); return; }
 
+  // Claude 종목은 받은 세트(claudeSets)를 그대로 두고 이름만 바꾼다.
+  if (ex.claudeSets) {
+    ex.name = name;
+    saveWizard();
+    closeExerciseSwap();
+    showToast(name + ' 으로 바꿨어요');
+    return;
+  }
+
   var info = EXERCISE_BODY_PART_MAP[name] || getExercisePart(name);
   var rules = EXERCISE_CLASS_RULES[getExerciseClass(name)];
   var plan = getSessionSetPlan(name, null, rules.repMin + '-' + rules.repMax, { sets: parseInt(ex.sets, 10) || 3 });
@@ -2672,15 +2105,14 @@ function applyExerciseSwap(ex, newName) {
   // 아래 "남은 워킹세트 수" 계산이 0이 되어 세트 없는 빈 종목이 되는 걸 막는다.
   restoreSkippedSets(ex);
 
-  // 채팅 신호는 옛 종목의 것 — 새 종목에 귀속되지 않게 객체에서 제거
-  // (신호 자체는 확인 시점에 recordChatSignal이 옛 이름으로 이미 저장했다)
-  if (ex.painFlag || ex.feel || ex.chatRpe) {
-    delete ex.painFlag; delete ex.painNote; delete ex.feel; delete ex.chatRpe;
-  }
-  // 확인 대기 중인 신호 칩이 이 슬롯 것이면 폐기 (엉뚱한 종목에 기록 방지)
-  if (state.sessionChatPending && state.activeSession &&
-      state.activeSession.exercises[state.sessionChatPending.exIdx] === ex) {
-    state.sessionChatPending = null;
+  // Claude 세션: 받은 세트를 그대로 두고 이름만(무게만 새 장비 단위). 세트법·워밍업 재구성 없음.
+  if (isClaudeSession()) {
+    swapClaudeSessionExercise(ex, newName);
+    unlinkSuperset(state.activeSession.exercises, state.activeSession.currentExerciseIdx);
+    state.exerciseSwapOpen = false;
+    saveActiveSession();
+    render();
+    return;
   }
 
   // 종목명/타입 갱신 (정확 매칭 없으면 fuzzy)
@@ -2705,18 +2137,6 @@ function applyExerciseSwap(ex, newName) {
   state.exerciseSwapOpen = false;
   saveActiveSession();
   render();
-
-  warnExerciseSafety(newName);
-}
-
-// 부상 대조 경고 토스트 (교체·추가가 같은 규칙을 쓰도록 한 곳에 모음). 막지는 않는다 — 사용자 선택 존중.
-function warnExerciseSafety(name) {
-  var safety = checkExerciseSafety(name);
-  if (safety.level === 'contra') {
-    showToast(INJURY_AREAS[safety.area].kr + ' 부상 등록됨 — 이 종목은 금기예요' + (safety.sub ? ' (대체: ' + safety.sub + ')' : ''));
-  } else if (safety.level === 'caution') {
-    showToast(INJURY_AREAS[safety.area].kr + ' 주의: ' + (safety.mod || '가볍게, 통증 없는 범위로'));
-  }
 }
 
 // ═══════════════════════════════════════════════
@@ -2744,7 +2164,7 @@ function buildSessionExercise(name) {
 }
 
 // 종목 배열 중간에 하나를 끼워 넣으면 **저장돼 있던 종목 index가 전부 한 칸씩 밀린다.**
-// 슈퍼세트 짝·휴식 타이머·편집 중 세트·채팅 신호가 전부 index로 종목을 가리키므로
+// 슈퍼세트 짝·휴식 타이머·편집 중 세트가 전부 index로 종목을 가리키므로
 // splice 전에 여기서 같이 밀어 준다. 안 밀면 엉뚱한 종목에 기록이 붙는다.
 function shiftSessionExerciseIndexes(session, insertAt) {
   var bump = function(v) { return (typeof v === 'number' && v >= insertAt) ? v + 1 : v; };
@@ -2761,7 +2181,6 @@ function shiftSessionExerciseIndexes(session, insertAt) {
     saveRestTimer();
   }
   if (state.editingSet) state.editingSet.exerciseIdx = bump(state.editingSet.exerciseIdx);
-  if (state.sessionChatPending) state.sessionChatPending.exIdx = bump(state.sessionChatPending.exIdx);
 }
 
 window.addExerciseAfterCurrent = function(newName) {
@@ -2771,7 +2190,10 @@ window.addExerciseAfterCurrent = function(newName) {
   if (!name) return;
 
   var insertAt = session.currentExerciseIdx + 1;
-  var newEx = buildSessionExercise(name);
+  // Claude 세션은 마지막 수행 작업 세트를 그대로 복사한다 (설계서 결정 13 — 세트법·자동 워밍업 없음)
+  var newEx = isClaudeSession()
+    ? buildClaudeUserExercise(name, session.exercises[session.currentExerciseIdx])
+    : buildSessionExercise(name);
   shiftSessionExerciseIndexes(session, insertAt);
   session.exercises.splice(insertAt, 0, newEx);
 
@@ -2783,7 +2205,6 @@ window.addExerciseAfterCurrent = function(newName) {
   render();
 
   showToast('“' + name + '” 추가 — 지금 종목 다음 차례예요');
-  warnExerciseSafety(name);
 };
 
 // ═══════════════════════════════════════════════
@@ -2862,7 +2283,12 @@ window.unskipExercise = function(idx) {
 
   // 보관본이 없는 예외(옛 세션 등) — 남은 세트를 현재 세트법 기준으로 새로 만든다(완료분 제외한 만큼).
   // 세트법 변경·종목 교체와 **같은 재구성 규칙**을 쓴다(2차 #10).
-  if (!(ex.sets || []).some(function(s) { return !s.completed; })) {
+  if (!(ex.sets || []).some(function(s) { return !s.completed; }) && isClaudeSession()) {
+    // Claude 세션은 종목 추가와 같은 규칙 — 마지막 수행 작업 세트 복사 (설계서 결정 13)
+    ex.sets = (ex.sets || []).concat(claudeUserAddedSets(ex.name, session.exercises[session.currentExerciseIdx]));
+    var claudeTr = claudeSessionTargetReps(ex);
+    if (claudeTr) { ex.targetReps = claudeTr; ex.reps = claudeTr; }
+  } else if (!(ex.sets || []).some(function(s) { return !s.completed; })) {
     var refSet = sessionReferenceSet(ex);
     rebuildPendingSets(ex, {
       sets: Math.max(1, 3 - countWorkingSets(ex.sets)),
@@ -2949,7 +2375,8 @@ function renderWorkoutSession() {
 
     // 한계반복(AMRAP) 세트는 목표가 한 숫자가 아니라 범위다 — "12~15회 · 한계까지"가 이 세트의 정의다.
     // 완료된 뒤에는 같은 자리에 **실제로 한 횟수**가 들어오므로 범위 표기를 걷는다.
-    var repsText = (!set.completed && set.amrap && set.repsMax > set.reps)
+    // Claude 세션의 범위 목표('8-10')도 같은 방식으로 적는다.
+    var repsText = (!set.completed && (set.amrap || session.source === 'claude') && set.repsMax > set.reps)
       ? set.reps + '~' + set.repsMax : set.reps;
 
     // 세트 역할 뱃지 (탑세트 / 백오프 / 백다운 / 드롭 / 미니). 옛 세션 복원처럼 role이 없으면 아무것도 안 그린다.
@@ -3088,16 +2515,14 @@ function renderWorkoutSession() {
             '</div>' +
             '<button class="session-header-btn" onclick="closeExerciseMenu()">' + icon('close', 18) + '</button>' +
           '</div>' +
-          // 상단 버튼 3개를 하나로 모으면서 코치·세트법이 여기로 들어왔다.
+          // 상단 버튼 3개를 하나로 모으면서 세트법이 여기로 들어왔다.
           // 순서는 운동 중 손이 가는 빈도순 — 위험한 건너뛰기는 맨 아래.
-          '<button class="option-card" style="width:100%; margin-bottom:6px; text-align:left;" onclick="openSessionChatFromMenu()">' +
-            '<p class="font-display text-sm">AI 코치 상담</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">세트 사이에 짧게 물어봐요</p>' +
-          '</button>' +
+          // Claude 세션은 세트법을 다시 매기지 않는다 — 메뉴에서 뺀다(설계서 결정 5).
+          (isClaudeSession() ? '' :
           '<button class="option-card" style="width:100%; margin-bottom:6px; text-align:left;" onclick="openSetSchemeFromMenu()">' +
             '<p class="font-display text-sm">세트법 바꾸기</p>' +
             '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + escapeHtml((SET_SCHEMES[sessionSchemeOf(exercise)] || SET_SCHEMES.straight).kr) + '로 하는 중</p>' +
-          '</button>' +
+          '</button>') +
           '<button class="option-card" style="width:100%; margin-bottom:6px; text-align:left;" onclick="openExerciseSwap()">' +
             '<p class="font-display text-sm">종목 교체</p>' +
             '<p class="text-[11px] font-mono text-stone-500 mt-0.5">지금 종목을 다른 종목으로 바꿔요</p>' +
@@ -3321,7 +2746,6 @@ function renderWorkoutSession() {
     swapSheetHtml +
     buildSetSchemeSheetHtml(session, exercise) +
     buildTopSetWeightSheetHtml(session, exercise) +
-    buildSessionChatSheetHtml(session, exercise) +
     buildLastRecordSheetHtml(exercise) +
     buildExerciseEditSheetHtml() +
     buildMuscleMapZoomHtml();
@@ -3406,7 +2830,7 @@ function exerciseEditValues(ex) {
     weight: exerciseBaseWeight(ex),
     reps: String(ex.targetReps || '8-12'),
     sets: working.length,                            // 완료분 포함 총 세트 수(사용자가 세는 단위)
-    rest: exerciseRestLabelSec(ex)
+    rest: exerciseRestLabelSec(ex, isClaudeSession() ? claudeRestSec : null)   // 타이머와 같은 규칙
   };
 }
 
@@ -3445,6 +2869,17 @@ function applyExerciseChange(ex, field, value) {
   // 호출부(코치 [적용])가 엉뚱한 갈래로 빠진다.
   var isPreview = isPreviewExercise(ex);
   var v = exerciseEditValues(ex);
+
+  // Claude 세션 종목: 남은 세트만 직접 고친다(세트를 다시 짜지 않는다). 휴식은 아래 공통 갈래.
+  if (!isPreview && isClaudeSession() && field !== 'rest') {
+    var d = 0;
+    if (field === 'weight') d = snapWeightToEquipment(Math.max(0, Number(value)), ex.name) - (v.weight === null ? 0 : v.weight);
+    else if (field === 'reps') d = parseInt(String(value), 10) - parseInt(v.reps, 10);
+    else if (field === 'sets') d = parseInt(value, 10) - v.sets;
+    if (!(d === d) || !applyClaudeSessionEdit(ex, field, d)) return false;
+    saveActiveSession();
+    return true;
+  }
 
   if (field === 'weight') {
     var w = snapWeightToEquipment(Math.max(0, Number(value)), ex.name);
@@ -3494,7 +2929,7 @@ function applyExerciseChange(ex, field, value) {
   }
 
   // 미리보기 루틴은 마법사 블롭으로만 저장된다 — 여기서 안 부르면 새로고침에 편집이 사라진다.
-  if (isPreview) { state.routinePreviewExpanded = true; saveWizard(); }
+  if (isPreview) saveWizard();
   else saveActiveSession();
   return true;
 }
@@ -3502,6 +2937,12 @@ function applyExerciseChange(ex, field, value) {
 window.adjustExerciseEdit = function(field, delta) {
   var ex = exerciseEditTarget();
   if (!ex) { closeExerciseEditNow(); return; }
+  // Claude 종목(2단계): 받은 세트를 직접 고친다 — 무게는 작업 세트 전부 같은 폭, 반복은 전부, 세트는 복제/삭제.
+  if (isClaudePreviewExercise(ex)) {
+    if (applyClaudeExerciseEdit(ex, field, delta)) saveWizard();
+    render();
+    return;
+  }
   var v = exerciseEditValues(ex);
 
   var next;
@@ -3565,7 +3006,8 @@ function exerciseEditRow(label, unit, value, field, steps) {
 function buildExerciseEditSheetHtml() {
   var ex = exerciseEditTarget();
   if (!ex) return '';
-  var v = exerciseEditValues(ex);
+  var claude = isClaudePreviewExercise(ex);
+  var v = claude ? claudeEditValues(ex) : exerciseEditValues(ex);
   var preview = isPreviewExercise(ex);
   var inc = getWeightIncrement(ex.name);
   var reverse = isReverseProgression(ex.name);
@@ -3574,7 +3016,8 @@ function buildExerciseEditSheetHtml() {
     exerciseEditRow(reverse ? '보조 무게' : '무게', 'kg', (v.weight === null ? '—' : v.weight), 'weight', [-2 * inc, -inc, inc, 2 * inc]) +
     exerciseEditRow('목표 반복', '회', v.reps, 'reps', [-1, 1]) +
     exerciseEditRow('세트', '개', v.sets, 'sets', [-1, 1]) +
-    exerciseEditRow('쉬는시간', '초', v.rest, 'rest', [-EXERCISE_EDIT_REST_STEP, EXERCISE_EDIT_REST_STEP]);
+    // Claude 종목의 휴식은 세트마다 받은 값이라 여기서 한 값으로 바꾸지 않는다.
+    (claude ? '' : exerciseEditRow('쉬는시간', '초', v.rest, 'rest', [-EXERCISE_EDIT_REST_STEP, EXERCISE_EDIT_REST_STEP]));
 
   return '<div class="sheet-overlay" onclick="closeExerciseEdit()">' +
       '<div class="sheet" onclick="event.stopPropagation()">' +
@@ -3587,7 +3030,8 @@ function buildExerciseEditSheetHtml() {
           '<button class="session-header-btn" onclick="closeExerciseEdit()" aria-label="닫기">' + icon('close', 18) + '</button>' +
         '</div>' +
         (preview ? '' : noteBlock('아직 안 한 세트에만 적용돼요.',
-          '이미 끝낸 세트의 기록은 그대로 둬요. 무게·세트를 바꾸면 남은 세트를 세트법에 맞춰 다시 짜요.')) +
+          '이미 끝낸 세트의 기록은 그대로 둬요.' +
+          (isClaudeSession() ? '' : ' 무게·세트를 바꾸면 남은 세트를 세트법에 맞춰 다시 짜요.'))) +
         rows +
         // 인체도는 컨트롤 **아래**에 둔다 — 위에 두면 좁은 화면에서 정작 고칠 숫자가 화면 밖으로 밀린다.
         buildMuscleMapBlock(ex.name, { compact: true }) +
@@ -3813,216 +3257,6 @@ function buildTopSetWeightSheetHtml(session, exercise) {
         '</div>' +
       '</div>' +
     '</div>';
-}
-
-// 세트 사이 코치 시트 (운동 중 채팅 — 3단계)
-function buildSessionChatSheetHtml(session, exercise) {
-  if (!state.sessionChatOpen) return '';
-
-  var msgs = (session.chat || []).map(function(m, mi) {
-    return '<div class="chat-line ' + (m.role === 'user' ? 'user' : 'coach') + '">' +
-      renderMarkdown(m.content) + buildCoachApplyCardHtml(m, mi) + '</div>';
-  }).join('');
-
-  var streamingHtml = state._sessionChatStreaming
-    ? '<div class="chat-line coach"><span id="session-chat-stream"></span><span class="chat-cursor">▌</span></div>'
-    : '';
-
-  // 추출 신호 확인 칩 (확인 후 저장)
-  var pendingHtml = (state.sessionChatPending && !state._sessionChatStreaming) ? buildChatSignalChipHtml() : '';
-
-  return '' +
-    '<div class="sheet-overlay" onclick="closeSessionChat()">' +
-      '<div class="sheet" onclick="event.stopPropagation()" style="display:flex; flex-direction:column; max-height:70vh;">' +
-        '<div class="sheet-handle"></div>' +
-        '<div class="flex items-center justify-between mb-2">' +
-          '<div>' +
-            '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">세트 사이 코치</p>' +
-            '<p class="font-bebas text-xl mt-1">' + escapeHtml(exercise.name) + '</p>' +
-          '</div>' +
-          '<button class="session-header-btn" onclick="closeSessionChat()">' + icon('close', 18) + '</button>' +
-        '</div>' +
-        '<div id="session-chat-list" style="flex:1; overflow-y:auto; min-height:120px; padding:4px 2px;">' +
-          (msgs || '<p class="text-xs font-mono text-stone-500" style="padding:12px 4px;">자세·무게·통증, 뭐든 물어보세요.</p>') +
-          streamingHtml +
-          pendingHtml +
-        '</div>' +
-        '<div class="flex gap-2 mt-3">' +
-          '<input id="session-chat-input" type="text" placeholder="메시지 입력…" ' +
-            (state._sessionChatStreaming ? 'disabled ' : '') +
-            'value="' + escapeHtml(state._sessionChatDraft || '') + '" ' +
-            'oninput="state._sessionChatDraft = this.value" ' +
-            'onkeydown="if(event.key===\'Enter\')sendSessionChatMessage()" onclick="event.stopPropagation()" ' +
-            'style="flex:1; padding:10px 12px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:10px; color:inherit; font-size:14px; outline:none;" />' +
-          '<button class="rest-done-btn" onclick="sendSessionChatMessage()"' + (state._sessionChatStreaming ? ' disabled' : '') + '>전송</button>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-}
-
-// 추출 신호 확인 칩 HTML (시트 렌더와 DOM 직접 삽입 양쪽에서 사용)
-function buildChatSignalChipHtml() {
-  var p = state.sessionChatPending;
-  var session = state.activeSession;
-  if (!p || !session) return '';
-  var parts = [];
-  if (p.pain) parts.push('통증' + (p.painNote ? ' (' + escapeHtml(p.painNote) + ')' : ''));
-  if (p.feel === 'bad') parts.push('자극 나쁨');
-  if (p.feel === 'good') parts.push('자극 좋음');
-  if (p.rpe) parts.push('RPE ' + p.rpe);
-  var targetEx = session.exercises[p.exIdx];
-  return '<div class="chat-signal-chip" id="session-chat-chip">' +
-      '<p class="text-xs">' + parts.join(' · ') + ' — <b>' + escapeHtml(p.exName || (targetEx ? targetEx.name : '')) + '</b>에 기록할까요?' +
-        (p.pain ? '<br/><span class="text-stone-400">통증 기록 시 이 종목 증량이 자동 중단돼요</span>' : '') + '</p>' +
-      '<div class="flex gap-2 mt-2">' +
-        '<button class="adj-btn accent-btn" style="flex:1;" onclick="confirmChatSignal()">기록</button>' +
-        '<button class="adj-btn" style="flex:1;" onclick="dismissChatSignal()">아니오</button>' +
-      '</div>' +
-    '</div>';
-}
-
-// ── 세트 사이 코치: 열기/닫기/전송/신호 확인 ──
-function openSessionChat() {
-  if (!state.activeSession) return;
-  if (!state.activeSession.chat) state.activeSession.chat = [];
-  state.sessionChatOpen = true;
-  render();
-  scrollSessionChatToBottom();
-}
-
-function closeSessionChat() {
-  state.sessionChatOpen = false;
-  render();
-}
-
-// 바닥 근처일 때만 자동 스크롤 (위로 올려 읽는 중이면 방해 안 함). force=true면 무조건.
-function scrollSessionChatToBottom(force) {
-  var list = document.getElementById('session-chat-list');
-  if (!list) return;
-  var nearBottom = (list.scrollHeight - list.scrollTop - list.clientHeight) < 60;
-  if (force || nearBottom) list.scrollTop = list.scrollHeight;
-}
-
-// 진행 중인 전송의 세대 토큰 — 세션 종료/새 전송 시 증가해, 늦게 도착한
-// 스트림·신호 추출 콜백이 다음 세션이나 다음 전송을 오염시키지 못하게 한다.
-var _sessionChatGen = 0;
-function invalidateSessionChat() {
-  _sessionChatGen++;
-}
-
-function sendSessionChatMessage() {
-  if (state._sessionChatStreaming) return;
-  var input = document.getElementById('session-chat-input');
-  var text = (input && input.value || '').trim();
-  if (!text) return;
-  var session = state.activeSession;
-  if (!session) return;
-  if (!session.chat) session.chat = [];
-
-  session.chat.push({ role: 'user', content: text });
-  if (session.chat.length > 40) session.chat = session.chat.slice(-40); // 세션 내 캡
-  state._sessionChatStreaming = true;
-  state._sessionChatDraft = '';
-  saveActiveSession();
-  render();
-  scrollSessionChatToBottom(true);
-
-  var gen = ++_sessionChatGen;
-  var exIdx = session.currentExerciseIdx;
-  var exName = session.exercises[exIdx].name;
-
-  // 신호 추출 (haiku, 병렬) — 결과는 확인 칩으로만, 저장은 사용자 확인 후
-  extractWorkoutSignals(text, exName).then(function(sig) {
-    // 세션이 바뀌었거나(종료 후 새 세션) 다른 전송으로 넘어갔으면 폐기
-    if (!sig || gen !== _sessionChatGen || state.activeSession !== session) return;
-    sig.exIdx = exIdx;
-    sig.exName = exName;
-    // 미확정 칩이 같은 종목이면 병합 (덮어쓰기로 이전 신호가 사라지지 않게)
-    var prev = state.sessionChatPending;
-    if (prev && prev.exIdx === exIdx && prev.exName === exName) {
-      sig.pain = sig.pain || prev.pain;
-      sig.painNote = sig.painNote || prev.painNote;
-      sig.feel = sig.feel || prev.feel;
-      sig.rpe = sig.rpe || prev.rpe;
-    }
-    state.sessionChatPending = sig;
-    if (!state.sessionChatOpen) return;
-    // 전체 렌더 대신 칩만 DOM에 삽입 — 사용자가 다음 메시지를 입력 중이어도 끊지 않는다
-    if (!state._sessionChatStreaming) insertPendingChipDom();
-  });
-
-  // 코치 응답 (스트리밍)
-  var apiMessages = buildChatApiMessages(session.chat);
-
-  callSessionCoachAPI(apiMessages, function(fullText) {
-    if (gen !== _sessionChatGen) return; // 옛 스트림이 새 화면을 덮어쓰지 않게
-    var el = document.getElementById('session-chat-stream');
-    // 응답 끝에 붙는 ```apply 블록은 사용자에게 보일 것이 아니다. 스트리밍 중에는 아직
-    // 닫히지 않아 parseCoachApplyBlock 이 못 잡으므로, 여는 표시부터 잘라서 보여준다.
-    if (el) { el.textContent = stripCoachApplyBlock(fullText); scrollSessionChatToBottom(); }
-  }).then(function(result) {
-    if (state.activeSession !== session) return; // 세션 종료 후 도착 → 통째로 폐기
-    if (gen !== _sessionChatGen) return;         // 다른 전송으로 대체됨 → 폐기
-    state._sessionChatStreaming = false;
-    if (result.error) {
-      session.chat.push({ role: 'assistant', content: result.error, isError: true });
-    } else {
-      var parsedApply = parseCoachApplyBlock(result.text);
-      var chatMsg = { role: 'assistant', content: parsedApply.clean };
-      if (parsedApply.actions.length) {
-        chatMsg.apply = parsedApply.actions;
-        chatMsg.applyStatus = 'pending';
-      }
-      session.chat.push(chatMsg);
-    }
-    saveActiveSession();
-    if (state.sessionChatOpen) { render(); scrollSessionChatToBottom(true); }
-  });
-}
-
-// 대화 이력 → API 메시지 배열 (순수 함수 — 테스트 대상).
-// 에러 메시지 제외 후 최근 12개로 자르고, 반드시 user로 시작하게 앞부분을 정리한다
-// (Anthropic API는 첫 메시지가 assistant면 400을 반환 → 자르기가 어긋나면 채팅이 영구 먹통).
-function buildChatApiMessages(chat) {
-  var msgs = (chat || [])
-    .filter(function(m) { return !m.isError; })
-    .slice(-12)
-    .map(function(m) { return { role: m.role, content: m.content }; });
-  while (msgs.length && msgs[0].role !== 'user') msgs.shift();
-  return msgs;
-}
-
-// 확인 칩을 전체 렌더 없이 채팅 목록 끝에 삽입 (입력 포커스 보존)
-function insertPendingChipDom() {
-  var list = document.getElementById('session-chat-list');
-  if (!list) return;
-  var old = document.getElementById('session-chat-chip');
-  if (old && old.parentNode) old.parentNode.removeChild(old);
-  list.insertAdjacentHTML('beforeend', buildChatSignalChipHtml());
-  scrollSessionChatToBottom();
-}
-
-function confirmChatSignal() {
-  var sig = state.sessionChatPending;
-  state.sessionChatPending = null;
-  if (sig && state.activeSession) {
-    var ex = state.activeSession.exercises[sig.exIdx];
-    // 종목이 교체됐으면(이름 불일치) 엉뚱한 종목에 기록하지 않는다
-    if (ex && sig.exName && ex.name !== sig.exName) {
-      showToast('종목이 바뀌어 기록을 취소했어요 (' + sig.exName + ' → ' + ex.name + ')');
-    } else if (ex && applyChatSignalToExercise(ex, sig)) {
-      // 전용 저장소에 즉시 기록 — 세션 취소·0세트 종료·종목 교체에도 신호가 보존된다
-      recordChatSignal(sig.exName || ex.name, sig);
-      saveActiveSession();
-      showToast(sig.pain ? '통증 기록됨 — 이 종목 증량을 중단해요' : '기록했어요 — 다음 추천에 반영돼요');
-    }
-  }
-  render();
-}
-
-function dismissChatSignal() {
-  state.sessionChatPending = null;
-  render();
 }
 
 // ═══════════════════════════════════════════════
@@ -4596,63 +3830,80 @@ function buildMobilityGuideHtml(kind) {
 }
 
 // ═══════════════════════════════════════════════
-// 더보기 화면 - 핸들러
+// Claude 연결 시트 — 연결 코드 저장 · 지금 보내기 (js/ai.js)
 // ═══════════════════════════════════════════════
-
-// API 키 모달 열기
-window.openApiKeyModal = function() {
-  state.apiKeyModalOpen = true;
-  state.apiKeyInput = state.apiKey || '';
+window.openClaudeSyncSheet = function() {
+  state.claudeSyncInput = getSyncToken() || '';
+  state.claudeSyncSendError = '';
+  state.claudeSyncSheetOpen = true;
   render();
-  setTimeout(function() {
-    var input = document.getElementById('api-key-field');
-    if (input && !state.apiKey) input.focus();
-  }, 100);
 };
 
-// API 키 모달 닫기
-window.closeApiKeyModal = function() {
+window.closeClaudeSyncSheet = function() {
   animateSheetCloseThen(function() {
-    state.apiKeyModalOpen = false;
-    state.apiKeyInput = '';
+    state.claudeSyncSheetOpen = false;
+    state.claudeSyncInput = '';
     render();
   });
 };
 
-// API 키 입력 업데이트
-window.updateApiKeyInput = function(value) {
-  state.apiKeyInput = value;
+window.updateClaudeSyncInput = function(value) {
+  state.claudeSyncInput = value;
 };
 
-// API 키 저장
-window.saveApiKey = function() {
-  var key = state.apiKeyInput.trim();
-  if (!key) {
-    alert('API 키를 입력해주세요');
+// 커넥터 주소 전체를 붙여도 /api/mcp/ 뒤 코드만 저장한다.
+window.saveClaudeSyncToken = function() {
+  var code = extractSyncToken(state.claudeSyncInput);
+  if (!code) { showToast('연결 코드를 넣어 주세요', true); return; }
+  storage.set(KEYS.SYNC_TOKEN, code);
+  state.claudeSyncInput = code;
+  closeClaudeSyncSheet();   // 저장하면 시트를 닫고 알린다 (설계서 결정 14)
+  showToast('연결 코드를 저장했어요');
+};
+
+// [지금 보내기]는 토스트 없이 시트 안에서 알린다 — 성공은 마지막 전송 줄, 실패는 그 자리 안내 한 줄 (결정 14)
+window.sendClaudeSnapshotNow = function() {
+  if (!getSyncToken()) {
+    state.claudeSyncSendError = '연결 코드를 먼저 저장해 주세요';
+    if (state.claudeSyncSheetOpen) render();
     return;
   }
-  if (!key.startsWith('sk-ant-')) {
-    if (!confirm('"sk-ant-"로 시작하지 않아요. 그래도 저장할까요?')) return;
-  }
-  state.apiKey = key;
-  storage.set(KEYS.API_KEY, key);
-  state.apiKeyModalOpen = false;
-  state.apiKeyInput = '';
-  render();
-  // 토스트 대체
-  setTimeout(function() {
-    alert('API 키를 저장했어요. 이제 코치 대화·맞춤 루틴·주간 리뷰를 쓸 수 있어요.');
-  }, 100);
+  uploadClaudeSnapshot({ force: true }).then(function(res) {
+    state.claudeSyncSendError = (res && res.ok) ? '' : '보내지 못했어요. 연결 코드를 확인해 주세요';
+    if (state.claudeSyncSheetOpen) render();
+  });
 };
 
-// API 키 삭제
-window.deleteApiKey = function() {
-  if (!confirm('API 키를 삭제할까요? 삭제하면 코치 대화·맞춤 루틴·주간 리뷰를 쓸 수 없어요.')) return;
-  state.apiKey = null;
-  storage.set(KEYS.API_KEY, null);
-  state.apiKeyModalOpen = false;
-  render();
-};
+function renderClaudeSyncSheet() {
+  if (!state.claudeSyncSheetOpen) return '';
+  var at = getClaudeSyncState().lastUploadAt;
+  var lastLine = at ? '마지막 전송 · ' + claudeFmtUploadAt(at) : '아직 보낸 적 없어요';
+  var statusLine = state.claudeSyncSendError
+    ? '<p class="flex items-center gap-1 text-[11px] font-mono mt-3 px-1" style="color:var(--warn);">' +
+        icon('info', 13) + '<span>' + escapeHtml(state.claudeSyncSendError) + '</span></p>'
+    : '<p class="text-[11px] font-mono text-stone-500 mt-3 px-1">' + escapeHtml(lastLine) + '</p>';
+  return '<div class="manual-input-overlay" onclick="closeClaudeSyncSheet()">' +
+    '<div class="manual-input-sheet" onclick="event.stopPropagation()">' +
+      '<div class="sheet-handle"></div>' +
+      '<div class="flex items-center justify-between mb-5">' +
+        '<div>' +
+          '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">AI 코칭</p>' +
+          '<p class="font-bebas text-2xl mt-1">Claude 연결</p>' +
+        '</div>' +
+        '<button class="session-header-btn" onclick="closeClaudeSyncSheet()" aria-label="닫기">' + icon('close', 18) + '</button>' +
+      '</div>' +
+      '<div class="input-group">' +
+        '<div class="input-label"><p>연결 코드</p></div>' +
+        '<input type="password" class="api-key-input" id="claude-sync-input" autocomplete="off" ' +
+          'placeholder="커넥터 주소 또는 코드" value="' + escapeHtml(state.claudeSyncInput || '') + '" ' +
+          'oninput="updateClaudeSyncInput(this.value)" onkeydown="if(event.key===\'Enter\')saveClaudeSyncToken()" />' +
+      '</div>' +
+      '<button class="sheet-submit" onclick="saveClaudeSyncToken()">저장</button>' +
+      '<button class="claude-send-btn mt-2" onclick="sendClaudeSnapshotNow()">지금 보내기</button>' +
+      statusLine +
+    '</div>' +
+  '</div>';
+}
 
 // ═══════════════════════════════════════════════
 // 프로필 수정 모달 (묶음1): 기본(나이·키·체중) + 주간 운동 횟수
@@ -4886,8 +4137,7 @@ window.executeResetAll = function() {
 };
 
 // 백업/내보내기 (복원 가능한 JSON 파일)
-// 파일 하나에 운동·유산소·체중·1RM·기억 노트 등 기록을 모아 담는다.
-// API 키(fitness_api_key)와 코치 대화는 보안·용량 때문에 담지 않는다 (BACKUP_LOCAL_ONLY_KEYS).
+// 파일 하나에 운동·유산소·체중·1RM 등 기록을 모아 담는다.
 window.exportData = function() {
   var url = null;
   // 파일 만들기 + 내려받기 시작까지만 try 로 감싼다 (뒤의 화면 갱신이 실패해도 '백업 실패'로 보이지 않게)
@@ -4911,12 +4161,12 @@ window.exportData = function() {
   // 주의: 브라우저는 "실제로 저장됐는지"를 알려주지 않는다(공유 시트 취소 등도 감지 불가).
   // 그래서 여기 기록은 "저장을 시도한 시각"이다 — 그래서 화면에서도 파일 확인을 권한다.
   markBackupDone();                         // 마지막 백업 일시 기록 → 더보기 화면 표시·리마인더 갱신
-  showToast('백업 파일을 저장했어요 (API 키 제외)');
+  showToast('백업 파일을 저장했어요');
   render();
 };
 
 // 가져오기: 파일 선택 → 검사 → "덮어씁니다" 확인 → 복원 → 새로고침.
-// (운동 데이터만 복원. API 키·코치 대화는 백업에 없으므로 이 폰 값이 그대로 남는다.)
+// (운동 데이터만 복원.)
 window.openBackupImport = function() {
   var input = document.createElement('input');
   input.type = 'file';
@@ -4963,10 +4213,8 @@ function buildRestoreConfirmMessage(s) {
   if (s.body) items.push('체중 ' + s.body + '개');
   if (s.records) items.push('기록 ' + s.records + '개');
   if (s.oneRM) items.push('1RM ' + s.oneRM + '종목');
-  if (s.memory) items.push('기억 노트 ' + s.memory + '개');
   return when + '\n' + (items.length ? items.join(' · ') : '담긴 기록 없음') + '\n\n' +
-    '지금 이 폰에 있는 기록을 이 파일 내용으로 모두 바꿉니다. 되돌릴 수 없어요.\n' +
-    '(API 키와 코치 대화는 그대로 남아요)';
+    '지금 이 폰에 있는 기록을 이 파일 내용으로 모두 바꿉니다. 되돌릴 수 없어요.';
 }
 
 // ═══════════════════════════════════════════════
@@ -4974,7 +4222,6 @@ function buildRestoreConfirmMessage(s) {
 // ═══════════════════════════════════════════════
 function renderMore() {
   var profile = state.profile;
-  var apiKey = state.apiKey;
   var settings = state.settings;
 
   // ── 데이터 백업 섹션 (마지막 백업 표시 + 오래되면 부드러운 리마인더) ──
@@ -5024,56 +4271,8 @@ function renderMore() {
         '</div>';
   // 위 리마인더 카드가 이미 같은 말을 할 때는 문단을 두지 않는다(같은 설명 두 번 금지).
   var backupHintHtml = backupStatus.stale ? '' :
-        '<p class="backup-hint">폰을 바꾸거나 브라우저 기록을 지우면 데이터가 사라져요. 백업 파일로 옮길 수 있어요.<br>' +
-          '<span style="opacity:0.7;">(API 키는 백업에 포함되지 않아요)</span></p>';
+        '<p class="backup-hint">폰을 바꾸거나 브라우저 기록을 지우면 데이터가 사라져요. 백업 파일로 옮길 수 있어요.</p>';
 
-  // API 키 모달
-  var apiModalHtml = '';
-  if (state.apiKeyModalOpen) {
-    apiModalHtml = 
-      '<div class="manual-input-overlay" onclick="closeApiKeyModal()">' +
-        '<div class="manual-input-sheet" onclick="event.stopPropagation()">' +
-          '<div class="sheet-handle"></div>' +
-          
-          '<div class="flex items-center justify-between mb-5">' +
-            '<div>' +
-              '<p class="text-[11px] font-mono text-stone-500 uppercase tracking-widest">AI 코치·루틴</p>' +
-              '<p class="font-bebas text-2xl mt-1">Anthropic API 키</p>' +
-            '</div>' +
-            '<button class="session-header-btn" onclick="closeApiKeyModal()">' + icon('close', 18) + '</button>' +
-          '</div>' +
-          
-          // 안내
-          '<div class="card mb-4" style="padding: 14px; background: rgba(var(--accent-rgb), 0.06); border-color: rgba(var(--accent-rgb), 0.25);">' +
-            '<div class="flex items-start gap-2">' +
-              '<div style="color: var(--accent); flex-shrink: 0; margin-top: 2px;">' + icon('info', 16) + '</div>' +
-              '<div>' +
-                '<p class="text-xs accent font-mono uppercase tracking-widest mb-1">왜 필요한가요?</p>' +
-                '<p class="text-xs text-stone-300 leading-relaxed">코치·루틴·주간 리뷰·정체기 분석에 Claude 를 써요.<br>키가 없으면 그 기능만 꺼져요.</p>' +
-              '</div>' +
-            '</div>' +
-          '</div>' +
-          
-          // 입력
-          '<div class="input-group">' +
-            '<div class="input-label">' +
-              '<p>API 키</p>' +
-              '<p>console.anthropic.com</p>' +
-            '</div>' +
-            '<input type="password" class="api-key-input" id="api-key-field" placeholder="sk-ant-..." value="' + escapeHtml(state.apiKeyInput || '') + '" oninput="updateApiKeyInput(this.value)" />' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-2 px-1">키는 이 기기에만 저장돼요.</p>' +
-          '</div>' +
-          
-          // 저장 버튼
-          '<button class="sheet-submit" onclick="saveApiKey()">저장</button>' +
-          
-          // 삭제 버튼 (기존 키 있을 때만)
-          (apiKey ? '<button class="btn-danger mt-2" onclick="deleteApiKey()">API 키 삭제</button>' : '') +
-          
-        '</div>' +
-      '</div>';
-  }
-  
   return '' +
     '<div class="px-5 pt-12 pb-32" style="display: flex; flex-direction: column; gap: 20px;">' +
       
@@ -5091,70 +4290,17 @@ function renderMore() {
         '</div>' +
       '</div>' +
       
-      // 코치와 대화 (강조)
-      '<button class="coach-chat-card" onclick="openCoachChat()">' +
-        '<div class="flex items-center gap-3">' +
-          '<div class="coach-chat-icon">' + icon('msg', 22) + '</div>' +
-          '<div class="flex-1 text-left">' +
-            '<p class="font-display font-bold text-base">코치와 대화</p>' +
-            '<p class="text-[11px] font-mono text-stone-400 mt-0.5">' + 
-              (apiKey ? '운동·식단·컨디션 질문하기' : 'API 키 설정 후 사용 가능') +
-            '</p>' +
-          '</div>' +
-          '<div style="color: var(--accent);">' + icon('chevron', 18) + '</div>' +
-        '</div>' +
-      '</button>' +
-      
-      // ── 섹션은 3개(AI 코칭 · 내 데이터 · 앱)로 묶는다. 7개로 잘게 쪼개면 목록이 계단처럼 보인다.
-      //    아이콘 타일 색도 통일 — 회색 하나, 위험한 것(전체 초기화)만 빨강.
+      // Claude 연결 — 폰의 Claude 앱(Opus)이 커넥터로 기록을 읽고 오늘 루틴을 저장한다
       '<div>' +
         '<p class="section-label">AI 코칭</p>' +
         '<div class="section-group">' +
-          '<div class="menu-row" onclick="openApiKeyModal()">' +
+          '<div class="menu-row" onclick="openClaudeSyncSheet()">' +
             '<div class="menu-icon-sm">' + icon('key', 18) + '</div>' +
             '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">Anthropic API 키</p>' +
-              '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' +
-                (apiKey ? escapeHtml(maskApiKey(apiKey)) : 'AI 코치·맞춤 루틴·주간 리뷰 켜기') +
-              '</p>' +
+              '<p class="text-sm font-display font-bold">Claude 연결</p>' +
+              '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + (getSyncToken() ? '연결 코드 저장됨' : '연결 코드를 넣어요') + '</p>' +
             '</div>' +
-            '<span class="api-status-badge ' + (apiKey ? 'active' : 'inactive') + '">' +
-              (apiKey ? '활성' : '비활성') +
-            '</span>' +
-          '</div>' +
-
-          (apiKey ?
-            '<div class="menu-row" onclick="openWeeklyReview()">' +
-              '<div class="menu-icon-sm">' + icon('chart', 18) + '</div>' +
-              '<div class="menu-row-content">' +
-                '<p class="text-sm font-display font-bold">주간 리뷰</p>' +
-                '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + (state.weeklyReview ? '이번 주 ' + escapeHtml(state.weeklyReview.grade) + '등급 리뷰' : '이번 주 종합 분석') + '</p>' +
-              '</div>' +
-              '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
-            '</div>'
-          : '') +
-
-          (apiKey ?
-            '<div class="menu-row" onclick="openPlateauDetail()">' +
-              '<div class="menu-icon-sm">' + icon('info', 18) + '</div>' +
-              '<div class="menu-row-content">' +
-                '<p class="text-sm font-display font-bold">정체기 분석</p>' +
-                '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + (state.plateauCheck ? state.plateauCheck.signals.length + '개 신호' : '무게가 멈춘 종목 찾기') + '</p>' +
-              '</div>' +
-              (state.plateauCheck ? '<span class="api-status-badge" style="background: rgba(var(--warn-rgb), 0.15); color: var(--warn); border: 1px solid rgba(var(--warn-rgb), 0.4);">감지</span>' : '<div class="menu-arrow">' + icon('chevron', 16) + '</div>') +
-            '</div>'
-          : '') +
-          // 기억 노트 (API 키 없어도 직접 추가 가능)
-          '<div class="menu-row" onclick="openCoachMemory()">' +
-            '<div class="menu-icon-sm">' + icon('msg', 18) + '</div>' +
-            '<div class="menu-row-content">' +
-              '<p class="text-sm font-display font-bold">기억 노트</p>' +
-              '<p class="text-[11px] font-mono text-stone-500 mt-0.5">코치가 기억할 부상·선호·목표·일정</p>' +
-            '</div>' +
-            '<div style="display:flex; align-items:center; gap:8px;">' +
-              '<p class="text-[11px] font-mono text-stone-500">' + (state.coachMemory ? state.coachMemory.length : 0) + '개</p>' +
-              '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
-            '</div>' +
+            '<div class="menu-arrow">' + icon('chevron', 16) + '</div>' +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -5214,846 +4360,7 @@ function renderMore() {
       
     '</div>' +
 
-    apiModalHtml +
     renderProfileEditModal();
-}
-
-// AI 추천 새로고침
-
-// 주간 리뷰 새로고침
-window.refreshWeeklyReview = async function() {
-  state.weeklyReviewLoading = true;
-  state.weeklyReview = null;
-  render();
-  
-  var review = await generateWeeklyReview(true);
-  state.weeklyReview = review;
-  state.weeklyReviewLoading = false;
-  render();
-};
-
-// 주간 리뷰 상세 열기
-window.openWeeklyReview = async function() {
-  if (!state.weeklyReview && state.apiKey && !state.weeklyReviewLoading) {
-    state.weeklyReviewLoading = true;
-    state.weeklyReviewOpen = true;
-    render();
-    
-    var review = await generateWeeklyReview();
-    state.weeklyReview = review;
-    state.weeklyReviewLoading = false;
-    render();
-  } else {
-    state.weeklyReviewOpen = true;
-    render();
-  }
-};
-
-window.closeWeeklyReview = function() {
-  state.weeklyReviewOpen = false;
-  render();
-};
-
-window.openPlateauDetail = function() {
-  state.plateauOpen = true;
-  render();
-};
-
-window.closePlateauDetail = function() {
-  state.plateauOpen = false;
-  render();
-};
-
-window.dismissPlateau = function() {
-  if (!confirm('정체기 알림을 닫을까요? 3일 뒤에 다시 확인해요.')) return;
-  state.plateauCheck = null;
-  storage.set(KEYS.PLATEAU_CHECK, null);
-  state.plateauOpen = false;
-  render();
-};
-
-// ═══════════════════════════════════════════════
-// 코치 채팅 - 핸들러
-// ═══════════════════════════════════════════════
-
-window.openCoachChat = function() {
-  state.coachChatOpen = true;
-  
-  // 기존 대화 이력 불러오기
-  var saved = storage.get(KEYS.COACH_HISTORY, []);
-  
-  if (saved.length === 0) {
-    // 첫 인사
-    var profile = state.profile;
-    var greeting = '**Cycle ' + profile.currentCycle + ' · ' + profile.cyclePhase + '** 진행 중이에요. ' +
-      '운동·식단·컨디션 뭐든 물어보세요.';
-    
-    state.coachMessages = [{ role: 'assistant', content: greeting }];
-  } else {
-    state.coachMessages = saved;
-  }
-  
-  state.coachInputText = '';
-  state.coachThinking = false;
-  render();
-  
-  setTimeout(function() {
-    scrollCoachToBottom();
-    var input = document.getElementById('coach-chat-input');
-    if (input) input.focus();
-  }, 100);
-};
-
-window.closeCoachChat = function() {
-  // 저장
-  if (state.coachMessages.length > 0) {
-    // 최근 30개만 저장
-    var toSave = state.coachMessages.slice(-30);
-    storage.set(KEYS.COACH_HISTORY, toSave);
-  }
-  
-  state.coachChatOpen = false;
-  render();
-};
-
-window.updateCoachInput = function(text) {
-  state.coachInputText = text;
-  var sendBtn = document.getElementById('coach-send-btn');
-  if (sendBtn) sendBtn.disabled = !text.trim() || state.coachThinking;
-};
-
-window.applyCoachQuickQuestion = function(text) {
-  var input = document.getElementById('coach-chat-input');
-  if (input) input.value = text;
-  state.coachInputText = text;
-  sendCoachMessage();
-};
-
-window.clearCoachHistory = function() {
-  if (!confirm('대화 기록을 모두 삭제하시겠어요?')) return;
-  state.coachMessages = [];
-  storage.set(KEYS.COACH_HISTORY, []);
-  openCoachChat();
-};
-
-window.sendCoachMessage = async function() {
-  if (state.coachThinking) return;
-  
-  var text = state.coachInputText.trim();
-  if (!text) {
-    var input = document.getElementById('coach-chat-input');
-    if (input) text = input.value.trim();
-    if (!text) return;
-  }
-  
-  if (!state.apiKey) {
-    state.coachMessages.push({ role: 'user', content: text });
-    state.coachMessages.push({ 
-      role: 'assistant', 
-      content: 'API 키가 필요해요.\n\n' +
-        '코치 기능을 사용하려면:\n' +
-        '1. **더보기** 탭으로 이동\n' +
-        '2. **Anthropic API 키** 메뉴\n' +
-        '3. 키 입력 후 저장\n\n' +
-        '키는 본인 기기에만 저장되고 밖으로 보내지 않아요.' 
-    });
-    state.coachInputText = '';
-    render();
-    scrollCoachToBottom();
-    return;
-  }
-  
-  // 사용자 메시지 추가
-  state.coachMessages.push({ role: 'user', content: text });
-  state.coachInputText = '';
-  state.coachThinking = true;
-  render();
-  scrollCoachToBottom();
-  
-  // API에 보낼 메시지 (마지막 20개만)
-  var apiMessages = state.coachMessages.slice(-20).map(function(m) {
-    return { role: m.role, content: m.content };
-  });
-  
-  // API 호출
-  var result = await callCoachAPI(apiMessages);
-  
-  state.coachThinking = false;
-  
-  if (result.error) {
-    state.coachMessages.push({ 
-      role: 'assistant', 
-      content: result.error 
-    });
-  } else {
-    // 코치 원문 그대로 표시 (자동 기억 저장 폐지 — 기억은 수동 입력만: openCoachMemory).
-    // 다만 응답 끝의 ```apply 블록은 본문에서 떼어 [적용] 카드로 만든다 —
-    // 코치가 "바꿨어요" 라고만 하고 앱은 그대로였던 문제(#2)를 이 승인 흐름이 막는다.
-    var parsedApply = parseCoachApplyBlock(result.text);
-    var coachMsg = { role: 'assistant', content: parsedApply.clean };
-    if (parsedApply.actions.length) {
-      coachMsg.apply = parsedApply.actions;
-      coachMsg.applyStatus = 'pending';
-    }
-    state.coachMessages.push(coachMsg);
-  }
-
-  // 저장
-  var toSave = state.coachMessages.slice(-30);
-  storage.set(KEYS.COACH_HISTORY, toSave);
-  
-  render();
-  scrollCoachToBottom();
-};
-
-// ═══════════════════════════════════════════════
-// 코치 기억 노트 화면 (묶음3)
-// ═══════════════════════════════════════════════
-window.openCoachMemory = function() {
-  state.coachMemoryOpen = true;
-  state.coachMemoryInput = '';
-  state.coachMemoryCategory = 'other';
-  state.coachMemoryEditingId = null;
-  state.coachMemoryDeleteId = null;
-  render();
-};
-window.closeCoachMemory = function() {
-  state.coachMemoryOpen = false;
-  state.coachMemoryEditingId = null;
-  state.coachMemoryDeleteId = null;
-  render();
-};
-window.updateMemoryInput = function(value) { state.coachMemoryInput = value; };
-window.setMemoryCategory = function(cat) { state.coachMemoryCategory = cat; render(); };
-
-window.saveMemoryNote = function() {
-  var text = (state.coachMemoryInput || '').trim();
-  if (!text) return;
-  var cat = state.coachMemoryCategory || 'other';
-  if (state.coachMemoryEditingId) {
-    state.coachMemory = state.coachMemory.map(function(m) {
-      return m.id === state.coachMemoryEditingId
-        ? { id: m.id, category: cat, text: text.slice(0, 140), source: m.source, date: m.date }
-        : m;
-    });
-    state.coachMemoryEditingId = null;
-  } else {
-    state.coachMemory = mergeCoachMemory(state.coachMemory, [{ category: cat, text: text }], 'manual', getTodayStr(), 'mem_' + Date.now());
-  }
-  storage.set(KEYS.COACH_MEMORY, state.coachMemory);
-  state.coachMemoryInput = '';
-  state.coachMemoryCategory = 'other';
-  render();
-  showToast('기억 노트 저장됨');
-};
-
-window.editMemoryNote = function(id) {
-  var note = (state.coachMemory || []).find(function(m) { return m.id === id; });
-  if (!note) return;
-  state.coachMemoryEditingId = id;
-  state.coachMemoryInput = note.text;
-  state.coachMemoryCategory = note.category;
-  state.coachMemoryDeleteId = null;
-  render();
-  setTimeout(function() { var el = document.getElementById('memory-input'); if (el) el.focus(); }, 50);
-};
-
-window.deleteMemoryNote = function(id) { state.coachMemoryDeleteId = id; render(); };
-window.cancelMemoryDelete = function() { state.coachMemoryDeleteId = null; render(); };
-window.executeDeleteMemory = function(id) {
-  state.coachMemory = (state.coachMemory || []).filter(function(m) { return m.id !== id; });
-  storage.set(KEYS.COACH_MEMORY, state.coachMemory);
-  state.coachMemoryDeleteId = null;
-  if (state.coachMemoryEditingId === id) { state.coachMemoryEditingId = null; state.coachMemoryInput = ''; }
-  render();
-  showToast('삭제됨');
-};
-
-function renderCoachMemory() {
-  var notes = state.coachMemory || [];
-  var groups = '';
-  MEMORY_CATEGORIES.forEach(function(cat) {
-    var meta = MEMORY_CATEGORY_META[cat];
-    var inCat = notes.filter(function(m) { return m.category === cat; });
-    if (!inCat.length) return;
-    var rows = inCat.map(function(m) {
-      if (state.coachMemoryDeleteId === m.id) {
-        return '<div class="menu-row" style="background: rgba(239,68,68,0.08);">' +
-          '<div class="flex-1"><p class="text-sm">' + escapeHtml(m.text) + '</p>' +
-            '<p class="text-[11px] font-mono text-stone-500 mt-0.5">정말 삭제할까요?</p></div>' +
-          '<div style="display:flex; gap:6px;">' +
-            '<button onclick="cancelMemoryDelete()" style="padding:6px 12px; border-radius:10px; background:transparent; border:1px solid var(--bg-4); color:var(--text-soft); font-size:12px;">취소</button>' +
-            '<button class="btn-danger" style="padding:6px 12px; width:auto;" onclick="executeDeleteMemory(\'' + escapeHtml(m.id) + '\')">삭제</button>' +
-          '</div>' +
-        '</div>';
-      }
-      var srcBadge = m.source === 'auto'
-        ? '<span class="accent">자동</span>'
-        : '<span class="text-stone-500">직접</span>';
-      return '<div class="menu-row">' +
-        '<div class="flex-1" onclick="editMemoryNote(\'' + escapeHtml(m.id) + '\')" style="cursor:pointer;">' +
-          '<p class="text-sm">' + escapeHtml(m.text) + '</p>' +
-          '<p class="text-[11px] font-mono text-stone-500 mt-0.5">' + srcBadge + ' · ' + escapeHtml(m.date || '') + '</p>' +
-        '</div>' +
-        '<button class="session-header-btn" onclick="deleteMemoryNote(\'' + escapeHtml(m.id) + '\')">' + icon('trash', 16) + '</button>' +
-      '</div>';
-    }).join('');
-    groups += '<p class="section-label">' + meta.kr + '</p><div class="section-group" style="margin-bottom:16px;">' + rows + '</div>';
-  });
-  if (!groups) {
-    groups = '<p class="text-sm text-stone-500 text-center" style="padding:40px 0; line-height:1.6;">아직 기억 노트가 없어요.<br>아래에서 직접 추가해 주세요 (부상·제약·선호 등).</p>';
-  }
-
-  var chips = MEMORY_CATEGORIES.map(function(cat) {
-    var meta = MEMORY_CATEGORY_META[cat];
-    var on = state.coachMemoryCategory === cat;
-    var style = 'padding:5px 10px; border-radius:999px; font-size:11px; font-family:monospace; cursor:pointer; border:1px solid ' +
-      (on ? 'var(--accent)' : 'var(--bg-4)') + '; background:' + (on ? 'rgba(var(--accent-rgb),0.15)' : 'transparent') + '; color:' + (on ? 'var(--accent)' : 'var(--text-soft)') + ';';
-    return '<button style="' + style + '" onclick="setMemoryCategory(\'' + cat + '\')">' + meta.kr + '</button>';
-  }).join('');
-
-  return '<div class="review-detail-screen">' +
-    '<div class="coach-header">' +
-      '<button class="session-header-btn" onclick="closeCoachMemory()">' + icon('close', 18) + '</button>' +
-      '<div class="coach-header-info"><p class="text-sm font-display font-bold">기억 노트</p>' +
-        '<p class="text-[11px] font-mono text-stone-500">총 ' + notes.length + '개 · 코치가 참고해요</p></div>' +
-      '<div style="width:36px;"></div>' +
-    '</div>' +
-    '<div class="px-5 pt-5" style="padding-bottom:160px;">' + groups + '</div>' +
-    '<div style="position:fixed; left:0; right:0; bottom:0; padding:12px 16px calc(14px + env(safe-area-inset-bottom)); background:var(--bg-0); border-top:1px solid var(--bg-3); z-index:50;">' +
-      '<div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">' + chips + '</div>' +
-      '<div style="display:flex; gap:8px;">' +
-        '<input type="text" id="memory-input" class="api-key-input" style="flex:1;" placeholder="' + (state.coachMemoryEditingId ? '수정 내용' : '기억할 내용 추가') + '" value="' + escapeHtml(state.coachMemoryInput || '') + '" oninput="updateMemoryInput(this.value)" onkeydown="if(event.key===\'Enter\'){saveMemoryNote();}" />' +
-        '<button class="sheet-submit" style="width:auto; padding:0 18px;" onclick="saveMemoryNote()">' + (state.coachMemoryEditingId ? '수정' : '추가') + '</button>' +
-      '</div>' +
-    '</div>' +
-  '</div>';
-}
-
-// 간단한 마크다운 → HTML (안전한 기본 변환)
-function renderMarkdown(text) {
-  if (!text) return '';
-  
-  // HTML 이스케이프 먼저
-  var escaped = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-  
-  // 마크다운 변환
-  return escaped
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br/>');
-}
-
-// ═══════════════════════════════════════════════
-// 코치 제안 적용 (#2) — 코치는 제안만 하고, 반영은 [적용] 을 누를 때 일어난다
-// ═══════════════════════════════════════════════
-// 코치 채팅은 글자만 돌려줄 뿐 앱을 전혀 못 건드렸다. 그래서 "쉬는시간 줄여줘" 에
-// "줄였어요" 라고 답해 놓고 실제 운동은 그대로였다. 자동 적용은 하지 않는다 —
-// 오인식으로 무게·휴식이 멋대로 바뀌면 더 나쁘다(루틴 수정 화면이 쓰던 승인 흐름과 같다).
-
-// 이 제안이 가리키는 종목을 찾는다. 이름이 없으면 "지금 하고 있는 종목".
-// 운동 중이면 세션에서, 아니면 AI 루틴 미리보기에서 찾는다.
-function coachActionTarget(act) {
-  var name = act && act.exercise ? canonicalExerciseName(act.exercise) : '';
-  var session = state.activeSession;
-  if (session && session.exercises && session.exercises.length) {
-    if (!name) {
-      var cur = session.exercises[session.currentExerciseIdx];
-      return cur ? { ex: cur, isPreview: false } : null;
-    }
-    for (var i = 0; i < session.exercises.length; i++) {
-      if (canonicalExerciseName(session.exercises[i].name) === name) {
-        return { ex: session.exercises[i], isPreview: false };
-      }
-    }
-  }
-  var routine = state.generatedRoutine;
-  if (routine && routine.exercises && routine.exercises.length) {
-    if (!name) return { ex: routine.exercises[0], isPreview: true };
-    for (var j = 0; j < routine.exercises.length; j++) {
-      if (canonicalExerciseName(routine.exercises[j].name) === name) {
-        return { ex: routine.exercises[j], isPreview: true };
-      }
-    }
-  }
-  return null;
-}
-
-function buildCoachApplyCardHtml(msg, msgIdx) {
-  if (!msg || !msg.apply || !msg.apply.length) return '';
-
-  var lines = msg.apply.map(function(act) {
-    var t = coachActionTarget(act);
-    var cur = t ? exerciseEditValues(t.ex)[act.action] : null;
-    var name = act.exercise || (t && t.ex ? t.ex.name : '');
-    return '<div class="change-line">' +
-        '<div class="change-icon modify">~</div>' +
-        '<span class="text-stone-200">' + escapeHtml(describeCoachAction(
-          { action: act.action, exercise: name, value: act.value }, cur)) + '</span>' +
-      '</div>';
-  }).join('');
-
-  var actionHtml;
-  if (msg.applyStatus === 'applied') {
-    actionHtml = '<div class="change-approval-actions" style="grid-template-columns: 1fr;">' +
-      '<button class="change-approval-btn applied">' + icon('check', 14) + ' 적용 완료</button></div>';
-  } else if (msg.applyStatus === 'cancelled') {
-    actionHtml = '<div class="change-approval-actions" style="grid-template-columns: 1fr;">' +
-      '<button class="change-approval-btn cancel" style="pointer-events: none; opacity: 0.6;">취소됨</button></div>';
-  } else if (!coachActionTarget(msg.apply[0])) {
-    // 적용할 곳이 없으면 버튼을 살려 두지 않는다 — 눌러서 실패를 보게 하지 않는다.
-    actionHtml = '<div class="change-approval-actions" style="grid-template-columns: 1fr;">' +
-      '<button class="change-approval-btn cancel" style="pointer-events: none; opacity: 0.6;">진행 중인 운동이 없어요</button></div>';
-  } else {
-    actionHtml = '<div class="change-approval-actions">' +
-      '<button class="change-approval-btn cancel" onclick="cancelCoachApply(' + msgIdx + ')">취소</button>' +
-      '<button class="change-approval-btn apply" onclick="approveCoachApply(' + msgIdx + ')">' +
-        icon('check', 14) + ' 적용하기</button></div>';
-  }
-
-  return '<div class="routine-change-card">' +
-      '<p class="text-[11px] font-mono accent uppercase tracking-widest mb-1.5">제안된 변경사항</p>' +
-      lines + actionHtml +
-    '</div>';
-}
-
-function coachApplyMessage(msgIdx) {
-  var list = (state.sessionChatOpen && state.activeSession && state.activeSession.chat)
-    ? state.activeSession.chat : state.coachMessages;
-  return { list: list, msg: list && list[msgIdx] };
-}
-
-window.approveCoachApply = function(msgIdx) {
-  var found = coachApplyMessage(msgIdx);
-  var msg = found.msg;
-  if (!msg || !msg.apply || msg.applyStatus === 'applied') return;
-
-  var done = [];
-  msg.apply.forEach(function(act) {
-    var t = coachActionTarget(act);
-    if (!t) return;
-    if (applyExerciseChange(t.ex, act.action, act.value)) {
-      done.push(describeCoachAction({ action: act.action, exercise: '', value: act.value }));
-    }
-  });
-
-  if (!done.length) { showToast('지금은 적용할 수 없어요'); return; }
-  msg.applyStatus = 'applied';
-  if (state.activeSession) saveActiveSession();
-  storage.set(KEYS.COACH_HISTORY, state.coachMessages);
-  render();
-  showToast(done.join(' · ') + ' 적용했어요');
-};
-
-window.cancelCoachApply = function(msgIdx) {
-  var found = coachApplyMessage(msgIdx);
-  if (!found.msg || !found.msg.apply) return;
-  found.msg.applyStatus = 'cancelled';
-  storage.set(KEYS.COACH_HISTORY, state.coachMessages);
-  render();
-};
-
-// ═══════════════════════════════════════════════
-// 코치 채팅 - 렌더
-// ═══════════════════════════════════════════════
-function renderCoachChat() {
-  var hasApiKey = !!state.apiKey;
-  
-  // 메시지 렌더
-  var messagesHtml = '';
-  state.coachMessages.forEach(function(msg, mi) {
-    if (msg.role === 'assistant') {
-      messagesHtml += 
-        '<div class="coach-msg-bot">' +
-          '<p class="msg-content">' + renderMarkdown(msg.content) + '</p>' +
-          buildCoachApplyCardHtml(msg, mi) +
-        '</div>';
-    } else if (msg.role === 'user') {
-      messagesHtml += 
-        '<div class="coach-msg-user">' +
-          '<p class="text-sm">' + renderMarkdown(msg.content) + '</p>' +
-        '</div>';
-    }
-  });
-  
-  // 생각 중 인디케이터
-  if (state.coachThinking) {
-    messagesHtml += 
-      '<div class="coach-msg-bot">' +
-        '<div class="flex items-center gap-2">' +
-          '<div class="loading-spinner"></div>' +
-          '<p class="text-sm text-stone-400">분석 중...</p>' +
-        '</div>' +
-      '</div>';
-  }
-  
-  // API 키 없으면 안내
-  var apiWarning = '';
-  if (!hasApiKey) {
-    apiWarning = 
-      '<div class="coach-api-required">' +
-        '<div style="color: var(--warn); flex-shrink: 0;">' + icon('info', 18) + '</div>' +
-        '<div class="flex-1">' +
-          '<p class="text-xs font-display font-bold" style="color: var(--warn);">API 키 필요</p>' +
-          '<p class="text-[11px] font-mono text-stone-400 mt-0.5">더보기 → Anthropic API 키 설정</p>' +
-        '</div>' +
-      '</div>';
-  }
-  
-  // 빠른 질문 (대화 적을 때만)
-  var quickQuestions = [];
-  if (state.coachMessages.length <= 1) {
-    quickQuestions = [
-      '오늘 어떤 운동 해야 해?',
-      '디로드는 언제 해야 해?',
-      '내 진행 상황 어때?',
-      '정체기 같은데 어떻게?',
-      '회복이 부족해'
-    ];
-  }
-  
-  var quickHtml = quickQuestions.length > 0 
-    ? '<div class="coach-quick-questions">' + 
-        quickQuestions.map(function(q) {
-          return '<button class="coach-quick-chip" onclick="applyCoachQuickQuestion(\'' + q.replace(/'/g, "\\'") + '\')">' + q + '</button>';
-        }).join('') + 
-      '</div>'
-    : '';
-  
-  var sendDisabled = !state.coachInputText.trim() || state.coachThinking;
-  
-  return '' +
-    '<div class="coach-screen">' +
-      
-      // 헤더
-      '<div class="coach-header">' +
-        '<button class="session-header-btn" onclick="closeCoachChat()">' + icon('close', 18) + '</button>' +
-        '<div class="coach-header-info">' +
-          '<div class="coach-avatar">' + icon('msg', 18) + '</div>' +
-          '<div>' +
-            '<p class="text-sm font-display font-bold">코치</p>' +
-            // 키가 없다는 말은 아래 카드에서 한 번만 한다(헤더 점·placeholder 중복 제거).
-            (hasApiKey ? '<p class="text-[11px] font-mono text-stone-500"><span class="coach-online-dot"></span> 온라인</p>' : '') +
-          '</div>' +
-        '</div>' +
-        '<button class="session-header-btn" onclick="clearCoachHistory()" title="대화 초기화">' + icon('refresh', 16) + '</button>' +
-      '</div>' +
-      
-      // 채팅 영역
-      '<div class="coach-chat-area" id="coach-chat-area">' +
-        apiWarning +
-        messagesHtml +
-      '</div>' +
-      
-      // 하단 입력
-      '<div class="coach-input-bottom">' +
-        quickHtml +
-        '<div class="chat-input-bar">' +
-          '<input type="text" id="coach-chat-input" placeholder="메시지 입력…" value="' + escapeHtml(state.coachInputText) + '" oninput="updateCoachInput(this.value)" onkeydown="if(event.key===\'Enter\') sendCoachMessage()" ' + (state.coachThinking ? 'disabled' : '') + ' />' +
-          '<button class="chat-send-btn" id="coach-send-btn" onclick="sendCoachMessage()"' + (sendDisabled ? ' disabled' : '') + '>' +
-            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
-              '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>' +
-            '</svg>' +
-          '</button>' +
-        '</div>' +
-      '</div>' +
-      
-    '</div>';
-}
-
-// ═══════════════════════════════════════════════
-// 주간 리뷰 상세 화면
-// ═══════════════════════════════════════════════
-function renderWeeklyReviewDetail() {
-  var review = state.weeklyReview;
-  var loading = state.weeklyReviewLoading;
-  
-  if (loading) {
-    return '' +
-      '<div class="review-detail-screen">' +
-        '<div class="coach-header">' +
-          '<button class="session-header-btn" onclick="closeWeeklyReview()">' + icon('close', 18) + '</button>' +
-          '<div class="coach-header-info">' +
-            '<div>' +
-              '<p class="text-sm font-display font-bold">주간 리뷰</p>' +
-              '<p class="text-[11px] font-mono text-stone-500">분석 중…</p>' +
-            '</div>' +
-          '</div>' +
-          '<div style="width: 36px;"></div>' +
-        '</div>' +
-        '<div style="padding: 80px 20px; text-align: center;">' +
-          '<div class="loading-spinner" style="width: 32px; height: 32px; margin: 0 auto 16px;"></div>' +
-          '<p class="text-sm text-stone-400">코치가 이번 주를 분석하고 있어요...</p>' +
-        '</div>' +
-      '</div>';
-  }
-  
-  if (!review) {
-    return '' +
-      '<div class="review-detail-screen">' +
-        '<div class="coach-header">' +
-          '<button class="session-header-btn" onclick="closeWeeklyReview()">' + icon('close', 18) + '</button>' +
-          '<div class="coach-header-info">' +
-            '<div>' +
-              '<p class="text-sm font-display font-bold">주간 리뷰</p>' +
-            '</div>' +
-          '</div>' +
-          '<div style="width: 36px;"></div>' +
-        '</div>' +
-        '<div style="padding: 80px 20px; text-align: center;">' +
-          '<p class="text-sm text-stone-400 mb-4">' + (state.apiKey ? '리뷰 생성에 실패했어요.' : 'API 키가 필요해요.') + '</p>' +
-          (state.apiKey
-            ? '<button class="sheet-submit" onclick="refreshWeeklyReview()" style="max-width: 200px;">다시 분석</button>'
-            // 키가 없을 때 "필요해요"만 띄우면 여기서 할 수 있는 게 없다 → 설정으로 가는 길을 준다.
-            : '<button class="sheet-submit" onclick="closeWeeklyReview(); setTab(\'more\'); openApiKeyModal();" style="max-width: 220px;">키 설정하러 가기</button>') +
-        '</div>' +
-      '</div>';
-  }
-  
-  // 등급 색상 — 홈 카드와 같은 함수(프로토타입 조회 안전 + 토큰 색)
-  var gradeCol = gradeColor(review.grade);
-  
-  // 잘한 점
-  var winsHtml = review.wins.map(function(w) {
-    return '<div class="review-bullet">' +
-      '<div class="review-bullet-dot" style="background: var(--accent);"></div>' +
-      '<p>' + escapeHtml(w) + '</p>' +
-    '</div>';
-  }).join('');
-  
-  // 개선점
-  var improvementsHtml = review.improvements.map(function(i) {
-    return '<div class="review-bullet">' +
-      '<div class="review-bullet-dot" style="background: var(--warn);"></div>' +
-      '<p>' + escapeHtml(i) + '</p>' +
-    '</div>';
-  }).join('');
-  
-  // 다음 주
-  var nextWeekHtml = review.nextWeek.map(function(n) {
-    return '<div class="review-bullet">' +
-      '<div class="review-bullet-dot" style="background: var(--accent);"></div>' +
-      '<p>' + escapeHtml(n) + '</p>' +
-    '</div>';
-  }).join('');
-  
-  return '' +
-    '<div class="review-detail-screen">' +
-      // 헤더
-      '<div class="coach-header">' +
-        '<button class="session-header-btn" onclick="closeWeeklyReview()">' + icon('close', 18) + '</button>' +
-        '<div class="coach-header-info">' +
-          '<div>' +
-            '<p class="text-sm font-display font-bold">주간 리뷰</p>' +
-            '<p class="text-[11px] font-mono text-stone-500">' + review.monday + ' ~ ' + review.sunday + '</p>' +
-          '</div>' +
-        '</div>' +
-        '<button class="session-header-btn" onclick="refreshWeeklyReview()" title="다시 분석">' + icon('refresh', 16) + '</button>' +
-      '</div>' +
-      
-      '<div class="px-5 pt-5 pb-20">' +
-        
-        // 등급 + 헤드라인
-        '<div class="text-center mb-6">' +
-          '<div style="display: inline-block; font-family: var(--font); font-weight: 800; font-size: 80px; line-height: 1; color: ' + gradeCol + ';">' + escapeHtml(review.grade) + '</div>' +
-          '<p class="text-xs font-mono text-stone-500 uppercase tracking-widest mt-1 mb-3">이번 주 평가</p>' +
-          '<p class="text-base font-display font-bold leading-relaxed">' + escapeHtml(review.headline) + '</p>' +
-        '</div>' +
-        
-        // 통계 요약
-        '<div class="grid grid-cols-3 gap-2 mb-5">' +
-          '<div class="stat-card">' +
-            '<p class="stat-card-label">운동</p>' +
-            '<p class="stat-card-value">' + review.stats.workoutCount + '</p>' +
-            '<p class="stat-card-unit">회</p>' +
-          '</div>' +
-          '<div class="stat-card">' +
-            '<p class="stat-card-label">PR</p>' +
-            '<p class="stat-card-value">' + review.stats.prCount + '</p>' +
-            '<p class="stat-card-unit">개</p>' +
-          '</div>' +
-          '<div class="stat-card">' +
-            '<p class="stat-card-label">체중</p>' +
-            '<p class="stat-card-value">' + (review.stats.weightChange >= 0 ? '+' : '') + review.stats.weightChange + '</p>' +
-            '<p class="stat-card-unit">kg</p>' +
-          '</div>' +
-        '</div>' +
-        
-        // 잘한 점
-        (winsHtml ? 
-          '<div class="review-section highlight">' +
-            '<p class="text-[11px] font-mono accent uppercase tracking-widest mb-3">잘한 점</p>' +
-            winsHtml +
-          '</div>' : '') +
-        
-        // 개선점
-        (improvementsHtml ? 
-          '<div class="review-section warning">' +
-            '<p class="text-[11px] font-mono uppercase tracking-widest mb-3" style="color: var(--warn);">개선점</p>' +
-            improvementsHtml +
-          '</div>' : '') +
-        
-        // 다음 주
-        (nextWeekHtml ? 
-          '<div class="review-section">' +
-            '<p class="text-[11px] font-mono text-stone-400 uppercase tracking-widest mb-3">다음 주 조정</p>' +
-            nextWeekHtml +
-          '</div>' : '') +
-        
-        // 코치 한 마디
-        (review.coachNote ? 
-          '<div class="card-coach mt-5">' +
-            '<div class="flex items-start gap-3">' +
-              '<div class="coach-icon accent">' + icon('msg', 18) + '</div>' +
-              '<div class="flex-1">' +
-                '<p class="text-xs font-mono accent uppercase tracking-widest mb-1.5">코치 한마디</p>' +
-                '<p class="text-sm text-stone-200 leading-relaxed">' + escapeHtml(review.coachNote) + '</p>' +
-              '</div>' +
-            '</div>' +
-          '</div>' : '') +
-
-        // 코치와 상담 (코치가 이 주간리뷰를 자동 인용)
-        '<button class="coach-chat-card mt-5" onclick="closeWeeklyReview(); openCoachChat();" style="width: 100%;">' +
-          '<div class="flex items-center gap-3">' +
-            '<div class="coach-chat-icon">' + icon('msg', 22) + '</div>' +
-            '<div class="flex-1 text-left">' +
-              '<p class="font-display font-bold text-sm">이번 주에 대해 코치와 상담</p>' +
-              '<p class="text-[11px] font-mono text-stone-400 mt-0.5">개선 전략 짜기</p>' +
-            '</div>' +
-            '<div style="color: var(--accent);">' + icon('chevron', 16) + '</div>' +
-          '</div>' +
-        '</button>' +
-
-      '</div>' +
-    '</div>';
-}
-
-// ═══════════════════════════════════════════════
-// 정체기 상세 화면
-// ═══════════════════════════════════════════════
-function renderPlateauDetail() {
-  var p = state.plateauCheck;
-  
-  if (!p) {
-    return '' +
-      '<div class="review-detail-screen">' +
-        '<div class="coach-header">' +
-          '<button class="session-header-btn" onclick="closePlateauDetail()">' + icon('close', 18) + '</button>' +
-          '<div class="coach-header-info">' +
-            '<div><p class="text-sm font-display font-bold">정체기 분석</p></div>' +
-          '</div>' +
-          '<div style="width: 36px;"></div>' +
-        '</div>' +
-        '<div style="padding: 80px 20px; text-align: center;">' +
-          '<p class="text-sm text-stone-400">정체기 신호가 없어요.</p>' +
-        '</div>' +
-      '</div>';
-  }
-  
-  // 신호 라벨 — js/ai.js detectPlateauSignals가 만드는 키와 **반드시** 같이 유지할 것.
-  // (키가 없으면 아래 폴백이 'lift_stalled' 같은 영문 식별자를 그대로 화면에 찍는다)
-  // weight_stalled는 삭제됐다 — 체중 유지 + 수행 상승은 리컴포지션 정상 진행이지 정체가 아니다.
-  // 3일짜리 옛 캐시에 남아 있을 수 있어 라벨만 남겨 둔다.
-  var signalLabels = {
-    'lift_stalled': '무게·횟수 둘 다 정체 (4주 이상)',
-    'pr_stalled': 'PR 갱신 정체 (4주)',
-    'frequency_drop': '운동 빈도 감소',
-    'weight_stalled': '체중 변화 없음 (옛 기준)'
-  };
-  
-  var signalsHtml = p.signals.map(function(s) {
-    return '<div class="review-bullet">' +
-      '<div class="review-bullet-dot" style="background: var(--warn);"></div>' +
-      '<p>' + escapeHtml(signalLabels[s] || s) + '</p>' +
-    '</div>';
-  }).join('');
-  
-  // 권장사항
-  var recsHtml = p.recommendations.map(function(r) {
-    return '<div class="review-bullet">' +
-      '<div class="review-bullet-dot" style="background: var(--accent);"></div>' +
-      '<p>' + escapeHtml(r) + '</p>' +
-    '</div>';
-  }).join('');
-  
-  // 심각도 색상
-  var severityColors = { 'low': 'var(--warn)', 'medium': 'var(--warn)', 'high': 'var(--danger)' };
-  var sevColor = Object.prototype.hasOwnProperty.call(severityColors, p.severity) ? severityColors[p.severity] : 'var(--warn)';
-  var sevLabel = { 'low': '낮음', 'medium': '중간', 'high': '높음' }[p.severity] || '중간';
-  
-  return '' +
-    '<div class="review-detail-screen">' +
-      // 헤더
-      '<div class="coach-header">' +
-        '<button class="session-header-btn" onclick="closePlateauDetail()">' + icon('close', 18) + '</button>' +
-        '<div class="coach-header-info">' +
-          '<div>' +
-            '<p class="text-sm font-display font-bold">정체기 분석</p>' +
-            '<p class="text-[11px] font-mono text-stone-500">' + p.detectedAt + ' 감지</p>' +
-          '</div>' +
-        '</div>' +
-        '<button class="session-header-btn" onclick="dismissPlateau()" title="알림 닫기">' + icon('close', 16) + '</button>' +
-      '</div>' +
-      
-      '<div class="px-5 pt-5 pb-20">' +
-        
-        // 진단
-        '<div class="text-center mb-6">' +
-          '<div style="display: inline-block; padding: 6px 14px; border-radius: 9999px; background: ' + sevColor + '20; border: 1px solid ' + sevColor + '60; color: ' + sevColor + '; font-size: 10px; font-family: var(--font); font-weight: 700;">심각도 ' + sevLabel + '</div>' +
-          '<p class="font-bebas text-3xl mt-4 mb-2">정체기 신호 감지</p>' +
-          '<p class="text-sm text-stone-300 leading-relaxed">' + escapeHtml(p.diagnosis) + '</p>' +
-        '</div>' +
-        
-        // 주요 원인
-        (p.primary_cause ? 
-          '<div class="review-section warning">' +
-            '<p class="text-[11px] font-mono uppercase tracking-widest mb-2" style="color: var(--warn);">주요 원인</p>' +
-            '<p class="text-sm font-display font-bold">' + escapeHtml(p.primary_cause) + '</p>' +
-          '</div>' : '') +
-        
-        // 감지된 신호
-        '<div class="review-section">' +
-          '<p class="text-[11px] font-mono text-stone-400 uppercase tracking-widest mb-3">감지된 신호</p>' +
-          signalsHtml +
-        '</div>' +
-        
-        // 권장 조정
-        (recsHtml ? 
-          '<div class="review-section highlight">' +
-            '<p class="text-[11px] font-mono accent uppercase tracking-widest mb-3">→ 권장 조정</p>' +
-            recsHtml +
-          '</div>' : '') +
-        
-        // 격려
-        (p.encouragement ? 
-          '<div class="card-coach mt-5">' +
-            '<div class="flex items-start gap-3">' +
-              '<div class="coach-icon accent">' + icon('msg', 18) + '</div>' +
-              '<div class="flex-1">' +
-                '<p class="text-xs font-mono accent uppercase tracking-widest mb-1.5">코치 한마디</p>' +
-                '<p class="text-sm text-stone-200 leading-relaxed">' + escapeHtml(p.encouragement) + '</p>' +
-              '</div>' +
-            '</div>' +
-          '</div>' : '') +
-        
-        // 코치와 대화 버튼
-        '<button class="coach-chat-card mt-5" onclick="closePlateauDetail(); openCoachChat();" style="width: 100%;">' +
-          '<div class="flex items-center gap-3">' +
-            '<div class="coach-chat-icon">' + icon('msg', 22) + '</div>' +
-            '<div class="flex-1 text-left">' +
-              '<p class="font-display font-bold text-sm">코치와 더 자세히 상담</p>' +
-              '<p class="text-[11px] font-mono text-stone-400 mt-0.5">맞춤 계획 세우기</p>' +
-            '</div>' +
-            '<div style="color: var(--accent);">' + icon('chevron', 16) + '</div>' +
-          '</div>' +
-        '</button>' +
-        
-      '</div>' +
-    '</div>';
 }
 
 // ═══════════════════════════════════════════════
@@ -6353,7 +4660,7 @@ function renderStats() {
         partsBlock +
       '</div>' +
 
-      // 부위별 주간 볼륨 (최근 2주 — AI 프롬프트와 같은 수치)
+      // 부위별 주간 볼륨 (최근 2주)
       volumeByPartCardHtml() +
 
       // 유산소 요약(기록 있을 때만)
@@ -6414,13 +4721,12 @@ function renderStats() {
 
 // ═══════════════════════════════════════════════
 // 부위별 주간 볼륨 카드 (STATS)
-//  - AI 프롬프트(buildUserContext)가 보는 것과 "같은 함수·같은 인자(2주)"를 써서 숫자가 어긋나지 않게 한다.
 //  - 기간 탭(state.statsPeriod)과 무관하게 항상 최근 2주 평균이다.
 //  - 상한 초과는 '과잉'이 아니라 '이득 완만' — 볼륨-근비대 곡선이 꺾이는 지점은 아직 확인된 적이 없다
 //    (Pelland 2025/2026, 67개 연구·2,058명: 기울기>0 사후확률 100%).
 // ═══════════════════════════════════════════════
 function volumeByPartCardHtml() {
-  var WEEKS = 2; // js/ai.js buildUserContext 의 getRecentVolumeByPart(2) 와 반드시 동일
+  var WEEKS = 2;
   var log = (state.data && state.data.workoutLog) ? state.data.workoutLog : [];
   if (!log.length) return '';
 
@@ -6576,7 +4882,7 @@ function renderPlaceholder(title, label, iconName) {
 
 // ═══════════════════════════════════════════════
 // 러닝(유산소) 화면 — 러닝머신 인터벌 유산소 (2단계)
-//   흐름: 시간(분) 입력 → generateCardioInterval(AI) 구성 → 미리보기 → 시작
+//   흐름: 시간(분) 입력 → 규칙 기반 기본 구성 → 미리보기 → 시작
 //        → 실행화면(정밀 타이머·소리 알림·속력 조정) → 종료 → RPE 입력 → saveCardioSession
 //   ⓐ 시간 측정은 performance.now() 절대시각 기준(setInterval 드리프트 금지, 백그라운드 복귀 시 재동기화).
 //   ⓑ 소리는 Web Audio 오실레이터(파일 없이). 구간 경계 3초 전 예고음 + 경계 전환음(올림/내림 톤 구분).
@@ -6594,7 +4900,7 @@ function cardioNow() {
 // state.cardio 지연 초기화(core.js state 에 없으므로 여기서 안전하게 확보).
 // mode: 'interval'(걷기·뛰기 인터벌 · 기본값) | 'walk'(경사 걷기). 기존 사용자 흐름이 바뀌지 않도록 기본은 interval.
 function ensureCardioState() {
-  if (!state.cardio) state.cardio = { mode: 'interval', phase: 'idle', inputMin: '', loading: false, error: null, plan: null, run: null, reqId: 0 };
+  if (!state.cardio) state.cardio = { mode: 'interval', phase: 'idle', inputMin: '', plan: null, run: null };
   if (!state.cardio.mode) state.cardio.mode = 'interval';        // 옛 저장분 복원 시 하위 호환
   return state.cardio;
 }
@@ -6710,8 +5016,8 @@ function cardioTabIconName() {
   return 'clock';
 }
 
-// ── AI 응답 정규화 & 로컬 폴백 구성 ─────────────────────────────
-// generateCardioInterval 결과를 안전한 구간 배열로 정규화(연속·정렬 보장, 속력 숫자화).
+// ── 구간 정규화 & 로컬 기본 구성 ─────────────────────────────
+// 외부에서 받은 구간 계획을 안전한 구간 배열로 정규화(연속·정렬 보장, 속력 숫자화).
 function cardioNormalizePlan(res, min, mode) {
   var isWalk = (mode === 'walk');
   var segsIn = (res && res.segments) ? res.segments : [];
@@ -6744,16 +5050,16 @@ function cardioNormalizePlan(res, min, mode) {
     var dur = Math.max(5, segs[j].endSec - segs[j].startSec);
     segs[j].startSec = t; segs[j].endSec = t + dur; t += dur;
   }
-  if (!segs.length) return isWalk ? buildFallbackWalk(min, !state.apiKey) : buildFallbackInterval(min, !state.apiKey);
+  if (!segs.length) return isWalk ? buildFallbackWalk(min) : buildFallbackInterval(min);
   return {
     headline: res.headline || (Math.round(t / 60) + (isWalk ? '분 경사 걷기' : '분 인터벌')),
     totalSec: t, segments: segs, note: res.note || '', source: 'ai'
   };
 }
 
-// AI 미사용(키 없음·함수 없음·오류) 시 로컬 보수적 구성 — cardio-research.md 첫 회 처방 기반.
+// 로컬 보수적 구성 — cardio-research.md 첫 회 처방 기반.
 // 워밍업 걷기 → [뛰기 1분 + 걷기 2분] 반복 → 쿨다운 걷기. 시간 짧으면 워밍업/쿨다운 압축(최소 2분).
-function buildFallbackInterval(min, noKey) {
+function buildFallbackInterval(min) {
   var T = Math.max(5, Math.min(120, Math.round(min || 30)));
   var totalSec = T * 60;                                 // 항상 60의 배수(=30의 배수)
   function snap30(x) { return Math.round(x / 30) * 30; } // 30초 격자에 맞춤(구간 길이 30초 단위)
@@ -6778,13 +5084,12 @@ function buildFallbackInterval(min, noKey) {
   push('cooldown', cd, 5.0);
   var tot = segs.length ? segs[segs.length - 1].endSec : totalSec;
   var note = '완주가 목표예요. 힘들면 속력을 낮추세요.';
-  if (noKey) note += ' (더보기에서 AI 키를 넣으면 기록 기반 맞춤 구성을 받아요.)';
   return { headline: '오늘 ' + T + '분 · 몸풀기 → 걷기·뛰기 반복 → 정리', totalSec: tot, segments: segs, note: note, source: 'fallback' };
 }
 
-// AI 미사용(키 없음·함수 없음·오류) 시 경사 걷기 로컬 구성 — §3-2 4구간 구조를 시간에 맞춰 스케일.
-// 경사는 최근 걷기 기록에서 이어받고(하향 게이트 반영), 기록이 없으면 4%(허리 이력 있으면 3%).
-function buildFallbackWalk(min, noKey) {
+// 경사 걷기 로컬 구성 — §3-2 4구간 구조를 시간에 맞춰 스케일.
+// 경사는 최근 걷기 기록에서 이어받고(하향 게이트 반영), 기록이 없으면 4%.
+function buildFallbackWalk(min) {
   var asked = Math.max(5, Math.min(120, Math.round(min || 30)));
   // 본 구간 33분 상한(§4-1) → 세션 총시간은 45분까지. 더 길게 요청하면 잘리고, 그 사실을 note 로 알린다.
   var totalSec = cardioWalkClampTotalSec(asked * 60);
@@ -6802,9 +5107,7 @@ function buildFallbackWalk(min, noKey) {
   var tot = segs.length ? segs[segs.length - 1].endSec : totalSec;
   var note = '본 구간은 아무것도 바꾸지 않고 그대로 걸어요. 손잡이는 놓고(균형이 필요하면 손가락만 가볍게), ' +
     '"문장은 말할 수 있는데 노래는 안 되는" 정도로 유지하세요.';
-  if (ctx.back) note += ' 가슴은 들고 허리는 곧게 — 접히는 곳은 허리가 아니라 고관절이에요.';
   if (asked > T) note += ' 본 구간 상한(33분)에 맞춰 ' + T + '분으로 줄였어요. 더 채우고 싶으면 세션을 늘리지 말고 횟수를 늘리세요.';
-  if (noKey) note += ' (더보기에서 AI 키를 넣으면 기록 기반 맞춤 구성을 받아요.)';
   return {
     headline: '오늘 ' + T + '분 · 경사 ' + cardioFmtIncline(inc) + '% 정속 걷기',
     totalSec: tot, segments: segs, note: note, source: 'fallback'
@@ -6819,12 +5122,7 @@ window.setCardioMode = function(mode) {
   if (c.mode === next) return;
   if (c.phase === 'running' || c.phase === 'rpe') return;      // 진행 중엔 못 바꿈
   c.mode = next;
-  c.plan = null; c.phase = 'idle'; c.error = null;             // 모드가 다르면 구성도 다르다 → 초기화
-  // ★생성 중(AI 대기)에 모드를 바꾸면 먼저 보낸 요청의 응답이 나중에 도착한다.
-  //   그 응답이 새 모드 화면에 꽂히면 경사 없는 걷기 세션(또는 그 반대)이 만들어지고 기록도 잘못된 모드로 저장된다.
-  //   토큰을 올려 "지금 유효한 요청"을 바꾸면, 늦게 온 옛 응답은 buildCardioPlan 에서 버려진다.
-  c.reqId = (c.reqId || 0) + 1;
-  c.loading = false;
+  c.plan = null; c.phase = 'idle';                             // 모드가 다르면 구성도 다르다 → 초기화
   render();
 };
 
@@ -6840,36 +5138,26 @@ window.buildCardioPlan = function(explicitMin) {
   }
   if (!min || isNaN(min) || min < 5) { showToast('5분 이상 입력해 주세요', true); return; }
   if (min > 120) min = 120;
-  c.inputMin = min; c.loading = true; c.error = null; c.plan = null; c.phase = 'idle';
-  // 이 요청의 표. 응답이 돌아왔을 때 이 값이 그대로면 "아직 유효한 요청", 달라졌으면 모드가 바뀐 뒤라 버린다.
-  c.reqId = (c.reqId || 0) + 1;
-  var myReq = c.reqId;
-  function stale() { return c.reqId !== myReq; }
+  c.inputMin = min;
+  c.plan = (mode === 'walk') ? buildFallbackWalk(min) : buildFallbackInterval(min);
+  c.phase = 'preview';
   render();
+};
 
-  var generate = (mode === 'walk') ? (typeof generateCardioWalk === 'function' ? generateCardioWalk : null)
-                                   : (typeof generateCardioInterval === 'function' ? generateCardioInterval : null);
-  function usefallback() {
-    if (stale()) return;
-    c.loading = false;
-    c.plan = (mode === 'walk') ? buildFallbackWalk(min, !state.apiKey) : buildFallbackInterval(min, !state.apiKey);
-    c.phase = 'preview';
-    render();
-  }
-  try {
-    if (generate) {
-      Promise.resolve(generate(min)).then(function(res) {
-        if (stale()) return;                                   // 모드가 바뀐 뒤 도착한 옛 응답 → 폐기
-        if (res && res.segments && res.segments.length) {
-          c.loading = false; c.plan = cardioNormalizePlan(res, min, mode); c.phase = 'preview'; render();
-        } else {
-          usefallback(); // null(키 없음) 또는 형식 이상 → 로컬 폴백
-        }
-      }).catch(function() { usefallback(); });
-    } else {
-      usefallback();
-    }
-  } catch (e) { usefallback(); }
+// Claude 유산소 줄 → 모양만 맞춰(cardioNormalizePlan) 미리보기로. 이후 시작 흐름은 기존 그대로.
+window.openClaudeCardio = function() {
+  var plan = state.claudeCardio;
+  if (!plan) return;
+  ensureCardioState();
+  var c = state.cardio;
+  if (c.phase === 'running' || c.phase === 'rpe') return;
+  var mode = (plan.mode === 'walk') ? 'walk' : 'interval';
+  c.mode = mode;
+  c.plan = cardioNormalizePlan(claudeCardioToPlanInput(plan), claudeCardioTotalMin(plan), mode);
+  c.phase = 'preview';
+  setClaudeSyncState({ lastImportedCardioId: plan.id });
+  state.claudeCardio = null;
+  render();
 };
 
 window.resetCardioPlan = function() {
@@ -7330,18 +5618,16 @@ function renderRunning() {
     '<div class="card mb-4">' +
       '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-2">운동 시간</p>' +
       '<div class="flex items-center gap-2">' +
-        '<input id="cardio-min-input" type="number" inputmode="numeric" min="5" max="120" step="1" value="' + escapeHtml(c.inputMin || '') + '"' + (c.loading ? ' disabled' : '') + ' style="flex:1;min-width:0;background:var(--bg-1);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px 14px;color:#fff;font-family:var(--font);font-weight:800;font-size:26px;" onkeydown="if(event.key===\'Enter\')buildCardioPlan()" />' +
+        '<input id="cardio-min-input" type="number" inputmode="numeric" min="5" max="120" step="1" value="' + escapeHtml(c.inputMin || '') + '" style="flex:1;min-width:0;background:var(--bg-1);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px 14px;color:#fff;font-family:var(--font);font-weight:800;font-size:26px;" onkeydown="if(event.key===\'Enter\')buildCardioPlan()" />' +
         '<span class="text-sm font-mono text-stone-400">분</span>' +
-        '<button class="sheet-submit" style="width:auto;padding:12px 20px;margin:0;flex-shrink:0;" onclick="buildCardioPlan()"' + (c.loading ? ' disabled' : '') + '>구성</button>' +
+        '<button class="sheet-submit" style="width:auto;padding:12px 20px;margin:0;flex-shrink:0;" onclick="buildCardioPlan()">구성</button>' +
       '</div>' +
       '<div class="flex gap-2 mt-3">' + quickChips + '</div>' +
     '</div>';
 
-  // 로딩 / 미리보기
+  // 미리보기
   var mid = '';
-  if (c.loading) {
-    mid = '<div class="card mb-4 text-center" style="padding:28px 0;"><p class="text-sm font-mono accent">AI가 구성 중…</p></div>';
-  } else if (c.plan) {
+  if (c.plan) {
     var plan = c.plan;
     var segRow = function(s) {
       var dur = s.endSec - s.startSec;
@@ -7385,7 +5671,6 @@ function renderRunning() {
           '<p class="font-bebas text-2xl accent">' + cardioFmtClock(plan.totalSec) + '</p>' +
         '</div>' +
         (plan.headline ? '<p class="text-sm font-display mb-2">' + escapeHtml(plan.headline) + '</p>' : '') +
-        (plan.source === 'fallback' ? '<p class="text-[11px] font-mono" style="color:var(--warn);">AI 키가 없어 기본 구성을 썼어요</p>' : '') +
         '<div class="mt-2">' + segBlock + '</div>' +
         '<button class="sheet-submit" style="margin-top:14px;" onclick="startCardio()">시작</button>' +
         '<button class="option-card" style="width:100%;margin-top:8px;text-align:center;" onclick="resetCardioPlan()"><p class="text-xs font-mono text-stone-400">다시 구성</p></button>' +
@@ -7402,9 +5687,18 @@ function renderRunning() {
       (last.completed ? ' · 완주' : '') + '</p>'
     : '';
 
+  // Claude 앱이 저장한 오늘 유산소 플랜이 있을 때만 한 줄. 누르면 미리보기로 들어간다.
+  var claudeRow = state.claudeCardio
+    ? '<button class="claude-plan-row mt-3" onclick="openClaudeCardio()">' +
+        '<span class="claude-plan-text">' + escapeHtml(claudeCardioRowText(state.claudeCardio)) + '</span>' +
+        '<span class="claude-plan-arrow">' + icon('chevron', 16) + '</span>' +
+      '</button>'
+    : '';
+
   return '' +
     '<div class="px-5 pt-12 pb-32">' +
-      '<p class="text-xs font-mono text-stone-400">' + (isWalk ? '러닝머신 경사 걷기 · 정속 한 구간' : '러닝머신 인터벌 · 시간만 정하면 AI가 구성') + '</p>' +
+      '<p class="text-xs font-mono text-stone-400">' + (isWalk ? '러닝머신 경사 걷기 · 정속 한 구간' : '러닝머신 인터벌 · 시간만 정하면 구성') + '</p>' +
+      claudeRow +
       modeToggle + input + mid + recent +
     '</div>';
 }
@@ -7692,30 +5986,6 @@ function render() {
     return;
   }
 
-  // 코치 기억 노트
-  if (state.coachMemoryOpen) {
-    document.getElementById('app').innerHTML = renderCoachMemory();
-    return;
-  }
-
-  // 주간 리뷰 상세
-  if (state.weeklyReviewOpen) {
-    document.getElementById('app').innerHTML = renderWeeklyReviewDetail();
-    return;
-  }
-  
-  // 정체기 상세
-  if (state.plateauOpen) {
-    document.getElementById('app').innerHTML = renderPlateauDetail();
-    return;
-  }
-  
-  // 코치 채팅
-  if (state.coachChatOpen) {
-    document.getElementById('app').innerHTML = renderCoachChat();
-    return;
-  }
-  
   // 정리 스트레칭 가이드 — 완료 화면 위에 뜬다 (스트레칭 중엔 이 화면이 보여야 한다)
   if (state.stretchGuide) {
     document.getElementById('app').innerHTML = renderStretchGuide();
@@ -7773,12 +6043,15 @@ function render() {
   
   // 전체 초기화 확인 오버레이
   var resetOverlay = state.resetConfirming ? renderResetConfirm() : '';
+
+  // Claude 연결 시트 (더보기)
+  var claudeSyncSheet = state.claudeSyncSheetOpen ? renderClaudeSyncSheet() : '';
   
   // 6-C① 탭이 바뀔 때만 진입 애니메이션 래퍼(같은 탭 내 재렌더는 그대로 — 반복 튐 방지)
   var tabChanged = state._lastRenderedTab !== state.currentTab;
   state._lastRenderedTab = state.currentTab;
   var wrappedContent = tabChanged ? ('<div class="screen-enter">' + content + '</div>') : content;
-  document.getElementById('app').innerHTML = wrappedContent + renderTabbar() + detailSheet + resetOverlay;
+  document.getElementById('app').innerHTML = wrappedContent + renderTabbar() + detailSheet + resetOverlay + claudeSyncSheet;
   window.scrollTo(0, 0);
 }
 
@@ -7792,7 +6065,7 @@ function renderResetConfirm() {
           '<div style="color: var(--danger); display:flex; justify-content:center; margin-bottom: 10px;">' + icon('trash', 32) + '</div>' +
           '<p class="font-display font-bold text-xl mb-2" style="color: var(--danger);">전체 데이터 삭제</p>' +
           '<p class="text-xs text-stone-400 leading-relaxed">' +
-            '운동·체중·PR·1RM·코치 대화가 <strong style="color: var(--warn);">모두</strong> 지워져요.<br/>' +
+            '운동·체중·PR·1RM이 <strong style="color: var(--warn);">모두</strong> 지워져요.<br/>' +
             '되돌릴 수 없어요.' +
           '</p>' +
         '</div>' +
@@ -7874,16 +6147,11 @@ function getTopLayer() {
   if (state.topSetSheet) return 'topSetWeight';       // 탑세트 무게 입력 (세트법 시트에서 이어짐)
   if (state.setSchemeOpen) return 'setScheme';        // 세트법 변경 (세션 위)
   if (state.lastRecordOpen) return 'lastRecord';      // 지난 기록 (세션 위)
-  if (state.sessionChatOpen) return 'sessionChat';    // 세트 사이 채팅 (세션 위)
-  if (state.apiKeyModalOpen) return 'apiKey';         // (더보기 위)
   if (state.profileEditModalOpen) return 'profileEdit';
+  if (state.claudeSyncSheetOpen) return 'claudeSync';   // Claude 연결 시트 (더보기 위)
   if (state.resetConfirming) return 'resetConfirm';
   // 전체화면 오버레이 (render 우선순위와 동일한 순서)
   if (state.oneRMListOpen) return 'oneRMList';
-  if (state.coachMemoryOpen) return 'coachMemory';
-  if (state.weeklyReviewOpen) return 'weeklyReview';
-  if (state.plateauOpen) return 'plateau';
-  if (state.coachChatOpen) return 'coachChat';
   // 웜업/스트레칭 가이드 · 완료 화면 / 진행 중 세션 (render 우선순위와 동일한 순서)
   if (state.stretchGuide) return 'stretchGuide';
   if (state.completedSession) return 'completed';
@@ -7893,7 +6161,6 @@ function getTopLayer() {
   if (state.cardio && state.cardio.phase === 'rpe') return 'cardioRpe';
   if (state.cardio && state.cardio.phase === 'running') return 'cardioSession';
   // 루틴 만들기 마법사 (운동 탭 내부 단계). STEP1은 탭 자체라 'tab'으로 처리.
-  if (state.currentTab === 'workout' && state.workoutWizardStep === 3) return 'wizard3';
   if (state.currentTab === 'workout' && state.workoutWizardStep === 2) return 'wizard2';
   // 일반 탭 / 루트(홈)
   if (state.currentTab !== 'home') return 'tab';
@@ -7920,16 +6187,11 @@ function navBack() {
     case 'topSetWeight': closeTopSetWeightSheet(); break;
     case 'setScheme': closeSetSchemeSheet(); break;
     case 'lastRecord': closeLastRecord(); break;
-    case 'sessionChat': closeSessionChat(); break;
-    case 'apiKey': closeApiKeyModal(); break;
     case 'profileEdit': closeProfileEditModal(); break;
+    case 'claudeSync': closeClaudeSyncSheet(); break;
     case 'resetConfirm': cancelResetAll(); break;
     // 전체화면 오버레이
     case 'oneRMList': closeOneRMList(); break;
-    case 'coachMemory': closeCoachMemory(); break;
-    case 'weeklyReview': closeWeeklyReview(); break;
-    case 'plateau': closePlateauDetail(); break;
-    case 'coachChat': closeCoachChat(); break;
     // 웜업/스트레칭 가이드 — 스트레칭 뒤로 = 완료 화면으로 / 웜업 뒤로 = 세션과 동일하게 종료 확인
     case 'stretchGuide': window.closeStretchGuide(); break;
     case 'warmupGuide': endSession(true); break;
@@ -7940,7 +6202,6 @@ function navBack() {
     case 'cardioSession': window.stopCardio(true); break;
     case 'cardioRpe': window.submitCardioRpe(null); break;
     // 마법사 단계
-    case 'wizard3': backToStep2(); break;           // FREE면 backToStep2가 STEP1로 직행
     case 'wizard2': backToStep1(); break;
     // 일반 탭 → 방문 순서상 직전 탭으로
     case 'tab': {
@@ -8070,8 +6331,8 @@ function ensureBackTrap() {
     if (state.muscleMapZoom) return;   // 자극 근육 확대 중엔 스와이프로 종목이 넘어가면 안 된다
     if (state.exerciseEdit) return;    // 종목 편집 시트가 가리키는 종목과 화면이 어긋나면 안 된다
     if (state.lastRecordOpen) return;  // 지난 기록 시트도 마찬가지
-    if (state.sessionChatOpen) return; // 세트 사이 채팅 중에 뒤 종목이 조용히 넘어가면 안 된다
     if (state.stretchGuide) return;    // 웜업/스트레칭 가이드 위에서는 종목이 조용히 넘어가면 안 된다
+    if (state.claudeSyncSheetOpen) return;   // Claude 연결 시트 위 스와이프도 막는다
     if (state.activeSession.warmup && !state.activeSession.warmup.done) return;
 
     var touch = e.changedTouches[0];

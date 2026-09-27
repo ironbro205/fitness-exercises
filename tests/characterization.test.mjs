@@ -151,46 +151,6 @@ test('advanceCycleOnSessionComplete — 목표 달성 시에만 다음 주차/�
     { currentCycle: 2, currentWeek: 1, cyclePhase: '빌드' });
 });
 
-// ═══════════════════════════════════════════════
-// 묶음3 — 코치 기억 노트 (응답 파싱 + 중복제거 병합)
-// ═══════════════════════════════════════════════
-
-// ── 코치 응답 끝의 숨김 memory 블록 파싱 (본문에서 제거 + 항목 추출) ──
-test('parseCoachMemoryBlock — memory 블록 추출 + 본문 분리', () => {
-  const r = app.parseCoachMemoryBlock('좋아요. 어깨 조심하세요.\n```memory\n[{"category":"injury","text":"왼쪽 어깨 통증"}]\n```');
-  assert.equal(r.clean, '좋아요. 어깨 조심하세요.');
-  assert.equal(r.items.length, 1);
-  assert.equal(r.items[0].category, 'injury');
-  assert.equal(r.items[0].text, '왼쪽 어깨 통증');
-
-  // 블록 없음 → 본문 그대로, 항목 없음
-  const r2 = app.parseCoachMemoryBlock('그냥 일반 답변입니다.');
-  assert.equal(r2.clean, '그냥 일반 답변입니다.');
-  assert.deepEqual(plain(r2.items), []);
-
-  // 망가진 JSON → 블록은 제거(사용자에게 raw JSON 안 보임), 항목은 없음
-  const r3 = app.parseCoachMemoryBlock('답변.\n```memory\n망가진 JSON{\n```');
-  assert.equal(r3.clean, '답변.');
-  assert.deepEqual(plain(r3.items), []);
-});
-
-// ── 기억 노트 병합: 중복 제거 + 카테고리 보정 + 출처/날짜 ──
-test('mergeCoachMemory — 중복 건너뛰기 + 미지 카테고리는 other', () => {
-  const base = [{ id: 'a', category: 'preference', text: '덤벨 선호', source: 'manual', date: '2026-06-01' }];
-  const merged = app.mergeCoachMemory(base, [
-    { category: 'injury', text: '무릎 통증' },
-    { category: 'preference', text: '덤벨 선호' }, // 중복
-  ], 'auto', '2026-06-14', 'mem_x');
-  assert.equal(merged.length, 2);
-  const added = merged.find((m) => m.category === 'injury');
-  assert.equal(added.text, '무릎 통증');
-  assert.equal(added.source, 'auto');
-  assert.equal(added.date, '2026-06-14');
-
-  const m2 = app.mergeCoachMemory([], [{ category: 'weird', text: '테스트' }], 'auto', '2026-06-14', 'mem_y');
-  assert.equal(m2[0].category, 'other'); // 미지 카테고리 보정
-});
-
 // ── 진행은 완료 "횟수" 기준(캘린더 아님): 부분 진행도가 유지된다 ──
 test('advanceCycleIfWeekComplete — 부분 진행도 누적 후 목표 도달 시 다음 주차', () => {
   const fresh = loadApp();
@@ -275,15 +235,15 @@ test('parseBackupFile — 손상/타앱/미래버전/빈파일 거절, 정상 �
       fitness_cardio_log: [{ id: 'c' }],
       fitness_body_log: [{ date: '2026-08-01', weight: 78 }],
       fitness_personal_records: [{ id: 'p' }],
-      fitness_coach_memory: [{ id: 'm' }],
       fitness_one_rm_data: { '레그 프레스': 200, '벤치': 80 }
     }
   };
   const res = fresh.parseBackupFile(JSON.stringify(good));
   assert.equal(ok(res), true);
+  // 기억 노트(memory) 개수는 설계서 결정 7(기억 노트 삭제)로 요약에서 뺐다.
   assert.deepEqual(plain(res.summary), {
     exportedAt: '2026-08-01T00:00:00.000Z',
-    workouts: 2, cardio: 1, body: 1, records: 1, memory: 1, oneRM: 2
+    workouts: 2, cardio: 1, body: 1, records: 1, oneRM: 2
   });
 });
 
@@ -295,7 +255,7 @@ test('buildRestoreConfirmMessage — 백업 내용 요약 + 덮어쓰기 경고'
   assert.match(msg, /운동 12회/);
   assert.match(msg, /체중 30개/);
   assert.match(msg, /되돌릴 수 없/);
-  assert.match(msg, /API 키/);
+  // 'API 키는 안 건드림' 단언은 설계서 결정 1(API 키 삭제)로 뺐다.
   // 빈 백업도 문구가 깨지지 않는다
   assert.match(fresh.buildRestoreConfirmMessage({}), /담긴 기록 없음/);
 });
@@ -326,7 +286,6 @@ test('restoreFromBackup — 백업에 없는 기록은 지우고, 데모 재생�
 test('복원 — 악성 백업이 화면에서 실행되지 않고, 사용자 글자는 그대로 보존된다', () => {
   const fresh = loadApp();
   fresh.localStorage.clear();
-  const memoText = "무릎 <b>주의</b> ' \" & 표시";   // 사용자가 실제로 쓸 수 있는 글자
   const evil = {
     app: 'fitness', version: 1, exportedAt: '2026-08-01T00:00:00.000Z',
     data: {
@@ -334,15 +293,13 @@ test('복원 — 악성 백업이 화면에서 실행되지 않고, 사용자 �
       // 날짜는 오늘 — 기록 탭 목록은 기간 필터(최근 30일)를 타므로 옛 날짜면 화면에 안 실려 검사가 비어 버린다
       fitness_workout_log: [{ id: "&#39;);alert(1);//", sessionKr: '<img src=x onerror=steal()>', date: fresh.getTodayStr(), duration: 30, sets: 10 }],
       fitness_body_log: [{ date: "&#39;);alert(2);//", weight: '<script>x</script>' }],
-      fitness_coach_memory: [{ id: 'mem_1', category: 'injury', text: memoText }],
       fitness_one_rm_data: { '레그 프레스': 200, '벤치프레스': '<img src=x onerror=alert(1)>' },
       __proto__: { polluted: true },
     },
   };
   assert.equal(fresh.restoreFromBackup(JSON.stringify(evil)).ok, true);
 
-  // 1) 사용자 글자는 한 글자도 바뀌지 않는다 (정상 백업 왕복 보존)
-  assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_coach_memory'))[0].text, memoText);
+  // 1) (기억 노트 글자 보존 단언은 설계서 결정 7로 기억 노트가 삭제돼 뺐다)
 
   // 2) 프로필 숫자칸은 숫자만 (못 읽으면 기본값)
   assert.equal(JSON.parse(fresh.localStorage.getItem('fitness_profile')).age, 37);   // DEFAULT_PROFILE.age
@@ -412,7 +369,12 @@ test('복원 — 모든 기록에 태그를 심어도 어떤 화면에서도 살
     conditionLog: fresh.storage.get('fitness_condition_log', []),
     cycleHistory: fresh.storage.get('fitness_cycle_history', []),
   };
-  fresh.state.coachMemory = fresh.storage.get('fitness_coach_memory', []);
+  // 옛 백업의 지운 키(기억 노트·대화 신호)는 오류 없이 무시된다 — 저장소에도 state 에도 안 올라온다.
+  ['fitness_coach_memory', 'fitness_chat_signals'].forEach((k) => {
+    assert.equal(fresh.localStorage.getItem(k), null, k + ' 가 되살아났다');
+  });
+  assert.equal(fresh.state.coachMemory, undefined);
+  assert.equal(fresh.state.chatSignals, undefined);
   fresh.state.settings = fresh.storage.get('fitness_settings', {});
 
   // 인자 없이 부를 수 있는 화면 함수를 전부 그려본다
@@ -540,23 +502,18 @@ test('복원 실패 — 되돌리기까지 실패하면 다른 안내를 준다'
 test('백업 왕복 — 사용자 글자가 글자 단위로 그대로 돌아온다', () => {
   const fresh = loadApp();
   fresh.localStorage.clear();
-  const notes = [
-    { id: 'mem_1', category: 'goal', text: '목표: 체중 < 75kg & 벤치 "100kg"' },
-    { id: 'mem_2', category: 'injury', text: "왼쪽 어깨 '뚝' 소리 — 오버헤드 주의" },
-  ];
+  // 기억 노트(fitness_coach_memory) 왕복 단언은 설계서 결정 7(기억 노트 삭제)로 뺐다.
   fresh.localStorage.setItem('fitness_profile', JSON.stringify({ age: 40, height: 175, weight: 80, workoutFreq: 4 }));
   fresh.localStorage.setItem('fitness_workout_log', JSON.stringify([{ id: 'w_1749', date: '2026-08-01', sessionKr: 'PUSH' }]));
-  fresh.localStorage.setItem('fitness_coach_memory', JSON.stringify(notes));
 
   const file = JSON.stringify(fresh.buildBackupObject());
   fresh.localStorage.clear();
   assert.equal(fresh.restoreFromBackup(file).ok, true);
-  assert.deepEqual(plain(JSON.parse(fresh.localStorage.getItem('fitness_coach_memory'))), notes);
   assert.deepEqual(plain(JSON.parse(fresh.localStorage.getItem('fitness_workout_log'))), [{ id: 'w_1749', date: '2026-08-01', sessionKr: 'PUSH' }]);
 
   // 두 번 복원해도 계속 같다 (치환이 누적되지 않음)
   assert.equal(fresh.restoreFromBackup(JSON.stringify(fresh.buildBackupObject())).ok, true);
-  assert.deepEqual(plain(JSON.parse(fresh.localStorage.getItem('fitness_coach_memory'))), notes);
+  assert.deepEqual(plain(JSON.parse(fresh.localStorage.getItem('fitness_workout_log'))), [{ id: 'w_1749', date: '2026-08-01', sessionKr: 'PUSH' }]);
 });
 
 // Codex 리뷰: 저장이 중간에 실패하면(용량 초과) "반쪽 복원"으로 남으면 안 된다 → 원래대로 되돌린다.
@@ -636,7 +593,7 @@ test('renderMore — 데이터 백업 섹션 + 마지막 백업 표시 + 오래�
   assert.ok(never.includes('exportData()') && never.includes('openBackupImport()'), '내보내기/가져오기 연결');
   assert.ok(never.includes('마지막 백업') && never.includes('아직 백업한 적이 없어요'), '백업 이력 없음 표시');
   assert.ok(never.includes('backup-reminder'), '백업 이력이 없으면 리마인더 노출');
-  assert.ok(never.includes('API 키'), 'API 키 제외 안내');
+  // 'API 키 제외 안내' 단언은 설계서 결정 1(API 키 메뉴 삭제)로 뺐다.
 
   // 최근 백업 → 리마인더 없음
   fresh.markBackupDone(new Date(Date.now() - 2 * 86400000).toISOString());
@@ -670,26 +627,6 @@ test('renderHome — 사이클 5주(빌드/디로드), 옛 4단계 라벨 제거
   assert.ok(home.includes('다 하면 다음 주차') || home.includes('목표 달성') || home.includes('쉬는 중'), '이번주 진행/복귀 안내');
 });
 
-// ── 묶음3 UI/프롬프트 회귀 ──
-test('renderMore + renderCoachMemory — 기억 노트 메뉴/화면', () => {
-  const fresh = loadApp();
-  const more = fresh.renderMore();
-  assert.ok(more.includes('기억 노트') && more.includes('openCoachMemory'), '더보기 기억 노트 메뉴');
-  fresh.openCoachMemory();
-  const mem = fresh.renderCoachMemory();
-  assert.ok(mem.includes('memory-input'), '기억 노트 추가 입력창');
-  assert.ok(mem.includes('부상·제약'), '카테고리 라벨');
-});
-
-test('getCoachSystemPrompt — 기억 노트 주입 + memory 저장 지시 + 5주 정정', () => {
-  const fresh = loadApp();
-  const sys = fresh.getCoachSystemPrompt();
-  assert.ok(sys.includes('기억 노트'), '기억 노트 섹션 주입');
-  assert.ok(!sys.includes('```memory'), '자동 memory 저장 지시 제거됨(기억은 수동 입력만)');
-  assert.ok(sys.includes('5주 사이클'), '5주 사이클로 정정');
-  assert.ok(!sys.includes('5~6주 사이클 (적응'), '옛 5~6주 표현 제거');
-});
-
 // ═══════════════════════════════════════════════
 // 묶음5 — 화면정리 (중복·죽은 위젯 제거)
 // ═══════════════════════════════════════════════
@@ -719,7 +656,7 @@ test('묶음5 renderMore — 죽은 사이클 메뉴 2개 + 잘못된 모델 배
   assert.ok(!more.includes('사이클 히스토리'), '죽은 "사이클 히스토리" 메뉴 제거');
   assert.ok(!more.includes('Sonnet 4'), '코치 카드 모델 배지 제거');
   assert.ok(more.includes('현재 사이클'), '현재 사이클 정보 행 유지');
-  assert.ok(more.includes('기억 노트'), '기억 노트 메뉴 유지');
+  // '기억 노트 메뉴 유지' 단언은 설계서 결정 7(기억 노트 삭제)로 뺐다.
 });
 
 test('묶음5 renderStats — 체지방 토글 제거, 핵심지표 카드 유지', () => {
@@ -787,7 +724,7 @@ test('묶음6-B renderMore — U 아바타 + 린매스 배지 + Built with scien
   assert.ok(!more.includes('Built with science'), "'Built with science' 푸터 줄 제거");
   // 유지 (프로필 정보·목표·기존 푸터 브랜드는 남는다)
   assert.ok(more.includes('사용자'), '프로필 이름 유지');
-  assert.ok(more.includes('목표'), '프로필 목표 요약(주 N회) 유지');
+  // '목표' 단언은 옛 기억 노트 메뉴 설명('…부상·선호·목표·일정')으로만 맞던 것이라 설계서 결정 7로 뺐다.
   assert.ok(more.includes('app-footer'), '앱 푸터 블록 유지');
   // 디자인 정돈: 영어 태그라인·브랜드 줄은 뺐다. 푸터에는 버전만 남는다.
   assert.ok(!more.includes('Personal fitness tracker') && !more.includes('app-footer-brand'), '푸터 영어 태그라인 제거');
@@ -801,17 +738,6 @@ test('묶음6-B 장식 CSS — 죽은 pulse/animate-pulse/status-dot/avatar-box 
   assert.ok(!/\.animate-pulse\b/.test(css), '안 쓰이는 .animate-pulse 제거');
   assert.ok(!/\.status-dot\b/.test(css), '안 쓰이는 헤더 .status-dot 제거');
   assert.ok(!/\.avatar-box\b/.test(css), '안 쓰이는 .avatar-box CSS 제거');
-});
-
-test('묶음6-B 코치 온라인점 — 점/규칙은 유지하되 발광(box-shadow)만 제거', () => {
-  const css = fs.readFileSync(path.join(DIR, '..', 'css', 'styles.css'), 'utf8');
-  const block = css.match(/\.coach-online-dot\s*\{([^}]*)\}/);
-  assert.ok(block, '.coach-online-dot 규칙 자체는 유지(점은 남김)');
-  assert.ok(!/box-shadow/.test(block[1]), '코치 온라인점 발광(box-shadow) 제거');
-  // 상태 텍스트('온라인')는 screens.js 렌더에 그대로 있어야 함
-  const screens = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
-  assert.ok(screens.includes('coach-online-dot'), '온라인점 마크업 유지');
-  assert.ok(screens.includes('온라인'), '상태 텍스트(온라인) 유지');
 });
 
 // ── 묶음6-C① : 진입/피드백 애니메이션 (화면 떠오르기·세트완료 pop·완료 축하 + reduced-motion) ──
@@ -915,8 +841,7 @@ test('묶음6-D getTopLayer — 현재 떠 있는 가장 위 레이어를 판별
   assert.equal(a.getTopLayer(), 'tab', 'STEP1은 운동 탭 자체(탭 레벨)');
   s.workoutWizardStep = 2;
   assert.equal(a.getTopLayer(), 'wizard2');
-  s.workoutWizardStep = 3;
-  assert.equal(a.getTopLayer(), 'wizard3');
+  // 3단계(wizard3)는 설계서 결정 9(AI 대화 3단계 삭제)로 뺐다.
 
   // 진행 중 세션 (마법사보다 위)
   s.workoutWizardStep = 1;
@@ -937,10 +862,7 @@ test('묶음6-D getTopLayer — 현재 떠 있는 가장 위 레이어를 판별
   assert.equal(a.getTopLayer(), 'completed');
   s.completedSession = null;
 
-  // 전체화면 오버레이
-  s.coachChatOpen = true;
-  assert.equal(a.getTopLayer(), 'coachChat');
-  s.coachChatOpen = false;
+  // 전체화면 오버레이 (코치 채팅은 설계서 결정 8로 삭제)
   s.oneRMListOpen = true;
   assert.equal(a.getTopLayer(), 'oneRMList');
   s.oneRMListOpen = false;
@@ -951,9 +873,7 @@ test('묶음6-D getTopLayer — 현재 떠 있는 가장 위 레이어를 판별
   assert.equal(a.getTopLayer(), 'itemDetail');
   s.itemDetailSheet = null;
   s.currentTab = 'more';
-  s.apiKeyModalOpen = true;
-  assert.equal(a.getTopLayer(), 'apiKey');
-  s.apiKeyModalOpen = false;
+  // API 키 모달은 설계서 결정 1로 삭제
   s.profileEditModalOpen = true;
   assert.equal(a.getTopLayer(), 'profileEdit');
   s.profileEditModalOpen = false;
@@ -967,16 +887,10 @@ test('묶음6-D navBack — 위 레이어부터 한 겹씩 닫음(오버레이·
   const s = a.state;
   assert.equal(typeof a.navBack, 'function', 'navBack 전역 함수 존재');
 
-  // 오버레이(코치채팅) → 뒤로 → 닫힘, 뒤 화면 유지
-  s.coachChatOpen = true;
-  a.navBack();
-  assert.equal(s.coachChatOpen, false, '코치채팅 닫힘');
-
-  // 마법사 STEP3 → STEP2 → STEP1 (한 단계씩)
+  // 코치채팅 오버레이(설계서 결정 8)와 마법사 STEP3(결정 9)는 삭제돼 단언에서 뺐다.
+  // 마법사 STEP2 → STEP1
   s.currentTab = 'workout';
-  s.workoutWizardStep = 3; s.selectedBodyPart = 'push'; s.generatedRoutine = { exercises: [] };
-  a.navBack();
-  assert.equal(s.workoutWizardStep, 2, 'STEP3→STEP2');
+  s.workoutWizardStep = 2; s.selectedBodyPart = 'push'; s.generatedRoutine = { exercises: [] };
   a.navBack();
   assert.equal(s.workoutWizardStep, 1, 'STEP2→STEP1');
 
@@ -1046,149 +960,6 @@ test('묶음6-D 뒤로가기 배선 — popstate 리스너 + 부팅 트랩(ensur
 });
 
 // ═══════════════════════════════════════════════
-// 코치 지식 강화 — 지식 베이스 확장 + 질문 유형별 답변 + prompt caching
-// ═══════════════════════════════════════════════
-
-// ── Cycle A: 지식 베이스 상수 (data.js) — 운동과학 전 영역 + 근거 표기 ──
-test('코치지식 COACH_KNOWLEDGE — 운동/부상/회복/유산소 전 영역 + 근거 (영양 없음)', () => {
-  const app = loadApp();
-  assert.equal(typeof app.COACH_KNOWLEDGE, 'string', 'COACH_KNOWLEDGE 문자열 상수 존재');
-  assert.ok(app.COACH_KNOWLEDGE.length > 2500, '지식 베이스가 충분히 풍부 (기존 ~25줄 대비 대폭 확장)');
-  // 도메인 커버리지: 새로 추가된 영역들이 실제로 들어있어야 함
-  const k = app.COACH_KNOWLEDGE;
-  assert.ok(k.includes('자세') || k.includes('폼'), '종목 자세/폼 큐 포함');
-  assert.ok(k.includes('부상') || k.includes('통증'), '부상·통증 대응 포함');
-  assert.ok(!k.includes('크레아틴') && !k.includes('g/kg') && !k.includes('칼로리') && !k.includes('단백질 섭취'), '영양·보충제는 다루지 않는다(2026-09-02 결정) — "단백질 합성"(근육 생리)은 허용');
-  assert.ok(k.includes('유산소'), '유산소 병행 섹션 포함');
-  assert.ok(k.includes('워밍업') || k.includes('가동성'), '워밍업·가동성 포함');
-  // 근거 표기(메타분석 저자/연도)는 유지
-  assert.ok(/Pelland|Schoenfeld|Morton/.test(k), '메타분석 근거 표기 유지');
-});
-
-// ── Cycle B: 캐싱 분리 — 고정(지식) 블록과 가변(사용자데이터) 블록 ──
-test('코치지식 buildCoachSystemParts — 고정 지식블록 / 가변 사용자블록 분리', () => {
-  const app = loadApp();
-  assert.equal(typeof app.buildCoachSystemParts, 'function', 'buildCoachSystemParts 함수 존재');
-  const parts = app.buildCoachSystemParts();
-  assert.equal(typeof parts.stable, 'string', 'stable(고정) 블록 존재');
-  assert.equal(typeof parts.dynamic, 'string', 'dynamic(가변) 블록 존재');
-  // 고정 블록: 지식 베이스 포함, 사용자 데이터는 없어야 캐시가 호출마다 적중
-  assert.ok(parts.stable.includes('더블 프로그레션'), '고정 블록에 지식 베이스 주입');
-  assert.ok(!parts.stable.includes('사용자 정보'), '고정 블록에 사용자 데이터 없음(캐시 적중 위해)');
-  // 가변 블록: 사용자 컨텍스트 포함
-  assert.ok(parts.dynamic.includes('사용자 정보') || parts.dynamic.includes('사용자 현재 데이터'), '가변 블록에 사용자 데이터');
-});
-
-// ── Cycle C: 질문 유형별 답변 + 옛 "데이터 안에서만" 제약 제거 + 레거시 보존 ──
-test('코치지식 getCoachSystemPrompt — 질문 유형 분기 + 입막음 제거 + 레거시 유지', () => {
-  const app = loadApp();
-  const sys = app.getCoachSystemPrompt();
-  // 새: 질문 유형별 답변 지시(일반 지식 질문 허용)
-  assert.ok(sys.includes('질문 유형') || sys.includes('일반 운동'), '질문 유형별 답변 지시 주입');
-  assert.ok(sys.includes('지식 베이스') || sys.includes('더블 프로그레션'), '지식 베이스가 프롬프트에 포함');
-  // 옛 입막음 제약 제거
-  assert.ok(!sys.includes('위 데이터 안에서만'), '"위 데이터 안에서만 답하기" 제약 제거');
-  assert.ok(!sys.includes('데이터에 없는 추측 금지'), '"데이터에 없는 추측 금지" 제약 제거');
-  // 레거시 보존 (기존 테스트와 동일 계약)
-  assert.ok(sys.includes('기억 노트'), '기억 노트 섹션 유지');
-  assert.ok(!sys.includes('```memory'), '자동 memory 저장 지시 제거됨');
-  assert.ok(sys.includes('5주 사이클'), '5주 사이클 표현 유지');
-});
-
-// ── Cycle D: callCoachAPI — system 배열 + cache_control(prompt caching) ──
-test('코치지식 callCoachAPI — system 배열 + cache_control ephemeral(고정), 가변 분리', async () => {
-  const app = loadApp();
-  app.state.apiKey = 'sk-test';
-  let captured = null;
-  app.fetch = (url, opts) => {
-    captured = JSON.parse(opts.body);
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ content: [{ type: 'text', text: 'ok' }] }),
-      text: () => Promise.resolve(''),
-    });
-  };
-  const res = await app.callCoachAPI([{ role: 'user', content: '안녕' }]);
-  assert.equal(res.text, 'ok', '정상 응답 파싱');
-  assert.deepEqual(plain(captured.thinking), { type: 'disabled' }, 'Sonnet 5 생각모드 끔(안 끄면 max_tokens 소진→빈 응답)');
-  assert.ok(Array.isArray(captured.system), 'system이 배열(캐싱 구조)');
-  assert.ok(captured.system.length >= 2, '고정/가변 두 블록으로 분리');
-  // 고정 블록: 지식 + cache_control, 사용자 데이터 없음(호출마다 동일 → 캐시 적중)
-  assert.equal(captured.system[0].type, 'text');
-  assert.deepEqual(captured.system[0].cache_control, { type: 'ephemeral' }, '고정 블록에 cache_control ephemeral');
-  assert.ok(captured.system[0].text.includes('더블 프로그레션'), '고정 블록 = 지식 베이스');
-  assert.ok(!captured.system[0].text.includes('사용자 정보'), '고정 블록에 사용자 데이터 없음');
-  // 가변 블록: 사용자 데이터, 캐시 분기점 뒤라 cache_control 없음
-  assert.ok(captured.system[1].text.includes('사용자 정보') || captured.system[1].text.includes('사용자 현재 데이터'), '두 번째 블록 = 사용자 데이터');
-  assert.ok(!captured.system[1].cache_control, '가변 블록엔 cache_control 없음');
-});
-
-// ── Phase B: 루틴 생성 — 지식 주입 + 캐싱 ──
-test('코치지식 generateFullRoutine — 지식 주입 + cache_control(캐싱)', async () => {
-  const app = loadApp();
-  app.state.apiKey = 'sk-test';
-  let captured = null;
-  app.fetch = (url, opts) => {
-    captured = JSON.parse(opts.body);
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ content: [{ type: 'text', text: '{"headline":"t","reason":"r","exercises":[{"name":"벤치프레스","type":"복합","isMain":true,"sets":3,"reps":"6-8","weight":60,"rir":2,"note":"n"}]}' }] }),
-      text: () => Promise.resolve(''),
-    });
-  };
-  await app.generateFullRoutine('push');
-  assert.ok(captured, 'fetch 호출됨');
-  assert.ok(Array.isArray(captured.system), 'system 배열(캐싱 구조)');
-  assert.deepEqual(captured.system[0].cache_control, { type: 'ephemeral' }, '고정 블록 cache_control ephemeral');
-  assert.ok(captured.system[0].text.includes('더블 프로그레션'), '고정 블록 = 지식 베이스');
-  assert.ok(captured.system[1].text.includes('루틴'), '가변 블록 = 기존 루틴 프롬프트');
-  assert.ok(!captured.system[1].cache_control, '가변 블록엔 cache_control 없음');
-});
-
-// ── Phase B: 루틴 수정·질문 대화 — 지식 주입 + 캐싱 ──
-test('코치지식 modifyRoutineWithAI — 지식 주입 + cache_control(캐싱)', async () => {
-  const app = loadApp();
-  app.state.apiKey = 'sk-test';
-  let captured = null;
-  app.fetch = (url, opts) => {
-    captured = JSON.parse(opts.body);
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ content: [{ type: 'text', text: '{"intent":"question","reply":"ok","changes":[],"updatedRoutine":null}' }] }),
-      text: () => Promise.resolve(''),
-    });
-  };
-  const routine = { headline: 'h', bodyPart: 'push', isFree: false, exercises: [{ name: '벤치프레스', type: '복합', sets: 3 }] };
-  await app.modifyRoutineWithAI(routine, '어깨 더 넣어줘', []);
-  assert.ok(captured, 'fetch 호출됨');
-  assert.ok(Array.isArray(captured.system), 'system 배열(캐싱 구조)');
-  assert.deepEqual(captured.system[0].cache_control, { type: 'ephemeral' }, '고정 블록 cache_control ephemeral');
-  assert.ok(captured.system[0].text.includes('더블 프로그레션'), '고정 블록 = 지식 베이스');
-  assert.ok(captured.system[1].text.includes('루틴'), '가변 블록 = 기존 수정 프롬프트');
-  assert.ok(!captured.system[1].cache_control, '가변 블록엔 cache_control 없음');
-});
-
-// ── Phase B: 주간 리뷰 — 지식 주입(품질↑), 캐싱은 미적용(주 1회 호출이라 효과 없음) ──
-test('코치지식 generateWeeklyReview — 지식 주입(문자열 system), 캐싱 미적용', async () => {
-  const app = loadApp();
-  app.state.apiKey = 'sk-test';
-  let captured = null;
-  app.fetch = (url, opts) => {
-    captured = JSON.parse(opts.body);
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ content: [{ type: 'text', text: '{"headline":"h","grade":"A","wins":[],"improvements":[],"nextWeek":[],"coachNote":"n"}' }] }),
-      text: () => Promise.resolve(''),
-    });
-  };
-  await app.generateWeeklyReview(true);
-  assert.ok(captured, 'fetch 호출됨');
-  assert.equal(typeof captured.system, 'string', 'system 문자열(캐싱 미적용)');
-  assert.ok(captured.system.includes('더블 프로그레션'), '지식 베이스 주입됨');
-  assert.ok(captured.system.includes('등급') || captured.system.includes('주간 리뷰'), '기존 주간 리뷰 프롬프트 유지');
-});
-
-// ═══════════════════════════════════════════════
 // 인클라인 워킹(경사 걷기) 모드 — docs/research/incline-walking.md §2~§5·§7
 // ═══════════════════════════════════════════════
 
@@ -1196,14 +967,12 @@ test('코치지식 generateWeeklyReview — 지식 주입(문자열 system), 캐
 test('경사걷기 cardioWalkNextIncline — 첫 회 4%(허리 이력 3%) · 상한 클램프', () => {
   // 기록 없음 → 4% (§2-1 0단계)
   assert.equal(app.cardioWalkNextIncline([], []), 4);
-  // 허리디스크 이력 → 3%에서 출발 (§2-2)
-  assert.equal(app.cardioWalkNextIncline([], ['lower_back']), 3);
+  // 허리 이력 분기(3% 출발·10% 상한) 단언은 설계서 결정 2(부상 관리 삭제)로 뺐다.
   // 인터벌 기록만 있으면 걷기 기록으로 치지 않는다(하위 호환: 옛 기록엔 mode 자체가 없다)
   assert.equal(app.cardioWalkNextIncline([{ date: '2026-08-01', completed: true, rpe: 5, segments: [{ type: 'run', sec: 60 }] }], []), 4);
-  // 상한: 허리 없으면 12%, 허리 있으면 10% (§1-3 절대 상한 / §7-6 한 단계 낮춤)
+  // 상한 12% (§1-3 절대 상한)
   const hot = [{ date: '2026-08-01', mode: 'walk', completed: true, rpe: 5, segments: [{ type: 'walk', sec: 1200, incline: 20 }] }];
   assert.equal(app.cardioWalkNextIncline(hot, []), 12);
-  assert.equal(app.cardioWalkNextIncline(hot, ['lower_back']), 10);
 });
 
 // ── §4-2 향상 게이트: 하향 조건 ──
@@ -1318,7 +1087,6 @@ test('경사걷기 cardioWalkSessions — 걷기 세션만 최근순, 옛 기록
 // ── §7-7: API 키가 없어도 걷기 모드가 100% 동작한다 ──
 test('경사걷기 buildFallbackWalk — 키 없이도 완전한 구성(총시간 정확·경사 상한 이내)', () => {
   const a = loadApp();
-  a.state.apiKey = null;
   a.state.data.cardioLog = [];
   const plan = a.buildFallbackWalk(30, true);
   assert.equal(plan.source, 'fallback');
@@ -1328,11 +1096,7 @@ test('경사걷기 buildFallbackWalk — 키 없이도 완전한 구성(총시�
   const main = plan.segments.filter((s) => s.type === 'walk');
   assert.equal(main.length, 1, '본 구간은 쪼개지 않는다(§3-1 정속)');
   assert.equal(main[0].incline, 4, '기록 없으면 4%');
-  // 허리디스크 기억 노트가 있으면 3%에서 출발 + 자세 큐가 note 에 들어간다
-  a.state.coachMemory = [{ category: 'injury', text: '허리 디스크 이력' }];
-  const back = a.buildFallbackWalk(30, false);
-  assert.equal(back.segments.filter((s) => s.type === 'walk')[0].incline, 3);
-  assert.ok(back.note.includes('고관절'), '허리 자세 큐 포함');
+  // 허리 기억 노트 분기(3% 출발·자세 큐) 단언은 설계서 결정 2·7로 뺐다.
 });
 
 // ── §0·§1-1 톤 규칙: '지방 연소' 마케팅 금지 ──
@@ -1340,75 +1104,6 @@ test('경사걷기 톤 — 안내 문구에 지방 연소/순삭 류 표현이 �
   const banned = ['지방 연소', '지방연소', '순삭', '애프터번', '폭발'];
   const texts = [].concat(app.WALK_COACH_TIPS, app.buildFallbackWalk(30, true).note);
   texts.forEach((t) => banned.forEach((b) => assert.ok(String(t).indexOf(b) === -1, `금지 표현 "${b}" 발견: ${t}`)));
-});
-
-// ── §7-6 AI 프롬프트: 구조 고정 · 경사 상한 · 손잡이 게이트 · 톤 규칙 ──
-test('경사걷기 generateCardioWalk — 프롬프트 규칙 주입 + 총시간 강제 + 경사 상한', async () => {
-  const a = loadApp();
-  a.state.apiKey = 'sk-test';
-  a.state.data.cardioLog = [];
-  let captured = null;
-  a.fetch = (url, opts) => {
-    captured = JSON.parse(opts.body);
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify({
-        headline: 'h', note: 'n',
-        segments: [
-          { type: 'warmup', sec: 300, speed: 5, incline: 0, label: '몸풀기' },
-          { type: 'warmup', sec: 120, speed: 5, incline: 4, label: '준비 구간' },
-          { type: 'walk', sec: 1200, speed: 5, incline: 30, label: '본 구간' },   // ★상한 위반 시도
-          { type: 'cooldown', sec: 180, speed: 4.5, incline: 0, label: '정리' }
-        ]
-      }) }] }),
-      text: () => Promise.resolve(''),
-    });
-  };
-  const plan = await a.generateCardioWalk(30);
-  assert.ok(captured, 'fetch 호출됨');
-  assert.equal(captured.model, 'claude-sonnet-5');
-  assert.deepEqual(captured.thinking, { type: 'disabled' }, 'Sonnet 5 빈 응답 회피');
-  const sys = captured.system;
-  assert.ok(sys.includes('1800초'), '총시간 규칙');
-  assert.ok(sys.includes('시간 → 빈도 → 경사 → 속도'), '향상 우선순위 (§4-1)');
-  assert.ok(sys.includes('12%'), '경사 상한 명시');
-  assert.ok(sys.includes('손잡이'), '손잡이 게이트 (§5-2)');
-  assert.ok(sys.includes('지방 연소'), '금지 규칙으로 언급(과장 금지 §1-1)');
-  assert.ok(sys.includes('본 구간을 여러 개로 쪼개지 말 것'), '정속 고정 (§3-1)');
-  // 코드가 총시간과 경사 상한을 강제한다
-  assert.equal(plan.segments[plan.segments.length - 1].endSec, 1800);
-  assert.equal(plan.segments[2].incline, 12, 'AI가 30% 줘도 12%로 잘림');
-});
-
-// ── §7-6 규칙7: 허리 이력이면 상한 10% + 자세 큐 주입 ──
-test('경사걷기 generateCardioWalk — 허리 이력 시 상한 10% + 자세 큐 블록', async () => {
-  const a = loadApp();
-  a.state.apiKey = 'sk-test';
-  a.state.data.cardioLog = [];
-  a.state.coachMemory = [{ category: 'injury', text: '허리 디스크 있음' }];
-  let captured = null;
-  a.fetch = (url, opts) => {
-    captured = JSON.parse(opts.body);
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: '{"segments":[{"type":"walk","sec":1800,"speed":5,"incline":12}]}' }] }), text: () => Promise.resolve('') });
-  };
-  const plan = await a.generateCardioWalk(30);
-  assert.ok(captured.system.includes('허리(디스크) 이력 있음'), '허리 블록 주입');
-  assert.ok(captured.system.includes('고관절'), '자세 큐 포함');
-  assert.ok(captured.system.includes('10% 를 절대 넘기지 않는다'), '상한 한 단계 낮춤');
-  assert.equal(plan.segments[0].incline, 10, '허리 이력이면 코드도 10%로 자름');
-});
-
-// ── §7-7: API 오류·키 없음에도 기능이 죽지 않는다 ──
-test('경사걷기 generateCardioWalk — 키 없으면 null, API 오류면 로컬 폴백', async () => {
-  const a = loadApp();
-  a.state.apiKey = null;
-  assert.equal(await a.generateCardioWalk(30), null, '키 없으면 null(화면이 로컬 폴백 처리)');
-  a.state.apiKey = 'sk-test';
-  a.state.data.cardioLog = [];
-  a.fetch = () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}), text: () => Promise.resolve('') });
-  const plan = await a.generateCardioWalk(30);
-  assert.ok(plan && plan.segments.length, 'API 오류여도 폴백 구성이 나온다');
-  assert.equal(plan.segments[plan.segments.length - 1].endSec, 1800);
 });
 
 // ── 하위 호환: mode 인자를 안 주면 기존(인터벌) 라벨·아이콘 그대로 ──
@@ -1491,28 +1186,6 @@ test('경사걷기 모드 분리 — 인터벌 기준선이 걷기 세션에 오
   assert.equal(app.cardioIntervalSessions([{ date: '2026-07-01', segments: [] }]).length, 1);
 });
 
-test('경사걷기 generateCardioInterval — 프롬프트 기록 블록에 걷기 세션이 섞이지 않는다', async () => {
-  const a = loadApp();
-  a.state.apiKey = 'sk-test';
-  a.state.data.cardioLog = [
-    { date: '2026-08-01', mode: 'interval', completed: true, rpe: 6, totalSec: 1800, segments: [{ type: 'run', sec: 60, actualSpeed: 8.5 }, { type: 'walk', sec: 120, actualSpeed: 5.5 }] },
-    { date: '2026-08-05', mode: 'walk', completed: true, rpe: 5, totalSec: 1800, segments: [{ type: 'walk', sec: 1200, actualSpeed: 5, incline: 8 }] }
-  ];
-  let captured = null;
-  a.fetch = (url, opts) => {
-    captured = JSON.parse(opts.body);
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: '{"segments":[{"type":"warmup","sec":1800,"speed":5}]}' }] }), text: () => Promise.resolve('') });
-  };
-  await a.generateCardioInterval(30);
-  const sys = captured.system;
-  assert.ok(sys.includes('지난 회(기준선)'), '기록 블록이 들어감');
-  assert.ok(sys.includes('2026-08-01') || sys.includes('뛰기 1회'), '인터벌 세션이 기준선');
-  assert.ok(!sys.includes('2026-08-05'), '걷기 세션이 인터벌 프롬프트에 섞이지 않음');
-  // 반대 방향도 확인: 걷기 프롬프트엔 인터벌 세션이 안 들어간다
-  await a.generateCardioWalk(30);
-  assert.ok(!captured.system.includes('2026-08-01'), '인터벌 세션이 걷기 프롬프트에 섞이지 않음');
-});
-
 // ═══════════════════════════════════════════════
 // 코드리뷰(PR #46) 지적 반영 — 회귀 고정
 // ═══════════════════════════════════════════════
@@ -1563,28 +1236,9 @@ test('리뷰③ cardioFitToTotal — 걷기 모드에서 run 타입과 범위 �
   assert.equal(iv[0].speed, 8);
 });
 
-test('리뷰③-2 generateCardioWalk — AI가 run/과속을 줘도 화면엔 walk·5.5 이하로만 나간다', async () => {
-  const a = loadApp();
-  a.state.apiKey = 'sk-test';
-  a.state.data.cardioLog = [];
-  a.fetch = () => Promise.resolve({
-    ok: true,
-    json: () => Promise.resolve({ content: [{ type: 'text', text: '{"segments":[{"type":"run","sec":1800,"speed":12,"incline":8}]}' }] }),
-    text: () => Promise.resolve(''),
-  });
-  const plan = await a.generateCardioWalk(30);
-  plan.segments.forEach((s) => {
-    assert.notEqual(s.type, 'run', 'walk 모드에 run 구간 없음');
-    assert.ok(s.speed <= 5.5 && s.speed >= 4.5, '속도가 걷기 범위 안');
-  });
-  // 본 구간이 walk 로 남아야 경사 기록이 살아남는다
-  assert.equal(app.cardioWalkMainIncline({ segments: plan.segments.map((s) => ({ type: s.type, incline: s.incline })) }), 8);
-});
-
 // ── §4-1 본 구간 33분 상한을 코드가 강제한다 ──
 test('리뷰④ 본 구간 33분 상한 — 60분·120분을 요청해도 45분 세션으로 자른다', () => {
   const a = loadApp();
-  a.state.apiKey = null;
   a.state.data.cardioLog = [];
   [60, 120].forEach((min) => {
     const plan = a.buildFallbackWalk(min, true);
@@ -1598,39 +1252,6 @@ test('리뷰④ 본 구간 33분 상한 — 60분·120분을 요청해도 45분 
   const ok = a.buildFallbackWalk(30, true);
   assert.equal(ok.segments[ok.segments.length - 1].endSec, 1800);
   assert.ok(!ok.note.includes('본 구간 상한'));
-});
-
-// ── 모드 전환 경쟁 상태: 생성 중에 모드를 바꾸면 늦게 온 응답을 버린다 ──
-test('리뷰⑤ setCardioMode — 생성 중 모드 전환 시 옛 응답이 새 모드에 꽂히지 않는다', async () => {
-  const a = loadApp();
-  a.state.apiKey = 'sk-test';
-  a.state.data.cardioLog = [];
-  a.ensureCardioState();
-  a.state.cardio.mode = 'walk';
-  let release;
-  const pending = new Promise((r) => { release = r; });
-  a.fetch = () => pending;
-  a.buildCardioPlan(30);                       // 걷기 생성 시작 (응답 대기)
-  assert.equal(a.state.cardio.loading, true);
-  a.setCardioMode('interval');                 // 대기 중 모드 전환
-  assert.equal(a.state.cardio.loading, false, '전환 시 로딩 해제');
-  release({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: '{"segments":[{"type":"walk","sec":1800,"speed":5,"incline":8}]}' }] }), text: () => Promise.resolve('') });
-  await new Promise((r) => setTimeout(r, 0));
-  await new Promise((r) => setTimeout(r, 0));
-  assert.equal(a.state.cardio.mode, 'interval');
-  assert.equal(a.state.cardio.plan, null, '옛 걷기 응답이 인터벌 화면에 설치되지 않음');
-});
-
-// ── AI 폴백과 화면 폴백이 같은 구성을 쓴다(허리 자세 큐가 경로에 따라 달라지지 않게) ──
-test('리뷰⑥ generateCardioWalk 폴백 — 화면 폴백과 같은 안내(허리 자세 큐 포함)', async () => {
-  const a = loadApp();
-  a.state.apiKey = 'sk-test';
-  a.state.data.cardioLog = [];
-  a.state.coachMemory = [{ category: 'injury', text: '허리 디스크' }];
-  a.fetch = () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}), text: () => Promise.resolve('') });
-  const plan = await a.generateCardioWalk(30);
-  assert.ok(plan.note.includes('고관절'), 'API 오류 폴백에도 허리 자세 큐가 들어간다');
-  assert.equal(plan.segments[plan.segments.length - 1].endSec, 1800);
 });
 
 // ═══════════════════════════════════════════════
@@ -1647,8 +1268,7 @@ test('부위 매핑: 앱에 등장하는 모든 종목명이 null이 아니다',
   Object.keys(app.EXERCISE_ALIASES_1RM).forEach((k) => { names.add(k); names.add(app.EXERCISE_ALIASES_1RM[k]); });
   Object.keys(app.INITIAL_1RM).forEach((k) => names.add(k));
   Object.keys(app.EXERCISE_CLASS_OVERRIDES).forEach((k) => names.add(k));
-  Object.keys(app.EXERCISE_SAFETY).forEach((k) => names.add(k));
-  Object.keys(app.WEAK_PART_EXERCISE_MAP).forEach((p) => app.WEAK_PART_EXERCISE_MAP[p].forEach((n) => names.add(n)));
+  // EXERCISE_SAFETY(설계서 결정 2)·WEAK_PART_EXERCISE_MAP(결정 1·3)은 삭제돼 수집 대상에서 뺐다.
   Object.keys(app.EXERCISE_BODY_PART_MAP).forEach((k) => names.add(k));
   assert.ok(names.size > 100, '전수 스윕이 실제로 종목을 모았는지 (표 이름이 바뀌면 0건이 되어 조용히 통과한다)');
   names.forEach((n) => {
@@ -1732,64 +1352,6 @@ test('rolling1RMMaxReps — 처방 상단은 절대 자르지 않는다 (1RM 동
   assert.notEqual(app.update1RM('레그 프레스', 100, 12), false, '12회 세트로도 1RM 갱신이 가능해야 한다');
 });
 
-// ── 정체 판정 — 더블 프로그레션(무게 고정 + 반복 상승)은 정체가 아니다 + 표본/기간 가드 ──
-test('getStalledLifts — 반복이 오르면 정체 아님, 표본·기간 부족이면 판정 금지', () => {
-  const ago = (n) => app.getDateStr(new Date(Date.now() - n * 86400000));
-  const mk = (reps) => [0, 1, 2, 3, 4, 5].map((i) => ({
-    date: ago(35 - i * 7), completed: true,
-    exercises: [{ name: '머신 체스트 프레스', maxWeight: 60,
-      setsDetail: [{ weight: 60, reps: reps(i), isWarmup: false }] }],
-  }));
-
-  // 무게 고정 + 반복 상승 = 더블 프로그레션 정상 진행 → 정체 아님
-  app.state.data.workoutLog = mk((i) => 8 + i);
-  assert.deepEqual(plain(app.getStalledLifts()), []);
-
-  // 6주간 무게도 반복도 그대로 = 진짜 정체
-  app.state.data.workoutLog = mk(() => 8);
-  assert.deepEqual(plain(app.getStalledLifts()), ['머신 체스트 프레스']);
-
-  // 표본·기간 가드: 세션 2개(7일 간격)뿐이면 판정 자체를 안 한다
-  app.state.data.workoutLog = mk(() => 8).slice(0, 2);
-  assert.deepEqual(plain(app.getStalledLifts()), []);
-
-  // 정체 종목이 1개뿐이면 lift_stalled 신호는 안 뜬다(2개 이상 요구)
-  app.state.data.workoutLog = mk(() => 8);
-  app.state.data.personalRecords = [];
-  assert.equal(app.detectPlateauSignals().indexOf('lift_stalled'), -1);
-});
-
-// ── 영양 삭제 회귀(2026-09-02 결정): 영양 섹션이 다시 들어오지 않고, 섹션 번호는 1~7 연속 ──
-test('코치지식 COACH_KNOWLEDGE — 영양 섹션 없음 + 번호 1~7 연속', () => {
-  const fresh = loadApp();
-  const k = fresh.COACH_KNOWLEDGE;
-  const nums = (k.match(/### (\d+)\./g) || []).map((s) => parseInt(s.slice(4), 10));
-  assert.deepEqual(nums, [1, 2, 3, 4, 5, 6, 7], '섹션 번호 1~7 연속');
-  assert.ok(!/### \d+\. 영양/.test(k) && !/### \d+\. 보충제/.test(k), '영양·보충제 섹션 없음');
-  assert.ok(!k.includes('Morton 2018') && !k.includes('Maughan 2018'), '영양 출처 잔재 없음');
-  assert.ok(k.includes('### 7. 유산소 병행'), '유산소 병행 섹션이 7번');
-});
-
-// ── 2026-09 재검증 회귀: 정합성 버그가 되돌아오지 않게 못 박는다 (docs/research/v2-selection-plan.md A·C) ──
-test('코치지식·프롬프트 — 2026-09 재검증 정합성 (디로드 RIR 통일 · 오버트레이닝 라벨 없음 · 오타 없음)', () => {
-  const fresh = loadApp();
-  const k = fresh.COACH_KNOWLEDGE;
-  assert.ok(!k.includes('렉스트포즈') && k.includes('레스트포즈'), 'A8: 오타 수정');
-  assert.ok(k.includes('RIR 3~4') && !k.includes('RIR 3~5'), 'A3: 디로드 RIR 3~4로 통일');
-  assert.ok(!k.includes('간접자극을 받아 목표가 낮'), 'A7: 이중 차감 문장 없음');
-  assert.ok(k.includes('Pelland 2026') && !k.includes('Pelland 2024'), 'C1: 볼륨 출처 정식 출판본');
-  assert.ok(k.includes('ACSM 2026'), 'C2: ACSM 2026 포지션 스탠드 인용');
-});
-
-// ── 코치 원칙 5번: 없는 기능을 있다고 말하지 않는다 ──
-test('코치 프롬프트 — 영양 질문은 훈련 외 주제로 넘긴다 (원칙 5)', () => {
-  const fresh = loadApp();
-  const sys = fresh.getCoachSystemPrompt();
-  assert.ok(sys.includes('훈련 외 주제'), '원칙 5 = 훈련 외 주제 안내');
-  assert.ok(!sys.includes('지식 베이스 4·5번'), '옛 영양 섹션 참조 제거');
-  assert.ok(!sys.includes('식단·칼로리 기록 기능이 없다'), '옛 단서 문구 제거');
-});
-
 // ═══════════════════════════════════════════════
 // 부위별 주간 볼륨 노출 (STATS)
 // ═══════════════════════════════════════════════
@@ -1805,7 +1367,7 @@ test('getRecentVolumeSplitByPart — 직접과 분할환산을 분리, getRecent
   assert.equal(split.direct.glutes, undefined);          // 간접은 직접에 섞이지 않는다
   assert.equal(split.fractional.quads, 4);
   assert.equal(split.fractional.glutes, 2);              // 4 × 0.5
-  assert.deepEqual(plain(app.getRecentVolumeByPart(2)), plain(split.fractional)); // 기존 호출부 동작 불변
+  // getRecentVolumeByPart(AI 프롬프트 경로 래퍼)는 설계서 결정 1로 삭제돼 단언에서 뺐다.
 });
 
 // ── 임계 단일 출처: getVolumeThresholds ↔ getVolumeDiagnosis ──
@@ -1823,7 +1385,6 @@ test('볼륨 부위 — 전완·요추는 세지 않는다 (인체도 표시는 
   const fresh = loadApp();
   for (const k of ['forearms', 'lower_back']) {
     assert.equal(fresh.BODY_PART_GROUPS[k], undefined, `BODY_PART_GROUPS 에 ${k} 가 남아 있다`);
-    assert.equal(fresh.WEAK_PART_EXERCISE_MAP[k], undefined, `WEAK_PART_EXERCISE_MAP 에 ${k} 가 남아 있다`);
   }
   // 컬(전완 secondary)·데드(요추 secondary)를 3주간 해도 두 부위가 화면·프롬프트에 안 나온다
   fresh.state.data.workoutLog = [
@@ -1834,11 +1395,7 @@ test('볼륨 부위 — 전완·요추는 세지 않는다 (인체도 표시는 
   const card = fresh.volumeByPartCardHtml();
   assert.ok(!card.includes('전완'), '볼륨 카드에 전완 줄이 남아 있다');
   assert.ok(!card.includes('요추'), '볼륨 카드에 요추 줄이 남아 있다');
-
-  const ctx = fresh.buildUserContext();
-  assert.ok(!ctx.includes('전완'), 'AI 프롬프트에 전완 볼륨이 남아 있다');
-  assert.ok(!ctx.includes('요추'), 'AI 프롬프트에 요추 볼륨이 남아 있다');
-  assert.ok(!/권장 종목:[^\n]*리버스 컬/.test(ctx), '프롬프트가 아직 리버스 컬을 권장하고 있다');
+  // WEAK_PART_EXERCISE_MAP·buildUserContext(AI 프롬프트) 단언은 설계서 결정 1·3으로 뺐다.
 
   // 세는 것만 멈춘 것이지 지운 게 아니다 — 자극 인체도·라벨·종목은 그대로 살아 있다
   assert.equal(Array.from(fresh.getMuscleViews('forearms')).join(','), 'front,back');
@@ -1878,7 +1435,7 @@ test('volumeByPartCardHtml — 2주 미만은 판정 보류, 이후는 프롬프
   const html = app.volumeByPartCardHtml();
   assert.ok(!html.includes('아직 판단하기 일러요'));
   assert.ok(html.includes('직접 3.0 · 간접 포함 3.0세트/주'), '2주 평균 = 6세트 / 2주');
-  assert.equal(((app.groupVolumeBy(app.getRecentVolumeByPart(2)).chest) / 2).toFixed(1), '3.0', 'AI 프롬프트 경로와 같은 값');
+  // 'AI 프롬프트 경로와 같은 값' 단언은 설계서 결정 1(앱 안 AI 삭제)로 뺐다.
   assert.ok(html.includes('부족'));
   assert.ok(!html.includes('과잉'), "'과잉'은 근거를 넘어선 표현이라 쓰지 않는다");
   assert.ok(!html.includes('MEV'), '사용자 화면에 전문 약어 노출 금지');
@@ -1929,7 +1486,6 @@ test('2단계 — 종목을 다 빼면 시작을 막고 요약이 거짓말하�
 // 화면에 안 쓰는 값을 하루 한 번 API 로 받아 오면 요금만 나가므로 배경 로드도 멈췄다.
 test('오늘의 추천 — 홈·운동 탭 어디에도 남아 있지 않다', () => {
   const fresh = loadApp();
-  fresh.state.apiKey = 'sk-ant-test';
   fresh.state.aiRecommendation = { date: fresh.getTodayStr(), session: 'legs', title: '하체 가자',
     reason: 'r', caution: '', suggestion: 's', intensity: 'moderate' };
 
@@ -1944,8 +1500,8 @@ test('오늘의 추천 — 홈·운동 탭 어디에도 남아 있지 않다', (
   ['recommend-badge', '추천', '이번 주'].forEach((gone) => {
     assert.ok(!workout.includes(gone), '운동 탭에 아직 남아 있다: ' + gone);
   });
-  // 부위 다섯 장은 그대로 고를 수 있어야 한다
-  ['push', 'pull', 'legs', 'upper', 'free'].forEach((k) => {
+  // 부위 네 장은 그대로 고를 수 있어야 한다 (FREE 카드는 설계서 결정 9로 삭제)
+  ['push', 'pull', 'legs', 'upper'].forEach((k) => {
     assert.ok(workout.includes("selectBodyPart('" + k + "')"), k + ' 를 고를 수 없다');
   });
   assert.ok(workout.includes('body-part-grid'), '2열 그리드가 아니다');
@@ -1956,125 +1512,6 @@ test('오늘의 추천 — 홈·운동 탭 어디에도 남아 있지 않다', (
   const homeSrc = src.slice(src.indexOf('function renderHome()'), src.indexOf('function renderWorkout()'));
   assert.ok(!/^\s*[^/\n]*loadAIRecommendationIfNeeded\s*\(/m.test(homeSrc),
     '홈이 다시 오늘의 추천을 배경에서 불러온다 — 화면에 안 쓰는 값이라 요금만 나간다');
-});
-
-// 앱이 부상·장비 때문에 종목을 바꿨다면 그 사실은 사용자에게 알려야 한다.
-// 사용자가 지운 건 AI 가 쓴 '주의사항' 산문이지, **앱이 루틴에 한 일**이 아니다.
-test('2단계 — 안전·장비 교체는 알리고, AI 주의사항 산문은 안 적는다', () => {
-  const a = loadApp();
-  a.state.workoutWizardStep = 2;
-  a.state.selectedBodyPart = 'push';
-  a.state.routineLoading = false;
-  a.state.generatedRoutine = { bodyPart: 'push', headline: 'x', duration: 50, totalSets: 3,
-    caution: '어깨가 아프면 무리하지 마세요',
-    swaps: ['안전 교체: 바벨 스쿼트 → 핵 스쿼트 (허리 보호)'],
-    exercises: [{ name: '머신 체스트 프레스', type: '복합', sets: 3, reps: '8-10', weight: 60 }] };
-  const html = a.renderWorkoutStep2();
-  assert.ok(html.includes('안전 교체: 바벨 스쿼트 → 핵 스쿼트'), '앱이 종목을 바꾼 사실이 화면에 없다');
-  assert.ok(!html.includes('어깨가 아프면 무리하지 마세요'), 'AI 주의사항 산문은 걷어 냈다');
-
-  // 바꾼 게 없으면 줄도 안 뜬다
-  a.state.generatedRoutine.swaps = [];
-  assert.ok(!a.renderWorkoutStep2().includes('routine-swap-note'));
-
-  // API 키 없이 만든 템플릿 루틴은 그 사실을 알린다 — 옛 '기본 루틴' 배지가 'AI 분석 완료'
-  // 배지와 한 몸이라 같이 걷혔는데, 없으면 템플릿을 AI 맞춤으로 오해한다.
-  a.state.generatedRoutine.isFallback = true;
-  const fb = a.renderWorkoutStep2();
-  assert.ok(fb.includes('기본 루틴'), '폴백 루틴이 AI 루틴과 구분되지 않는다');
-  assert.ok(fb.includes('API 키'), '무엇을 하면 되는지 알려 준다');
-  assert.ok(!fb.includes('AI 분석 완료'), 'AI 배지는 되살리지 않는다');
-});
-
-// ── AI 종목 풀: 같은 운동이 두 이름으로 노출되면 AI가 둘 다 처방해 기록이 갈린다 ──
-// getExercisePoolFor는 generateFullRoutine 안의 중첩 함수라 직접 호출할 수 없다.
-// → fetch를 가로채 실제로 전송되는 프롬프트에서 "종목 풀" 블록을 뽑아 검사한다.
-test('AI 종목 풀 — 별칭 종목이 두 이름으로 중복 노출되지 않는다', async () => {
-  const a = loadApp();
-  a.state.apiKey = 'sk-test';
-  let captured = null;
-  a.fetch = (url, opts) => {
-    captured = JSON.parse(opts.body);
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ content: [{ type: 'text', text: '{"headline":"t","reason":"r","exercises":[]}' }] }),
-      text: () => Promise.resolve(''),
-    });
-  };
-
-  // 프롬프트의 종목 풀 블록에서 종목 이름만 추출 ("- 부위: 이름 [태그...], 이름 [태그...]")
-  const poolNames = (prompt) => {
-    const start = prompt.indexOf('사용 가능 종목 풀');
-    const end = prompt.indexOf('[규칙] 루틴 구성 원칙');
-    assert.ok(start !== -1 && end > start, '프롬프트에 종목 풀 블록이 있어야 함');
-    const names = [];
-    prompt.slice(start, end).split('\n').forEach((line) => {
-      if (line.slice(0, 2) !== '- ') return;
-      line.slice(line.indexOf(':') + 1).split('], ').forEach((chunk) => {
-        const i = chunk.indexOf(' [');
-        if (i > 0) names.push(chunk.slice(0, i).trim());
-      });
-    });
-    return names;
-  };
-
-  for (const bodyPart of ['push', 'pull', 'legs', 'upper']) {
-    captured = null;
-    await a.generateFullRoutine(bodyPart);
-    assert.ok(captured, bodyPart + ': 루틴 생성 요청이 전송돼야 함');
-    const names = poolNames(captured.system[1].text);
-    assert.ok(names.length > 0, bodyPart + ': 종목 풀이 비어있지 않아야 함');
-    const dup = names.filter((n) => {
-      const canonical = a.EXERCISE_ALIASES_1RM[n];
-      return canonical && names.indexOf(canonical) !== -1;
-    });
-    assert.deepEqual(dup, [], bodyPart + ' 풀에 같은 운동이 두 이름으로 노출됨');
-    // 표준명이 따로 있는 별칭 표기는 애초에 풀에 들어가면 안 된다 (중복이 아니어도)
-    const aliases = names.filter((n) => a.isAliasExerciseName(n));
-    assert.deepEqual(aliases, [], bodyPart + ' 풀에 별칭 표기가 노출됨');
-  }
-});
-
-// ── 프롬프트에서 근거 없는 통념·미검증 용어가 사라졌는가 (모델 입력 직접 검사) ──
-//    정체기: '자극 적응 / 같은 종목 6주 이상 → 종목 교체'는 근거 없는 통념 (Fonseca 2014 / Baz-Valle 2019)
-//    주간 리뷰: 'MEV'는 동료심사로 검증된 경계값이 아니고, 상한 초과는 '과잉'이 아니라 이득이 완만해지는 구간 (Pelland 2025)
-test('정체기·주간리뷰 프롬프트 — 근거 없는 통념(자극 적응/6주)과 미검증 용어(MEV/과잉) 제거', async () => {
-  const a = loadApp();
-  a.state.apiKey = 'sk-test';
-  let captured = null;
-  const stub = (text) => (url, opts) => {
-    captured = JSON.parse(opts.body);
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ content: [{ type: 'text', text: text }] }),
-      text: () => Promise.resolve(''),
-    });
-  };
-
-  // (1) 정체기 분석 — signals 가 비어 있으면 즉시 null 이므로 신호를 하나 넣는다
-  a.fetch = stub('{"severity":"low","diagnosis":"d","primary_cause":"c","recommendations":[],"encouragement":"e"}');
-  await a.analyzePlateauWithAI(['lift_stalled']);
-  assert.ok(captured, '정체기 요청이 전송돼야 함');
-  const plateau = captured.system;
-  assert.equal(typeof plateau, 'string', '정체기 system은 문자열');
-  assert.ok(!plateau.includes('자극 적응'), "'자극 적응'(근거 없는 통념) 제거");
-  assert.ok(!plateau.includes('6주'), "'같은 종목 6주 이상 → 교체' 기준 제거");
-  assert.ok(plateau.includes('종목 교체는 "몇 주 했는가"가 아니라 사유로 판단한다'), '기간이 아니라 사유 기반 판단으로 대체');
-
-  // (2) 주간 리뷰 — 볼륨 블록이 실제로 그려지도록 이번 주 기록을 심는다(상한 초과 구간)
-  captured = null;
-  a.state.data.workoutLog = [{
-    id: 'w1', date: a.getTodayStr(), completed: true, sessionKr: 'PUSH', duration: 60,
-    exercises: [{ name: '머신 체스트 프레스', setsCount: 25 }]
-  }];
-  a.fetch = stub('{"headline":"h","grade":"A","wins":[],"improvements":[],"nextWeek":[],"coachNote":"n"}');
-  await a.generateWeeklyReview(true);
-  assert.ok(captured, '주간 리뷰 요청이 전송돼야 함');
-  const review = captured.system;
-  assert.ok(review.includes('부위별 볼륨'), '볼륨 블록이 실제로 프롬프트에 들어갔는지(빈 블록이면 아래 단언이 공허해진다)');
-  assert.ok(review.includes('이득 완만'), '상한 초과 라벨은 이득 완만');
-  assert.ok(!review.includes('MEV'), "'MEV'는 검증된 경계값이 아니라 프롬프트에서 제거");
-  assert.ok(!review.includes('과잉'), "'과잉'은 근거를 넘어선 표현이라 제거");
 });
 
 // ═══════════════════════════════════════════════
@@ -2188,12 +1625,7 @@ test('종목 편집 — 갈래는 전역 state 가 아니라 종목 객체로 �
   // 미리보기 종목인데 세션 갈래로 빠지면 ex.sets.concat 에서 render() 가 통째로 죽었다
   assert.equal(a.isPreviewExercise(a.state.generatedRoutine.exercises[0]), true, 'sets 가 숫자면 미리보기');
   assert.equal(a.isPreviewExercise({ name: 'x', sets: [] }), false, 'sets 가 배열이면 세션');
-
-  const msg = { role: 'assistant', content: '90초로?', apply: [{ action: 'rest', exercise: '', value: 90 }], applyStatus: 'pending' };
-  a.state.coachMessages = [msg];
-  assert.doesNotThrow(() => a.buildCoachApplyCardHtml(msg, 0), '카드 렌더가 죽으면 안 된다');
-  assert.doesNotThrow(() => a.approveCoachApply(0), '적용이 죽으면 안 된다');
-  assert.equal(a.state.generatedRoutine.exercises[0].rest, 90);
+  // 코치 [적용] 경로 단언은 설계서 결정 8(코치 채팅 삭제)로 뺐다.
 });
 
 test('종목 편집 — 세트 스테퍼가 완료 세트를 이중으로 세지 않는다', () => {
@@ -2285,93 +1717,16 @@ test('처방 줄 휴식 — 사용자가 정한 값만 세트법 기본값을 �
   assert.equal(b.state.generatedRoutine.exercises[0].restLocked, true);
 });
 
-test('코치 apply 블록 — 잘리거나 뒤에 글자가 붙어도 본문에 원문이 남지 않는다', () => {
-  const p = app.parseCoachApplyBlock;
-  const cut = p('네.\n```apply\n[{"action":"rest","value":90}');
-  assert.equal(cut.clean, '네.', '잘린 블록도 본문에서 걷어낸다');
-  assert.deepEqual(plain(cut.actions), []);
-
-  const tail = p('네.\n```apply\n[{"action":"rest","value":90}]\n```\n더 궁금한 거 있으면 말해요.');
-  assert.equal(tail.clean, '네.\n더 궁금한 거 있으면 말해요.', '블록 뒤 문장은 살린다');
-  assert.equal(tail.actions.length, 1);
-
-  const broken = p('네.\n```apply\n망가짐\n```\n끝.');
-  assert.equal(broken.clean, '네.\n끝.');
-  assert.deepEqual(plain(broken.actions), []);
-
-  ['정상', '잘림', '꼬리'].forEach(() => {});
-  [cut, tail, broken].forEach((r) => assert.ok(!r.clean.includes('```apply'), '원문 블록이 채팅에 노출되면 안 된다'));
-});
-
 test('스와이프 가드 — 시트가 떠 있으면 뒤 종목이 넘어가지 않는다', () => {
   const src = fs.readFileSync(path.join(DIR, '..', 'js', 'screens.js'), 'utf8');
   const handler = src.slice(src.indexOf("document.addEventListener('touchend'"));
   const body = handler.slice(0, handler.indexOf('var touch = e.changedTouches[0]'));
   // 시트를 새로 만들면 이 목록에도 넣어야 한다 — 안 넣으면 시트 위 스와이프가 뒤 종목을 넘긴다
-  ['state.exerciseEdit', 'state.lastRecordOpen', 'state.sessionChatOpen', 'state.editingSet',
+  // state.sessionChatOpen 은 설계서 결정 8(운동 중 채팅 삭제)로 목록에서 뺐다.
+  ['state.exerciseEdit', 'state.lastRecordOpen', 'state.editingSet',
    'state.setSchemeOpen', 'state.topSetSheet', 'state.muscleMapZoom'].forEach((flag) => {
     assert.ok(body.includes('if (' + flag + ') return;'), '스와이프 가드에 ' + flag + ' 가 없다');
   });
-});
-
-// ── 코치 제안 적용 (#2) ──
-// 코치 채팅은 글자만 돌려줄 뿐 앱을 전혀 못 건드렸다. "쉬는시간 줄여줘" 에 "줄였어요" 라고
-// 답해 놓고 실제 운동은 그대로였다.
-test('parseCoachApplyBlock — 응답 끝 숨김 블록만 떼어내고 이상한 값은 버린다', () => {
-  const p = app.parseCoachApplyBlock;
-  const ok = p('세트 사이가 길어 보여요. 90초로 줄여볼까요?\n```apply\n[{"action":"rest","exercise":"벤치","value":90}]\n```');
-  assert.equal(ok.clean, '세트 사이가 길어 보여요. 90초로 줄여볼까요?', '블록은 본문에서 사라져야 한다');
-  assert.equal(ok.actions.length, 1);
-  assert.deepEqual(plain(ok.actions[0]), { action: 'rest', exercise: '벤치', value: 90 });
-
-  assert.deepEqual(plain(p('블록 없는 답변').actions), [], '블록이 없으면 제안도 없다');
-  assert.deepEqual(plain(p('x\n```apply\n[{"action":"rest","value":5}]\n```').actions), [], '30초 미만은 버린다');
-  assert.deepEqual(plain(p('x\n```apply\n[{"action":"rest","value":9999}]\n```').actions), [], '상한을 넘으면 버린다');
-  assert.deepEqual(plain(p('x\n```apply\n[{"action":"종목삭제","value":1}]\n```').actions), [], '모르는 action 은 버린다');
-  assert.deepEqual(plain(p('x\n```apply\n[{"action":"reps","value":"많이"}]\n```').actions), [], '반복은 숫자·범위만');
-  assert.deepEqual(plain(p('x\n```apply\n망가진 json\n```').actions), [], '깨진 블록은 본문에서만 지운다');
-  assert.equal(p('x\n```apply\n망가진 json\n```').clean, 'x');
-
-  // 스트리밍 중에는 아직 안 닫힌 블록이 화면에 흘러나오면 안 된다
-  assert.equal(app.stripCoachApplyBlock('답변입니다\n```apply\n[{"acti'), '답변입니다');
-});
-
-test('코치 제안 — [적용] 을 눌러야 반영된다 (자동 적용 안 함)', () => {
-  const a = loadApp();
-  a.state.data.workoutLog = []; a.storage.set(a.KEYS.WORKOUT_LOG, []);
-  a.startSession('push');
-  const ex = a.state.activeSession.exercises[0];
-  const restBefore = a.exerciseEditValues(ex).rest;
-
-  a.state.coachMessages = [
-    { role: 'user', content: '쉬는시간 줄여줘' },
-    { role: 'assistant', content: '90초로 줄여볼까요?', apply: [{ action: 'rest', exercise: '', value: 90 }], applyStatus: 'pending' }
-  ];
-  const card = a.buildCoachApplyCardHtml(a.state.coachMessages[1], 1);
-  assert.ok(card.includes('approveCoachApply(1)'), '[적용] 버튼이 없다');
-  assert.ok(card.includes('쉬는시간 ' + restBefore + '초 → 90초'), '무엇이 어떻게 바뀌는지 안 적혀 있다: ' + card);
-  assert.equal(a.exerciseEditValues(ex).rest, restBefore, '누르기 전에 이미 바뀌면 안 된다');
-
-  a.approveCoachApply(1);
-  assert.equal(a.exerciseEditValues(ex).rest, 90, '눌렀는데도 안 바뀐다 — 이 PR 이 고치려던 바로 그 문제');
-  assert.equal(a.state.coachMessages[1].applyStatus, 'applied');
-  assert.ok(a.buildCoachApplyCardHtml(a.state.coachMessages[1], 1).includes('적용 완료'));
-
-  // 취소하면 아무것도 안 바뀐다
-  a.state.coachMessages.push({ role: 'assistant', content: 'x', apply: [{ action: 'rest', exercise: '', value: 200 }], applyStatus: 'pending' });
-  a.cancelCoachApply(2);
-  assert.equal(a.exerciseEditValues(ex).rest, 90);
-  assert.equal(a.state.coachMessages[2].applyStatus, 'cancelled');
-});
-
-test('코치 제안 — 적용할 곳이 없으면 버튼을 살려 두지 않는다', () => {
-  const a = loadApp();
-  a.state.activeSession = null;
-  a.state.generatedRoutine = null;
-  const msg = { role: 'assistant', content: 'x', apply: [{ action: 'rest', exercise: '', value: 90 }], applyStatus: 'pending' };
-  const card = a.buildCoachApplyCardHtml(msg, 0);
-  assert.ok(!card.includes('approveCoachApply'), '누를 수 없는 버튼을 남기지 않는다');
-  assert.ok(card.includes('진행 중인 운동이 없어요'));
 });
 
 // ── 자극 부위·지난 기록을 버튼+팝업으로 (#3) ──
@@ -2515,9 +1870,7 @@ test('지난 기록 — 운동 중 화면·완료 화면·코치 컨텍스트가
   a.state.completedSession = { workoutId: 'x', sessionName: 'PULL', sessionType: 'pull', duration: 45,
     exerciseCount: 1, setCount: 2, newPRs: [], date: new Date(), exercises: [logged] };
   assert.ok(a.renderWorkoutComplete().includes(WANT), '완료 화면');
-
-  assert.ok(a.buildSessionChatContext(a.state.activeSession).includes('지난 세션 수행: ' + WANT),
-    '코치 컨텍스트 — 여기만 접히면 코치가 "40kg 를 10회나 들었네" 로 읽는다');
+  // 코치 컨텍스트(buildSessionChatContext) 단언은 설계서 결정 8(운동 중 채팅 삭제)로 뺐다.
 });
 
 // ── 빠져 있던 유명 종목 (#7) ──
@@ -2566,32 +1919,6 @@ test('종목 교체 검색 — 스컬크러셔로 찾으면 표준명이 나온�
   assert.deepEqual(hits('스컬크러셔'), ['라잉 트라이셉스 익스텐션'], '흔히 쓰는 이름으로 찾을 수 있어야 한다');
 });
 
-// ── 코치 프롬프트의 종목 목록 (#5) ──
-test('코치 프롬프트 — 부위별 종목 목록이 들어가고, 없는 종목은 이름조차 안 나온다', () => {
-  const a = loadApp();
-  const block = a.buildExerciseCatalogBlock();
-  assert.ok(a.buildCoachSystemParts().stable.includes(block.split('\n')[0]),
-    '종목 목록이 코치 시스템 프롬프트(캐시 블록)에 없다');
-
-  // 이두 줄에 회외 컬이 여러 개 보여야 한 종목에 갇히지 않는다
-  const bicepsLine = block.split('\n').find((l) => l.startsWith('- 이두:')) || '';
-  ['바벨 컬', '덤벨 컬', '인클라인 덤벨 컬', '이지 바 프리처 컬'].forEach((n) =>
-    assert.ok(bicepsLine.includes(n), `이두 줄에 ${n} 이 없다`));
-  assert.ok(!bicepsLine.includes('리버스 컬'), '리버스 컬은 이두가 아니라 전완 종목이다');
-
-  // 장비가 없는 종목과 별칭 표기는 목록에 오르지 않는다.
-  // includes() 로 보면 '덤벨 시티드 카프 레이즈' 안의 '시티드 카프 레이즈' 까지 걸리므로 항목 단위로 쪼갠다.
-  const listed = new Set(block.split('\n')
-    .filter((l) => l.startsWith('- ') && l.includes(': '))
-    .flatMap((l) => l.slice(l.indexOf(': ') + 2).split(', '))
-    .map((n) => n.replace('(신장강조)', '')));
-  Object.keys(a.EXERCISE_BODY_PART_MAP).forEach(function(n) {
-    if (!a.isExerciseAvailable(n)) assert.ok(!listed.has(n), `없는 기구 종목이 목록에 있다: ${n}`);
-    if (a.isAliasExerciseName(n)) assert.ok(!listed.has(n), `별칭 표기가 목록에 있다: ${n}`);
-  });
-  assert.ok(listed.has('라잉 트라이셉스 익스텐션') && !listed.has('스컬크러셔'), '별칭이 아니라 표준명으로 실린다');
-});
-
 // ── recalc1RMAfterEdit: 한 세션에 같은 운동이 두 표기로 있어도 1RM이 깎이지 않는다 ──
 test('recalc1RMAfterEdit — 세션 내 별칭/표준명 두 표기를 같은 종목으로 본다', () => {
   const a = loadApp();
@@ -2607,44 +1934,6 @@ test('recalc1RMAfterEdit — 세션 내 별칭/표준명 두 표기를 같은 �
   assert.equal(a.storage.get(a.KEYS.ONE_RM_DATA, {})['랫 풀 다운'], 93.3,
     '원문 비교면 다른 표기의 세트를 놓쳐 63.3으로 깎인다');
 });
-
-// ── getStalledLifts: 레거시 reps 배열에서도 "최대" 반복을 봐야 한다 ──
-// 첫 세트만 보면 세션 안에서 반복을 올린 사용자가 "반복도 안 오름" = 정체로 오판된다.
-test('getStalledLifts — 레거시 reps 배열도 최대 반복 기준 (더블 프로그레션 오판 금지)', () => {
-  const a = loadApp();
-  const ago = (n) => a.getDateStr(new Date(Date.now() - n * 86400000));
-  const log = (repsFor) => [0, 1, 2, 3, 4, 5].map((i) => ({
-    date: ago(35 - i * 7), completed: true,
-    exercises: [{ name: '머신 체스트 프레스', maxWeight: 60, reps: repsFor(i) }],
-  }));
-
-  // 무게 고정 + 세션 내 반복 상승([8,8,8] → [8,10,12]) = 정상 진행
-  a.state.data.workoutLog = log((i) => (i < 3 ? [8, 8, 8] : [8, 10, 12]));
-  assert.deepEqual(plain(a.getStalledLifts()), [], '첫 세트만 보면 둘 다 8로 읽혀 정체로 오판된다');
-
-  // 진짜 정체는 여전히 잡힌다
-  a.state.data.workoutLog = log(() => [8, 8, 8]);
-  assert.deepEqual(plain(a.getStalledLifts()), ['머신 체스트 프레스']);
-});
-
-// ── 정체기 화면 신호 라벨: 영문 식별자가 그대로 노출되면 안 된다 ──
-test('정체기 화면 — 새 신호 키가 전부 한글 라벨을 갖는다', () => {
-  const a = loadApp();
-  a.state.plateauCheck = {
-    signals: ['lift_stalled', 'pr_stalled', 'frequency_drop'],
-    severity: 'medium', diagnosis: 'd', primary_cause: 'c', recommendations: [], encouragement: 'e',
-  };
-  a.state.plateauDetailOpen = true;
-  const html = a.renderPlateauDetail();
-
-  ['lift_stalled', 'pr_stalled', 'frequency_drop'].forEach((k) => {
-    assert.ok(!html.includes(k), '영문 식별자 ' + k + '가 화면에 그대로 노출됨');
-  });
-  assert.ok(html.includes('무게·횟수 둘 다 정체'), 'lift_stalled 라벨');
-  assert.ok(html.includes('PR 갱신 정체 (4주)'), 'pr_stalled 라벨이 실제 판정 기간(4주)과 일치');
-  assert.ok(!html.includes('PR 갱신 정체 (2주)'), '옛 2주 표기가 남으면 안 된다');
-});
-
 
 // ── 휴식 타이머: 종목표에 없는 복합 종목도 150초를 받아야 한다 ──
 test('휴식 타이머 — 미등록 복합 종목도 부위 판정으로 150초', () => {
@@ -2673,29 +1962,19 @@ test('XSS 회귀 — AI 응답·사용자 입력을 심어도 어떤 화면에�
   const P = '<img src=x onerror=eeek()>';
   const ATTR = '" autofocus onfocus=eeek() x="';   // 속성 자리 탈출용 (P 에는 따옴표가 없다)
 
-  fresh.state.apiKey = 'sk-ant-' + P;
-  fresh.state.apiKeyModalOpen = true;
-  fresh.state.apiKeyInput = ATTR;
+  // API 키(설계서 결정 1)·AI 대화 3단계(결정 9)·주간 리뷰·정체기(결정 8)·기억 노트(결정 7) 화면과 상태는
+  // 삭제돼 페이로드 심기에서 뺐다.
 
   // 루틴 마법사 — selectedBodyPart 를 비워 partName 이 routine.bodyPart 로 폴백하는 경로까지 태운다
   fresh.state.selectedBodyPart = null;
   fresh.state.workoutWizardStep = 2;
   fresh.state.routineLoading = false;
-  fresh.state.routinePreviewExpanded = true;
-  fresh.state.routineChatHistory = [{ role: 'assistant', content: P, changes: [{ type: 'add', exercise: P, detail: P }], approvalStatus: 'pending' }];
-  fresh.state.routineChatInput = ATTR;
   fresh.state.generatedRoutine = {
     bodyPart: P, headline: P, reason: P, caution: P, duration: P, totalSets: P, intensity: P,
     exercises: [{ name: P, type: P, isMain: true, sets: P, reps: P, weight: P, rir: P, rest: null, note: P }],
   };
 
-  // 주간 리뷰 · 정체기 · 오늘의 추천
-  fresh.state.weeklyReview = {
-    weekId: '2026-W32', monday: '2026-08-03', sunday: '2026-08-09',
-    grade: P, headline: P, wins: [P], improvements: [P], nextWeek: [P], coachNote: P,
-    stats: { workoutCount: 1, weightChange: 0, prCount: 0 },
-  };
-  fresh.state.plateauCheck = { detectedAt: fresh.getTodayStr(), signals: [P], severity: P, diagnosis: P, primary_cause: P, recommendations: [P], encouragement: P };
+  // 오늘의 추천
   fresh.state.aiRecommendation = { session: P, title: P, reason: P, caution: P, suggestion: P, intensity: P };
 
   // 진행 중 세션 — AI 루틴의 type·lastWeight 가 세션 종목으로 그대로 복사돼 들어온다
@@ -2708,9 +1987,6 @@ test('XSS 회귀 — AI 응답·사용자 입력을 심어도 어떤 화면에�
                 { name: '풀업', type: P, targetReps: '5-8', lastWeight: null, lastReps: P, scheme: 'straight',
                   sets: [{ weight: null, reps: 8, isWarmup: false, completed: false, role: 'work' }] }],
   };
-
-  // 코치 기억 노트 — 사용자가 쓴 글이 그대로 화면에 남는 목록
-  fresh.state.coachMemory = [{ id: 'm_1', category: 'other', text: P, source: P, date: P }];
 
   // 완료 화면 (세션과 배타적이지 않다 — render 우선순위상 completedSession 이 위)
   fresh.state.completedSession = {
@@ -2740,9 +2016,10 @@ test('XSS 회귀 — AI 응답·사용자 입력을 심어도 어떤 화면에�
     if (html.includes('<img') || html.includes('<script')) leakedTag.push(name);
     if (html.includes(ATTR)) leakedAttr.push(name);         // 따옴표가 살아 있으면 속성 탈출
   }
-  // 지금 23개가 실제로 그려진다. 화면이 throw 하면 위에서 조용히 건너뛰므로,
+  // 화면이 throw 하면 위에서 조용히 건너뛰므로,
   // 하한을 넉넉히 잡아 두면 "예외 때문에 검사가 통째로 비는" 상황을 이 줄이 잡는다.
-  assert.ok(rendered >= 20, '실제로 그려진 화면이 너무 적다(예외로 건너뛴 화면 의심): ' + rendered + '/' + screenFns.length);
+  // 하한 20 → 15: 설계서 결정 1·7·8·9로 화면 함수 5개(코치 채팅·기억 노트·정체기·주간 리뷰·3단계)가 삭제됐다.
+  assert.ok(rendered >= 15, '실제로 그려진 화면이 너무 적다(예외로 건너뛴 화면 의심): ' + rendered + '/' + screenFns.length);
   assert.deepEqual(leakedTag, [], '태그가 살아있는 화면: ' + leakedTag.join(', '));
   assert.deepEqual(leakedAttr, [], '속성 탈출이 가능한 화면: ' + leakedAttr.join(', '));
 
@@ -2773,13 +2050,61 @@ test('XSS 회귀 — AI 응답·사용자 입력을 심어도 어떤 화면에�
   assert.ok(!fresh.renderWorkoutStep2().includes('<img'), '루틴 생성 실패 메시지가 날것으로 들어간다');
   fresh.state.generatedRoutine = okRoutine;
 
-  // 마스킹된 API 키는 앞 10자만 남아 '<img' 가 통째로 안 나온다 → 태그 검사가 못 잡는 사각지대라 따로 본다
-  const moreHtml = fresh.renderMore();
-  assert.ok(!moreHtml.includes('sk-ant-<im'), '마스킹된 API 키가 날것으로 들어간다');
-
   // 이스케이프가 "값을 지운" 게 아니라 "무해하게 바꾼" 것인지도 확인한다
   const step2 = fresh.renderWorkoutStep2();
   assert.ok(step2.includes('&lt;img src=x onerror=eeek()&gt;'), '이스케이프된 형태가 화면에 보이지 않는다');
+});
+
+// Claude 커넥터에서 들어오는 글자 — 연결 시트의 코드 칸(사용자 입력)과 Claude 계획의 title·note·종목 이름(서버에서 온 값).
+test('XSS 회귀 — Claude 연결 코드 칸 · Claude 계획의 title·note·종목 이름이 이스케이프된다', () => {
+  const fresh = loadApp();
+  const P = '<img src=x onerror=eeek()>';
+  const ATTR = '" autofocus onfocus=eeek() x="';
+  const MARK = '&lt;img src=x onerror=eeek()&gt;';
+
+  // ① 연결 시트 코드 칸 (value="..." 속성 자리)
+  fresh.state.claudeSyncSheetOpen = true;
+  fresh.state.claudeSyncInput = ATTR;
+  const sheet = fresh.renderClaudeSyncSheet();
+  assert.ok(sheet.includes('claude-sync-input'), '연결 시트가 안 그려졌다 — 이 검사가 헛돌고 있다');
+  assert.ok(!sheet.includes(ATTR), '연결 코드 칸에서 속성 탈출이 가능하다');
+  fresh.state.claudeSyncSheetOpen = false;
+
+  // ② Claude 계획 (루틴·유산소) — 첫 화면 한 줄 → 2단계 → 세션
+  const today = fresh.getTodayStr();
+  fresh.applyClaudePlans({
+    routine: { id: 'x-1', createdAt: new Date().toISOString(), date: today, session: 'push', title: P, note: P,
+      exercises: [{ name: P, note: P, sets: [{ weight: 20, reps: '8', warmup: false, restSec: 90 }] }] },
+    cardio: { id: 'x-2', createdAt: new Date().toISOString(), date: today, mode: 'walk', title: P, note: P,
+      segments: [{ type: 'walk', sec: 600, speed: 5, incline: 6 }] },
+  });
+  assert.ok(fresh.state.claudeRoutine && fresh.state.claudeCardio, '계획이 안 들어왔다 — 이 검사가 헛돌고 있다');
+  fresh.state.currentTab = 'workout';
+  fresh.state.workoutWizardStep = 1;
+  assert.ok(!fresh.renderWorkout().includes('<img'), '운동 탭 Claude 줄에서 태그가 살아있다');
+  fresh.state.currentTab = 'running';
+  const run = fresh.renderRunning ? fresh.renderRunning() : '';
+  assert.ok(!run.includes('<img'), '러닝 탭 Claude 줄에서 태그가 살아있다');
+  fresh.openClaudeCardio();
+  const cardioPreview = fresh.renderRunning();
+  assert.ok(!cardioPreview.includes('<img'), '유산소 미리보기에서 태그가 살아있다');
+  assert.ok(cardioPreview.includes(MARK), '유산소 미리보기에 이스케이프된 title 이 없다 — 이 검사가 헛돌고 있다');
+
+  fresh.state.currentTab = 'workout';
+  fresh.openClaudeRoutine();
+  const step2 = fresh.renderWorkoutStep2();
+  assert.ok(!step2.includes('<img'), '2단계에서 태그가 살아있다');
+  assert.ok(step2.includes(MARK), '2단계에 이스케이프된 종목 이름이 없다 — 이 검사가 헛돌고 있다');
+  fresh.openExerciseEdit('preview', 0);
+  const edit = fresh.buildExerciseEditSheetHtml();
+  assert.ok(!edit.includes('<img') && edit.includes(MARK), '편집 시트 종목 이름');
+  fresh.state.exerciseEdit = null;
+
+  fresh.startGeneratedRoutine();
+  fresh.state.activeSession.warmup = null;
+  const session = fresh.renderWorkoutSession();
+  assert.ok(!session.includes('<img'), '세션 화면에서 태그가 살아있다');
+  assert.ok(session.includes(MARK), '세션 화면에 이스케이프된 종목 이름이 없다 — 이 검사가 헛돌고 있다');
 });
 
 // ═══════════════════════════════════════════════
@@ -2937,11 +2262,7 @@ test('디자인 규칙 — 화면 이름은 탭바에만 있고 한국어다', (
 //  · js/ai.js 전체와 data.js 의 COACH_KNOWLEDGE 는 AI 에게 보내는 프롬프트라 규칙 예외다(CLAUDE.md).
 //  · data.js 의 화면용 표(MOBILITY_DRILLS·SET_SCHEMES)는 각자 전용 검사가 이미 있다
 //    (tests/mobility.test.mjs · tests/set-schemes.test.mjs) → 여기서 또 보지 않는다.
-//  · domain.js 안의 프롬프트 블록 빌더도 화면이 아니라 아래 목록으로 뺀다.
-//    새 프롬프트 빌더를 만들면 여기에 이름을 추가할 것.
 const COPY_FILES = ['screens.js', 'core.js', 'bodymap.js', 'domain.js'];
-const PROMPT_BUILDERS = ['buildSafetyPromptBlock', 'buildEquipmentPromptBlock', 'buildExerciseCatalogBlock',
-  'formatBalanceAnalysis', 'formatCoachMemoryForPrompt', 'getUnavailableExerciseNames'];
 const HANGUL_RE = /[가-힣]/;
 
 // 줄 끝 주석을 떼어낸 코드 부분. 문자열 안의 '//' 는 주석이 아니므로 따옴표 상태를 따라간다
@@ -2962,17 +2283,13 @@ function codeOf(line) {
   return line;
 }
 
-// 화면 파일에서 한글이 든 문자열 리터럴만 뽑는다 (주석·프롬프트 빌더 제외).
+// 화면 파일에서 한글이 든 문자열 리터럴만 뽑는다 (주석 제외).
 function uiLiterals() {
   const out = [];
   for (const f of COPY_FILES) {
     const lines = fs.readFileSync(path.join(DIR, '..', 'js', f), 'utf8').split('\n');
-    let inPrompt = false;
     lines.forEach((line, i) => {
       const t = line.trim();
-      if (PROMPT_BUILDERS.some((fn) => t.startsWith('function ' + fn))) inPrompt = true;
-      else if (inPrompt && t === '}') { inPrompt = false; return; }
-      if (inPrompt) return;
       if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return;   // 주석은 사람이 읽는 메모
       for (const raw of codeOf(line).match(/'(?:[^'\\]|\\.)*'/g) || []) {
         const str = raw.slice(1, -1).replace(/\\'/g, "'");
@@ -3016,33 +2333,6 @@ test('디자인 규칙 — 화면 문구는 한 문장 40자 이내', () => {
     }
   }
   assert.deepEqual(bad, [], '한 문장이 40자를 넘는다 — 쪼개거나 덜어낸다(더 필요하면 noteBlock 으로 접는다)');
-});
-
-// EXERCISE_SAFETY[].mod 는 js/data.js 에 있지만 **화면 토스트로 뜬다**(js/screens.js 의
-// checkExerciseSafety → showToast). 위 문구 3종 검사는 data.js 를 안 보므로 여기가 사각지대다.
-// 111문장을 지금 다시 쓰는 건 부상 안내의 뜻을 건드릴 위험이 커서 미룬다. 대신 **숫자가 늘지 않게**
-// 못박아, 새 종목을 넣을 때 같은 문체가 더 불어나는 것만 막는다.
-// (이 수는 줄어들 수는 있다 — 줄었으면 아래 상수를 내려 적는 게 맞다.)
-const SAFETY_MOD_KNOWN_VIOLATIONS = 111;
-
-test('디자인 규칙 — 부상 안내(mod) 문구 위반이 더 늘지 않는다', () => {
-  const bad = [];
-  Object.keys(app.EXERCISE_SAFETY).forEach((name) => {
-    const mod = app.EXERCISE_SAFETY[name].mod;
-    if (!mod) return;
-    Object.keys(mod).forEach((area) => {
-      String(mod[area]).split(/(?<=[.?!])\s+/).forEach((raw) => {
-        const t = raw.trim().replace(/\.$/, '');
-        if (!t) return;
-        if (/(한다|된다|이다|가능하다|합니다|됩니다|입니다)$/.test(t) || [...t].length > 40) {
-          bad.push(`${name}.${area}: ${t.slice(0, 40)}`);
-        }
-      });
-    });
-  });
-  assert.ok(bad.length <= SAFETY_MOD_KNOWN_VIOLATIONS,
-    `부상 안내 문구 위반이 ${SAFETY_MOD_KNOWN_VIOLATIONS} → ${bad.length} 로 늘었다. 새로 넣은 것부터 해요체·40자로:\n  ` +
-    bad.slice(-5).join('\n  '));
 });
 
 test('디자인 규칙 — 접이식 안내 noteBlock 은 네이티브 details 라 재렌더가 없다', () => {
@@ -3121,16 +2411,6 @@ test('2단계 — 종목 목록 위에 설명 카드가 없다', () => {
   assert.ok(html.includes('머신 체스트 프레스'));
   assert.ok(/60kg × 8~10회 × 3세트/.test(html), '처방 줄이 없다: ' + (html.match(/routine-ex-prescription[^<]*<[^>]*>([^<]*)/) || [])[1]);
   assert.ok(html.includes("openExerciseEdit('preview', 0)"), '종목 줄이 편집 시트를 열지 않는다');
-});
-
-test('주간 리뷰 — API 키가 없어도 막다른 길이 아니다(키 설정 진입점)', () => {
-  const fresh = loadApp();
-  fresh.state.apiKey = null;
-  fresh.state.weeklyReview = null;
-  fresh.state.weeklyReviewLoading = false;
-  const html = fresh.renderWeeklyReviewDetail();
-  assert.ok(html.includes('API 키가 필요해요'), '상태 안내');
-  assert.ok(html.includes('openApiKeyModal()'), '키 설정으로 가는 버튼이 있어야 한다');
 });
 
 test('없는 탭 id — 빈 화면 대신 홈으로 되돌린다', () => {
@@ -3232,12 +2512,7 @@ test('처방 한 줄 — 값은 [시작] 이 실제로 만들 세트에서 온�
   // 휴식은 AI가 준 값이 아니라 종목 클래스·세트 역할이 정한 값이다
   assert.equal(p.rest, fresh.restSecToMin(first.rest), '휴식이 실제 세트 값에서 오지 않았다');
   assert.ok(line.includes('휴식 ' + p.rest), '휴식이 줄에 안 적혔다: ' + line);
-
-  // 대화 미리보기도 같은 값을 말해야 한다 (두 화면이 다른 숫자를 말하면 안 된다)
-  fresh.state.workoutWizardStep = 3;
-  fresh.state.routinePreviewExpanded = true;
-  fresh.state.routineChatHistory = [];
-  assert.ok(fresh.renderWorkoutStep3().includes(plan.weight + 'kg × '), '대화 미리보기 무게가 처방 줄과 다르다');
+  // 대화 미리보기(3단계) 단언은 설계서 결정 9(AI 대화 3단계 삭제)로 뺐다.
 });
 
 // 2단계는 한 종목당 두 줄(이름 + 처방)이라, 옛 '탑세트 1 + 백오프 2 (90% · RIR 2-3→0-1)'
@@ -3319,21 +2594,6 @@ test('휴식 표기 — 숫자로 못 읽히는 값은 아예 적지 않는다 (
   assert.equal(fresh.buildPrescriptionValues({ name: 'x', sets: '3', rest: '90' }, null).rest, '1.5분');
 });
 
-test('대화 미리보기 — 종목 줄에 세트 수와 세트법이 있다', () => {
-  const fresh = loadApp();
-  fresh.state.workoutWizardStep = 3;
-  fresh.state.selectedBodyPart = 'free';
-  fresh.state.routinePreviewExpanded = true;      // 접혀 있으면 종목 줄이 안 그려진다
-  fresh.state.routineChatHistory = [];
-  fresh.state.generatedRoutine = SAME_VALUE_ROUTINE;
-  const html = fresh.renderWorkoutStep3();
-
-  assert.ok(html.includes('routine-preview-ex'), '미리보기 종목 줄이 안 그려졌다 — 이 검사가 헛돌고 있다');
-  assert.equal((html.match(/3세트/g) || []).length, 3, '종목 줄마다 세트 수가 있어야 한다');
-  // 자유 구성은 2단계를 건너뛰므로 세트법을 알 자리가 여기뿐이다
-  assert.ok(html.includes(fresh.SET_SCHEMES.top_backoff.short), '고중량 복합의 세트법 표시가 없다');
-});
-
 // ═══ 2026-09-02 재검증 회귀 가드 (docs/research/v2-selection-plan.md A1·A6·B4·B5·D4·D5) ═══
 test('경사걷기 손잡이 — 뒤로 기댐만 경사 −2%, 세우고 잡음은 유지 (B5 · Hofmann 2014)', () => {
   const mk = (over) => [Object.assign({
@@ -3357,66 +2617,4 @@ test('볼륨 진단 — 직접 세트 하한: 환산이 적정이어도 팔·측
   assert.equal(fresh.getVolumeDiagnosis({ biceps: 12 }, 1).directShort.length, 0, '직접 맵 없으면 판정 안 함');
   assert.equal(fresh.getVolumeThresholds('biceps').target, 10);
   assert.equal(fresh.getVolumeThresholds('biceps').optimalTop, 20);
-});
-
-test('걷기 엔진 — 하체 웨이트 인접(오늘/어제)을 읽어 컨텍스트에 싣는다 (D4)', () => {
-  const fresh = loadApp();
-  const today = fresh.getTodayStr();
-  const yday = fresh.getDateStr(new Date(Date.now() - 86400000));
-  fresh.state.data.workoutLog = [{ id: 'a', date: today, sessionKr: 'LEGS', exercises: [] }];
-  assert.deepEqual(plain(fresh.cardioLegsAdjacency()), { today: true, yesterday: false });
-  fresh.state.data.workoutLog = [{ id: 'b', date: yday, sessionKr: 'LEGS', exercises: [] }];
-  assert.deepEqual(plain(fresh.cardioLegsAdjacency()), { today: false, yesterday: true });
-  // 걷기 기록이 하나는 있어야 이력 컨텍스트가 만들어진다(없으면 '첫 회' 안내로 끝난다)
-  fresh.state.data.cardioLog = [{ date: yday, mode: 'walk', completed: true, rpe: 5, segments: [{ type: 'warmup', sec: 300, incline: 0 }, { type: 'walk', sec: 1200, incline: 6 }] }];
-  assert.ok(fresh.cardioWalkHistoryContext().includes('어제 하체 세션'), '프롬프트 컨텍스트에 실린다');
-  fresh.state.data.workoutLog = [{ id: 'c', date: yday, sessionKr: 'PUSH', exercises: [] }];
-  assert.ok(fresh.cardioWalkHistoryContext().includes('하체 인접 조정 불필요'));
-});
-
-test('코치 컨텍스트 — 정체 마커는 정체 엔진(4세션·28일)만 따른다: 3세션 같은 무게로는 🔥가 안 뜬다 (A1)', () => {
-  const fresh = loadApp();
-  fresh.state.apiKey = 'sk-test';
-  const d = (n) => fresh.getDateStr(new Date(Date.now() - n * 86400000));
-  const w = (n) => ({ id: 'w' + n, date: d(n), sessionKr: 'PUSH', sessionType: 'push',
-    exercises: [{ name: '벤치 프레스', maxWeight: 60, setsCount: 3, setsDetail: [{ weight: 60, reps: 8, completed: true }, { weight: 60, reps: 8, completed: true }, { weight: 60, reps: 8, completed: true }] }] });
-  fresh.state.data.workoutLog = [w(2), w(9), w(16)];
-  const ctx = fresh.buildUserContext();
-  assert.ok(!ctx.includes('## 🔥 정체'), '표본 3세션은 정체로 부르지 않는다');
-  assert.ok(ctx.includes('벤치 프레스') && !/벤치 프레스[^\n]*🔥/.test(ctx), '종목 줄에도 🔥 마커 없음');
-  // 엔진이 정체라고 하면 그대로 따른다
-  const key = fresh.canonicalExerciseName('벤치 프레스');
-  fresh.getStalledLifts = () => [key];
-  const ctx2 = fresh.buildUserContext();
-  assert.ok(ctx2.includes('## 🔥 정체') && ctx2.includes(key + ' 60kg'), ctx2.match(/## 🔥 정체[^\n]*\n[^\n]*/) + '');
-});
-
-test('코치 컨텍스트 — 볼륨 폐루프는 이번 주 누적을 함께 싣는다 (A6)', () => {
-  const fresh = loadApp();
-  fresh.state.apiKey = 'sk-test';
-  const today = fresh.getTodayStr();
-  fresh.state.data.workoutLog = [{ id: 'x', date: today, sessionKr: 'PUSH', sessionType: 'push',
-    exercises: [{ name: '벤치 프레스', setsCount: 3 }] }];
-  const ctx = fresh.buildUserContext();
-  assert.ok(ctx.includes('괄호 안은 이번 주 누적'), ctx.slice(0, 200));
-  assert.ok(/가슴 [0-9.]+\(이번 주 3\)/.test(ctx), '가슴 이번 주 3세트');
-  // S9: need(9)가 8을 넘으면 세션당 세트 상한 안내가 붙는다(js/ai.js volNeedNote)
-  assert.ok(ctx.includes('이번 주 3세트, 목표 12세트까지 9세트 더 (한 세션엔 최대 8세트)'), '격차는 이번 주 누적 기준 + 세션 상한 안내');
-});
-
-test('코치 컨텍스트 — RPE는 개인 기준선 대비로 판정하고 "오버트레이닝" 라벨을 쓰지 않는다 (D5)', () => {
-  const fresh = loadApp();
-  fresh.state.apiKey = 'sk-test';
-  const d = (n) => fresh.getDateStr(new Date(Date.now() - n * 86400000));
-  const log = [];
-  for (let i = 0; i < 5; i++) log.push({ date: d(i), rpe: 9, condition: 3 });
-  for (let i = 5; i < 15; i++) log.push({ date: d(i), rpe: 7, condition: 3 });
-  fresh.state.data.conditionLog = log;
-  const ctx = fresh.buildUserContext();
-  assert.ok(ctx.includes('평소보다 크게 높음') && ctx.includes('개인 기준선 7.0'), ctx.match(/RPE[^\n]*/)[0]);
-  assert.ok(!ctx.includes('오버트레이닝'));
-  // 기준선 없이 RPE 9 → 절대값 참고 표기, 오버트레이닝 아님
-  fresh.state.data.conditionLog = log.slice(0, 5);
-  const ctx2 = fresh.buildUserContext();
-  assert.ok(ctx2.includes('기준선 없음') && !ctx2.includes('오버트레이닝'));
 });

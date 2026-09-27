@@ -12,11 +12,7 @@ var KEYS = {
   INITIALIZED: 'fitness_initialized',
   EXERCISES_CACHE: 'fitness_exercises_cache',
   EXERCISES_VERSION: 'fitness_exercises_version',
-  API_KEY: 'fitness_api_key',
   SETTINGS: 'fitness_settings',
-  COACH_HISTORY: 'fitness_coach_history',
-  WEEKLY_REVIEW: 'fitness_weekly_review',
-  PLATEAU_CHECK: 'fitness_plateau_check',
   ONE_RM_DATA: 'fitness_one_rm_data',
   ONE_RM_INITIALIZED: 'fitness_one_rm_initialized',
   CONDITION_LOG: 'fitness_condition_log',
@@ -25,11 +21,13 @@ var KEYS = {
   REST_TIMER: 'fitness_rest_timer',
   WORKOUT_WIZARD: 'fitness_workout_wizard',
   CYCLE_HISTORY: 'fitness_cycle_history',
-  COACH_MEMORY: 'fitness_coach_memory',
-  CHAT_SIGNALS: 'fitness_chat_signals',
   LAST_BACKUP: 'fitness_last_backup',
   // 종목별 사용자 지정 세트법 { "핵 스쿼트": "straight", ... }. 없으면 클래스 기본값(EXERCISE_CLASS_RULES.scheme).
-  SET_SCHEMES: 'fitness_set_schemes'
+  SET_SCHEMES: 'fitness_set_schemes',
+  // Claude 커넥터 연결 코드 (이 기기 전용 · 백업 제외). js/ai.js
+  SYNC_TOKEN: 'fitness_sync_token',
+  // 커넥터 동기화 상태 { lastUploadAt, lastUploadHash, lastImportedRoutineId, lastImportedCardioId } (백업 제외)
+  CLAUDE_SYNC: 'fitness_claude_sync'
 };
 
 var storage = {
@@ -131,10 +129,7 @@ function saveWizard() {
   storage.set(KEYS.WORKOUT_WIZARD, {
     workoutWizardStep: state.workoutWizardStep,
     selectedBodyPart: state.selectedBodyPart,
-    generatedRoutine: state.generatedRoutine,
-    routineChatHistory: state.routineChatHistory,
-    routineChatInput: state.routineChatInput,
-    routinePreviewExpanded: state.routinePreviewExpanded
+    generatedRoutine: state.generatedRoutine
   });
 }
 function clearWizard() {
@@ -154,24 +149,28 @@ window.saveCardioSession = function(session) {
   state.data.cardioLog.push(session);
   storage.set(KEYS.CARDIO_LOG, state.data.cardioLog);
   if (typeof render === 'function') render();
+  // 저장 뒤 Claude 커넥터로 기록만 보낸다(코드가 없으면 요청 없음). js/ai.js
+  if (typeof uploadClaudeSnapshot === 'function') uploadClaudeSnapshot();
 };
 
 // ═══════════════════════════════════════════════
 // 데이터 백업 / 복원 (묶음1)
-// "운동 데이터만" 백업: API 키·코치 대화·임시 진행상태·AI 캐시는 제외.
+// "운동 데이터만" 백업: 임시 진행상태·파생 캐시는 제외.
 // 새 폰에서 복원 가능한 JSON 포맷. REMAKE-PLAN.md 묶음1.
 // ═══════════════════════════════════════════════
 var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v57';
+var APP_VERSION = 'v70';
 // 백업에 담지 않는 키. 두 부류:
-// (1) 로컬 전용·민감 → 복원해도 그대로 보존 (API 키·코치 대화)
+// (1) 로컬 전용·민감 → 복원해도 그대로 보존 (Claude 연결 코드·동기화 상태)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
+// KEYS 에 없는 키(옛 버전이 쓰던 API 키·코치 대화·기억 노트·채팅 신호·AI 캐시)는 백업·복원 대상이 아니다 —
+// 옛 백업 파일에 들어 있어도 sanitizeBackupData 가 알려진 키만 골라 담으므로 조용히 무시된다.
 var BACKUP_LOCAL_ONLY_KEYS = [
-  KEYS.API_KEY,            // 민감 (새 폰에서 다시 입력) — 복원 시 기존 값 보존
-  KEYS.COACH_HISTORY       // 대화 기록 — 복원 시 기존 값 보존
+  KEYS.SYNC_TOKEN,         // 연결 코드 — 새 브라우저에서 더보기 > Claude 연결에 다시 넣는다
+  KEYS.CLAUDE_SYNC         // 이 기기의 전송·가져오기 기록
 ];
 var BACKUP_TRANSIENT_KEYS = [
   KEYS.ACTIVE_SESSION,     // 진행 중 세션
@@ -179,11 +178,8 @@ var BACKUP_TRANSIENT_KEYS = [
   KEYS.REST_TIMER,
   KEYS.WORKOUT_WIZARD,
   KEYS.EXERCISES_CACHE,    // 재생성 가능
-  KEYS.EXERCISES_VERSION,
-  KEYS.WEEKLY_REVIEW,
-  KEYS.PLATEAU_CHECK
+  KEYS.EXERCISES_VERSION
 ];
-// 참고: COACH_MEMORY(기억 노트)는 제외 목록에 없음 → 백업에 포함(새 폰 복원). 사용자가 큐레이션한 개인 정보.
 // 이 기기에서만 의미 있는 기록용 값 → 파일에 담지 않는다. 복원 시에는 "파일이 만들어진 시각"으로 다시 세팅.
 var BACKUP_META_KEYS = [
   KEYS.LAST_BACKUP          // 마지막 백업 일시(기기별 메모)
@@ -221,7 +217,6 @@ function summarizeBackup(parsed) {
     cardio: count(KEYS.CARDIO_LOG),
     body: count(KEYS.BODY_LOG),
     records: count(KEYS.PERSONAL_RECORDS),
-    memory: count(KEYS.COACH_MEMORY),
     oneRM: (oneRM && typeof oneRM === 'object' && !Array.isArray(oneRM)) ? Object.keys(oneRM).length : 0
   };
 }
@@ -273,7 +268,7 @@ function parseBackupFile(input) {
 
 // 백업에 담기는 "목록형" 키 (모양 검사·빈 파일 판단에 함께 쓴다)
 var BACKUP_LIST_KEYS = [KEYS.WORKOUT_LOG, KEYS.CARDIO_LOG, KEYS.BODY_LOG, KEYS.PERSONAL_RECORDS,
-                        KEYS.CONDITION_LOG, KEYS.CYCLE_HISTORY, KEYS.COACH_MEMORY];
+                        KEYS.CONDITION_LOG, KEYS.CYCLE_HISTORY];
 
 // 파일 안의 값들을 저장해도 안전한 형태로 정리 (알려진 키만, 종류별 규칙 적용)
 function sanitizeBackupData(raw) {
@@ -468,7 +463,6 @@ function restoreFromBackup(input) {
   }
 
   // 기존 임시 진행상태·파생 캐시 정리 (옛 세션/캐시가 새 데이터와 충돌하지 않도록).
-  // API 키·코치 대화 같은 로컬 전용 값은 그대로 둔다.
   BACKUP_TRANSIENT_KEYS.forEach(function(key) {
     try { localStorage.removeItem(key); } catch (e) {}
   });
@@ -623,51 +617,24 @@ var state = {
   // 세션 시작 웜업은 activeSession.warmup 에 들어가 세션과 함께 저장된다.
   stretchGuide: null,
   // 더보기 화면 - 모달
-  apiKeyModalOpen: false,
-  apiKeyInput: '',
   profileEditModalOpen: false,
   profileEdit: null,
   settings: { notifications: true, theme: 'dark', unit: 'kg' },
-  apiKey: null,
   // 기록 화면
   statsPeriod: '1month',
   chartView: 'weight',
-  // 코치 채팅
-  coachChatOpen: false,
-  coachMessages: [],
-  coachInputText: '',
-  coachThinking: false,
-  // 세트 사이 채팅 (운동 중 — 3단계). 대화 내용은 activeSession.chat에 저장(세션과 함께 소멸)
-  sessionChatOpen: false,
-  sessionChatPending: null,     // 확인 대기 중인 추출 신호 {pain, painNote, feel, rpe, exIdx}
-  _sessionChatStreaming: false,
-  _sessionChatDraft: '',        // 입력 초안 (전체 렌더에도 살아남게 DOM 밖 보존)
-  // 주간 리뷰
-  weeklyReview: null,
-  weeklyReviewLoading: false,
-  weeklyReviewOpen: false,
-  // 정체기 감지
-  plateauCheck: null,
-  plateauCheckLoading: false,
-  plateauOpen: false,
   // 1RM 리스트
   oneRMListOpen: false,
-  // 코치 기억 노트 (묶음3)
-  coachMemory: [],            // [{id, category, text, source, date}]
-  coachMemoryOpen: false,
-  coachMemoryInput: '',
-  coachMemoryCategory: 'other',
-  coachMemoryEditingId: null, // 수정 중인 노트 id (null=새 추가)
-  coachMemoryDeleteId: null,  // 삭제 확인 중인 노트 id
   // 운동 마법사 (새 구조)
   workoutWizardStep: 1,
   selectedBodyPart: null,
   generatedRoutine: null,
-  routineLoading: false,
-  routineChatHistory: [],
-  routineChatInput: '',
-  routineChatThinking: false,
-  routinePreviewExpanded: false,
+  // Claude 커넥터 (js/ai.js) — 오늘 받아 온, 아직 열지 않은 계획. 저장하지 않는다(열 때마다 다시 받는다).
+  claudeRoutine: null,
+  claudeCardio: null,
+  claudeSyncSheetOpen: false,   // 더보기 > Claude 연결 시트
+  claudeSyncInput: '',
+  claudeSyncSendError: '',     // [지금 보내기] 실패 안내 (시트 안 한 줄)
   // 자극 근육 인체도 (js/bodymap.js)
   muscleMapZoom: null,        // 확대해서 보는 중인 종목명 (null=닫힘)
   // 기록 항목 상세 시트 (삭제용)
@@ -678,14 +645,6 @@ var state = {
   _navTabStack: ['home'],  // 탭 방문 순서(직전 탭으로 되돌리기용)
   _navExitArmed: false     // 루트에서 '한 번 더 누르면 종료' 준비 상태
 };
-
-function scrollRoutineChatToBottom() {
-  setTimeout(function() {
-    var area = document.getElementById('rc-area');
-    if (area) area.scrollTop = area.scrollHeight;
-    window.scrollTo(0, document.body.scrollHeight);
-  }, 80);
-}
 
 // 간단한 토스트 함수
 function showToast(message, isError) {
@@ -776,14 +735,6 @@ function showAlert(message, opts) {
   document.body.appendChild(overlay);
 }
 
-// 채팅 스크롤 맨 아래로
-function scrollChatToBottom() {
-  setTimeout(function() {
-    var chatArea = document.getElementById('chat-area');
-    if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
-  }, 50);
-}
-
 // HTML 이스케이프 (innerHTML/속성 값에 사용자·AI 텍스트 넣을 때)
 // ⚠ onclick="fn('...')" 처럼 **JS 문자열** 자리에는 이것만으로 부족하다 —
 //   &#39; 를 HTML 파서가 ' 로 되돌린 뒤 JS 가 읽으므로 문자열을 탈출할 수 있다.
@@ -793,36 +744,6 @@ function escapeHtml(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-// API 키 마스킹
-function maskApiKey(key) {
-  if (!key || key.length < 12) return '';
-  return key.substring(0, 10) + '••••••••' + key.substring(key.length - 4);
-}
-
-// ═══════════════════════════════════════════════
-// 주간 리뷰 (Sonnet 4.6) - 일요일 자동 트리거
-// ═══════════════════════════════════════════════
-
-// 주차 식별자 (예: "2026-W21")
-function getWeekId(date) {
-  var d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  // ISO 주: 목요일 기준
-  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
-  var year = d.getFullYear();
-  var firstDay = new Date(year, 0, 1);
-  var weekNum = Math.ceil((((d - firstDay) / 86400000) + 1) / 7);
-  return year + '-W' + String(weekNum).padStart(2, '0');
-}
-
-function scrollCoachToBottom() {
-  setTimeout(function() {
-    var area = document.getElementById('coach-chat-area');
-    if (area) area.scrollTop = area.scrollHeight;
-    window.scrollTo(0, document.body.scrollHeight);
-  }, 50);
 }
 
 // ═══════════════════════════════════════════════
@@ -876,10 +797,6 @@ function init() {
     storage.set(KEYS.WORKOUT_LOG, demo.workoutLog);
     storage.set(KEYS.PERSONAL_RECORDS, demo.personalRecords);
     storage.set(KEYS.BODY_LOG, demo.bodyLog);
-    storage.set(KEYS.COACH_MEMORY, [
-      { id: 'mem_demo1', category: 'injury', text: '왼쪽 어깨 약간 불편 — 오버헤드는 가볍게', source: 'manual', date: getTodayStr() },
-      { id: 'mem_demo2', category: 'preference', text: '머신·덤벨 선호', source: 'manual', date: getTodayStr() }
-    ]);
     storage.set(KEYS.INITIALIZED, true);
   }
 
@@ -902,32 +819,13 @@ function init() {
     state.profile.cyclePhase = getPhaseByWeek(state.profile.currentWeek);
   }
 
-  // API 키 + 설정 로드
-  state.apiKey = storage.get(KEYS.API_KEY, null);
+  // 설정 로드
   state.settings = storage.get(KEYS.SETTINGS, { notifications: true, theme: 'dark', unit: 'kg' });
 
-  // 코치 기억 노트 로드 (묶음3)
-  state.coachMemory = storage.get(KEYS.COACH_MEMORY, []);
-  
   // 1RM 초기 데이터 로드 (첫 실행 시 INITIAL_1RM 자동 입력)
   initializeOneRMData();
   
   // (오늘의 추천 캐시·실패 잠금 복원은 2026-09-02 엔진 삭제와 함께 제거. 옛 localStorage 키는 무시된다.)
-
-  // 캐시된 주간 리뷰 로드 (이번 주 것만)
-  var cachedReview = storage.get(KEYS.WEEKLY_REVIEW);
-  if (cachedReview && cachedReview.weekId === getWeekId(new Date())) {
-    state.weeklyReview = cachedReview;
-  }
-  
-  // 캐시된 정체기 체크 로드 (3일 이내)
-  var cachedPlateau = storage.get(KEYS.PLATEAU_CHECK);
-  if (cachedPlateau && cachedPlateau.detectedAt) {
-    var daysDiff = (new Date() - new Date(cachedPlateau.detectedAt)) / 86400000;
-    if (daysDiff < 3) {
-      state.plateauCheck = cachedPlateau;
-    }
-  }
 
   // 사라진 세트법 이관 — **세션을 복원하기 전에** 해야 복원된 세션이 이관된 값을 들고 온다.
   migrateSetSchemeData();
@@ -939,14 +837,14 @@ function init() {
   }
 
   // 진행 중이던 운동 마법사 상태 복원 (운동 짜는 단계가 백그라운드 후에도 유지되도록)
+  // 옛 버전이 저장한 3단계(AI 대화)·실패한 AI 루틴은 되살리지 않는다 — 그 화면이 없어졌다.
   var savedWizard = storage.get(KEYS.WORKOUT_WIZARD);
-  if (savedWizard) {
-    if (savedWizard.workoutWizardStep) state.workoutWizardStep = savedWizard.workoutWizardStep;
+  if (savedWizard && savedWizard.workoutWizardStep === 2 &&
+      savedWizard.generatedRoutine && !savedWizard.generatedRoutine.error &&
+      Array.isArray(savedWizard.generatedRoutine.exercises)) {
+    state.workoutWizardStep = 2;
     if (savedWizard.selectedBodyPart) state.selectedBodyPart = savedWizard.selectedBodyPart;
-    if (savedWizard.generatedRoutine) state.generatedRoutine = savedWizard.generatedRoutine;
-    if (Array.isArray(savedWizard.routineChatHistory)) state.routineChatHistory = savedWizard.routineChatHistory;
-    if (typeof savedWizard.routineChatInput === 'string') state.routineChatInput = savedWizard.routineChatInput;
-    if (typeof savedWizard.routinePreviewExpanded === 'boolean') state.routinePreviewExpanded = savedWizard.routinePreviewExpanded;
+    state.generatedRoutine = savedWizard.generatedRoutine;
   }
   var savedRest = storage.get(KEYS.REST_TIMER);
   if (savedRest && savedRest.startTime && savedRest.duration) {
@@ -1015,4 +913,7 @@ function init() {
   }
 
   render();
+
+  // Claude 커넥터 — 기록을 보내고 오늘 계획을 받아 온다(연결 코드가 없으면 아무것도 안 한다). js/ai.js
+  if (typeof runClaudeSync === 'function') runClaudeSync();
 }

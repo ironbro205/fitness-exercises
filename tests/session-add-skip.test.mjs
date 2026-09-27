@@ -138,7 +138,7 @@ test('삽입 지점 뒤를 가리키던 index가 모두 한 칸씩 밀린다 (�
   // techDismissed(강도 기법 제안 거절 표시)는 기능 삭제로 사라진 데이터라 더는 밀 것이 없다.
   app.state.restTimer = { startTime: Date.now(), duration: 90, exerciseIdx: 2, setIdx: 0, nextExerciseIdx: 3 };
   app.state.editingSet = { exerciseIdx: 3, setIdx: 1 };
-  app.state.sessionChatPending = { exIdx: 1, pain: true };
+  // 운동 중 채팅 확인 대기(sessionChatPending)는 설계서 결정 8로 삭제돼 밀 것이 없다.
 
   app.addExerciseAfterCurrent('덤벨 사이드 레터럴 레이즈');
 
@@ -149,12 +149,10 @@ test('삽입 지점 뒤를 가리키던 index가 모두 한 칸씩 밀린다 (�
   assert.equal(app.state.restTimer.exerciseIdx, 3);
   assert.equal(app.state.restTimer.nextExerciseIdx, 4);
   assert.equal(app.state.editingSet.exerciseIdx, 4);
-  assert.equal(app.state.sessionChatPending.exIdx, 2);
   // 삽입 지점 앞(0)은 그대로여야 한다
   assert.equal(s.exercises[0].name, '랫 풀 다운');
   app.state.restTimer = null;
   app.state.editingSet = null;
-  app.state.sessionChatPending = null;
 });
 
 test('추가한 종목은 슈퍼세트로 자동으로 묶이지 않는다 (진행 중 짝 재배치 금지)', () => {
