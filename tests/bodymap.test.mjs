@@ -279,12 +279,7 @@ test('루틴 미리보기 — 종목 줄을 누르면 편집 시트가 열리고
     { name: '바벨 스쿼트', sets: 3, reps: '5-8' },
     { name: '랫 풀 다운', sets: 3, reps: '8-12' }
   ] };
-  app.state.routinePreviewExpanded = true;
-  app.state.workoutWizardStep = 3;
-
-  const preview = app.renderWorkoutStep3();
-  assert.ok(preview.includes("openExerciseEdit('preview', 1)"), '종목 줄이 편집 시트를 열지 않는다');
-  assert.ok(!preview.includes('mm-views'), '인체도가 미리보기에 그대로 펼쳐져 있다');
+  // 3단계(AI 대화) 미리보기 단언은 설계서 결정 9로 그 화면이 삭제돼 뺐다 — 편집 시트 단언만 남는다.
 
   app.openExerciseEdit('preview', 1);
   assert.equal(app.state.exerciseEdit.name, '랫 풀 다운');

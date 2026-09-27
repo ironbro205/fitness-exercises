@@ -1,3 +1,4 @@
 # oh-my-claudecode (OMC) tooling state — local only, not part of the app
 .omc/
 .vercel
+node_modules/

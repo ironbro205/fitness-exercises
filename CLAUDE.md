@@ -4,15 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-헬스앱 ("Health App") — a Korean-language, mobile-first **AI fitness coach PWA**. It tracks weight training, treadmill cardio (intervals / incline walking), and body metrics, and uses the Anthropic API for routine generation, a coach chat, weekly reviews, and plateau detection.
+헬스앱 ("Health App") — a Korean-language, mobile-first **fitness PWA**. It tracks weight training, treadmill cardio (intervals / incline walking), and body metrics.
+
+**The AI coach is Claude, not the app.** The user's phone Claude app (Opus) reads the training record through a remote MCP connector in this repo (`api/`) and saves today's weight routine and cardio plan; the app fetches those plans and runs them as written. **The app records and executes; it makes no AI calls** (no API key, no in-app model calls, no coaching screens). See **Claude 커넥터** below and `docs/claude-connector-plan.md`.
 
 The five tabs are **홈 · 운동 · 러닝 · 기록 · 더보기**. There is **no food/nutrition feature** — it was removed in the remake, so ignore any older reference to a "연료" tab, `FOOD_DB`, or food analysis.
 
-The app is **plain static files, no build step** — a thin `index.html` shell plus `css/styles.css` and six `js/*.js` files. No framework, no package manager, no backend in this repo. Logic is guarded by a small zero-dependency test harness (see Running & testing).
+The app is **plain static files, no build step** — a thin `index.html` shell plus `css/styles.css` and six `js/*.js` files. No framework. The only server code is the connector (`api/*.mjs`, Vercel functions) with its own `package.json`; the app files never import it. Logic is guarded by a small zero-dependency test harness (see Running & testing).
 
 ## 개발 원칙 — 근성장(근비대) 근거 기반 (최우선)
 
-이 앱의 **모든 개발 방향 제시·기능 추천·기본값 설정은 반드시 근성장(근비대) 연구 결과를 근거로 한다.** 운동 로직(1RM 추적, 진행/과부하, 사이클·주기화, 디로드, 볼륨/세트 권장, AI 코치·추천 프롬프트 등)에 관한 결정을 내릴 때:
+이 앱의 **모든 개발 방향 제시·기능 추천·기본값 설정은 반드시 근성장(근비대) 연구 결과를 근거로 한다.** 운동 로직(1RM 추적, 진행/과부하, 사이클·주기화, 디로드, 볼륨/세트 권장, Claude 커넥터 지침 등)에 관한 결정을 내릴 때:
 
 - 추측이나 일반 상식으로 정하지 말고, **근비대 과학(메타분석·리뷰: Schoenfeld, Helms, Israetel 등, Stronger By Science/MASS, Renaissance Periodization, NSCA)을 근거로** 제시한다.
 - **지식이 부족하거나 불확실하면 먼저 웹 조사(WebSearch/WebFetch, 가능하면 다중 소스 교차검증)를 한 뒤** 제시한다. 근거 없는 단정 금지.
@@ -26,7 +28,11 @@ The app is **plain static files, no build step** — a thin `index.html` shell p
 - `js/*.js` — app logic as plain (non-module) scripts sharing one global scope, loaded `data → core → domain → bodymap → ai → screens` (see **Code map**). ES5-style `var`/function declarations; each file starts with `'use strict'`.
 - `service-worker.js` — offline caching (Network-First).
 - `manifest.json` — PWA manifest (standalone, portrait, Korean); `icon-*.png` — PWA icons.
-- `tests/` — zero-dependency characterization tests (see Running & testing).
+- `tests/` — zero-dependency tests (see Running & testing).
+- `api/` — Claude connector (Vercel functions, `.mjs`): `api/mcp/[token].mjs` (MCP endpoint), `api/snapshot.mjs`, `api/plan.mjs`, shared logic in `api/_lib/` (see **Claude 커넥터**).
+- `package.json` — connector dependencies only (`mcp-handler`, `@modelcontextprotocol/server`, `zod`, `@vercel/blob`); `private`, no build script, no `"type"`. The static app does not use it.
+- `scripts/dev-server.mjs` — local-only dev server (static files + `api/`, in-memory store). Never deployed.
+- `node_modules/` — installed connector dependencies; git-ignored. Ignore it when searching or reading code.
 
 ## Running & testing
 
@@ -36,13 +42,23 @@ No build step. The app needs a real HTTP origin (service worker + PWA do not wor
 python3 -m http.server 8000   # then open http://localhost:8000
 ```
 
-Logic regression is guarded by **zero-dependency characterization tests** — run with:
+Logic regression is guarded by **zero-dependency tests**. The check command runs **every test file, named explicitly**:
 
 ```
-node --test tests/characterization.test.mjs
+node --test $(ls tests/*.test.mjs)
 ```
 
-(the bare-directory `node --test tests/` form is unreliable in this environment — name the file). The harness (`tests/_harness.mjs`) loads the app's JS in a Node `vm` with a stub DOM, then golden-master-checks the pure functions (1RM, progressive overload, volume analysis, cardio plan summary) and asserts no global function/data table went missing (`tests/golden-symbols.json`). It auto-loads `js/*.js` if present, else the inline `<script>` in `index.html`, so the same tests run before and after the split.
+(the bare-directory `node --test tests/` form is unreliable in this environment — always pass the file names). The connector tests (`tests/connector-*.test.mjs`) and the app-side sync tests (`tests/claude-sync.test.mjs`) need no `node_modules`. The harness (`tests/_harness.mjs`) loads the app's JS in a Node `vm` with a stub DOM, then golden-master-checks the pure functions (1RM, progressive overload, volume analysis, cardio plan summary) and asserts no global function/data table went missing (`tests/golden-symbols.json`). It auto-loads `js/*.js` if present, else the inline `<script>` in `index.html`, so the same tests run before and after the split.
+
+**Local integration (connector + app):** run the dev server, then drive the MCP endpoint with the Inspector CLI.
+
+```
+HEALTH_SYNC_TOKEN=<code, 20+ chars> CONNECTOR_STORE=memory PORT=8765 node scripts/dev-server.mjs
+npx -y @modelcontextprotocol/inspector --cli http://localhost:8765/api/mcp/<code> --transport http --method tools/list
+npx -y @modelcontextprotocol/inspector --cli http://localhost:8765/api/mcp/<code> --transport http --method tools/call --tool-name get_saved_plans
+```
+
+(`tools/call` takes `--tool-arg key=value`; arrays and objects go in as JSON strings.) Open `http://localhost:8765`, put the same code in 더보기 > Claude 연결, and the app talks to the local `api/`.
 
 Visual/behavioral QA still needs a real browser — **hard-reload** (or enable DevTools "Update on reload") so the service worker doesn't keep serving a stale cached `index.html`.
 
@@ -54,7 +70,7 @@ Visual/behavioral QA still needs a real browser — **hard-reload** (or enable D
 
 **Single global `state` object + full re-render.** All UI state lives in one `state` object (`js/core.js`). `render()` (`js/screens.js`) is the only thing that paints the screen: it builds an HTML string and assigns it to `#app`'s `innerHTML` — no virtual DOM, no diffing, the whole screen is replaced. After mutating `state`, call `render()`.
 
-`render()` routing is **priority-ordered**: full-screen overlays are checked first (1RM list → coach memory → weekly review → plateau → coach chat → stretch guide → completed session → warmup guide → active workout session → cardio RPE → cardio session); only if none are open does it switch on `state.currentTab` (`home`/`workout`/`running`/`stats`/`more`, unknown ids fall back to `home`) and append the tab bar. Each screen has a `renderX()` function returning an HTML string. Event handlers are wired through inline `onclick="..."` attributes that call global functions.
+`render()` routing is **priority-ordered**: full-screen overlays are checked first (1RM list → stretch guide → completed session → warmup guide → active workout session → cardio RPE → cardio session); only if none are open does it switch on `state.currentTab` (`home`/`workout`/`running`/`stats`/`more`, unknown ids fall back to `home`) and append the tab bar. Each screen has a `renderX()` function returning an HTML string. Event handlers are wired through inline `onclick="..."` attributes that call global functions.
 
 **Persistence: `localStorage` via the `storage` wrapper.** `storage.get/set` (`js/core.js`) JSON-serialize to keys defined in the `KEYS` map (all prefixed `fitness_`). `init()` (defined in `js/core.js`, called at the tail of `js/screens.js`) loads everything into `state` on startup and seeds demo data (`generateDemoData`) on first run. The active workout session, rest timer, and routine-builder wizard are persisted separately (`saveActiveSession`, `saveRestTimer`, `saveWizard`) so they survive backgrounding/refresh.
 
@@ -62,39 +78,49 @@ The user's tracked data lives in `state.data`: `workoutLog`, `cardioLog`, `perso
 
 **Static data tables (`js/data.js`):**
 - UI icons: `ICONS` — 31 inline SVGs. **UI must use these, never emoji** (see 디자인 규칙 below).
-- Workout templates & body-part analysis: `SESSIONS`, `EXERCISE_BODY_PART_MAP`, `EXERCISES_BY_PRIMARY`, `BODY_PART_GROUPS`, `WEAK_PART_EXERCISE_MAP`, `BODY_PART_KR`.
+- Workout templates & body-part analysis: `SESSIONS`, `EXERCISE_BODY_PART_MAP`, `EXERCISES_BY_PRIMARY`, `BODY_PART_GROUPS`, `BODY_PART_KR`.
 - Set schemes / rest / supersets: `SET_SCHEMES`, `SET_ROLE_KR`, `REST_*`, `SUPERSET_*`.
-- Safety & coaching knowledge: `INJURY_AREAS`, `EXERCISE_SAFETY`, `COACH_KNOWLEDGE`, `WALK_PRESCRIPTION`, `MOBILITY_DRILLS`.
+- Cardio & mobility: `WALK_PRESCRIPTION`, `MOBILITY_DRILLS`.
 
-**Progressive-overload / 1RM engine:** `calculate1RM`, `get1RM` / `update1RM`, `getProgressiveRecommendation`, `suggestWorkingWeight`, `estimate1RMFromPart`, `initializeOneRMData`. This drives the weight recommendations (#11 switched these from a fixed scheme to progressive overload).
+**Progressive-overload / 1RM engine:** `calculate1RM`, `get1RM` / `update1RM`, `getProgressiveRecommendation`, `suggestWorkingWeight`, `estimate1RMFromPart`, `initializeOneRMData`. This drives the weight recommendations for the **base template path** (부위 카드 → `SESSIONS`) (#11 switched these from a fixed scheme to progressive overload). Claude routines bypass it — their sets run exactly as saved.
 
 **Dates are KST-based.** `getTodayStr` / `getDateStr` apply a +9h offset so the "day" rolls over at Korean midnight, not UTC. Use these helpers (not raw `new Date()`) for anything day-bucketed — weekly counts, "today" filters, etc. Several past bugs (#9, #10) came from timezone edges.
 
-## AI integration
+## Claude 커넥터
 
-The app calls the Anthropic Messages API **directly from the browser**: `POST https://api.anthropic.com/v1/messages` with headers `x-api-key`, `anthropic-version`, and `anthropic-dangerous-direct-browser-access: true`. The user pastes **their own** API key, stored in `localStorage` (`fitness_api_key`); there is no proxy/backend.
+Design doc (source of truth): `docs/claude-connector-plan.md`. Goal: zero API cost in the app — Opus in the user's phone Claude app does the judging; the app records and executes.
 
-Model selection by task:
-- `claude-haiku-4-5` — fast/cheap signal extraction from the in-session chat (`extractWorkoutSignals`).
-- `claude-sonnet-5` — everything heavier: routine generation (`generateFullRoutine`, `modifyRoutineWithAI`), coach chat (`callCoachAPI`, built from `getCoachSystemPrompt` + `buildUserContext`), weekly review (`generateWeeklyReview`), plateau analysis (`analyzePlateauWithAI`), cardio plan generation. (The daily-recommendation engine `fetchAIRecommendation` was deleted in #84 after being hidden from the UI — restore from git history before `0648697`'s successor if ever needed.)
+**Flow.** App → `POST /api/snapshot` (raw data) → Opus calls MCP tools on `/api/mcp/<code>` → saves today's plans → app `GET /api/plan` → 운동 탭 「Claude 추천」 줄 / 러닝 탭 「Claude 유산소」 줄.
 
-AI results are cached in `localStorage` and reused while fresh — weekly review (same `getWeekId()`), plateau check (within 3 days). The `load…IfNeeded` functions gate whether to hit the API again.
+**Server (`api/`, Vercel functions, `.mjs`).**
+- `api/mcp/[token].mjs` — MCP endpoint (`mcp-handler@2.1.1` + `@modelcontextprotocol/server@2` + `zod@4`). The last path segment must equal the code, otherwise 404. Four tools: `get_training_context` (read), `save_today_routine`, `save_today_cardio` (write), `get_saved_plans` (read).
+- `api/snapshot.mjs` — `POST`, `Authorization: Bearer <code>`, JSON up to 1MB, `schemaVersion:1` shape check.
+- `api/plan.mjs` — `GET` → `{routine, cardio}`, each only if dated KST today, else `null`.
+- `api/_lib/auth.mjs` (constant-time compare; rejects everything if the env var is missing or under 20 chars) · `store.mjs` (`getJSON`/`setJSON`; memory store never used on Vercel) · `kst.mjs` · `tools.mjs` (pure tool logic + snapshot → readable text) · `guide.mjs`.
+- All responses `Cache-Control: no-store`.
 
-**Coach knowledge scope (2026-09-02):** `COACH_KNOWLEDGE` (7 sections) covers training variables only — volume, intensity/RIR, exercise selection, injury triage, recovery/deload, warm-up, concurrent cardio. **Nutrition (protein, calories, supplements) is deliberately excluded** (user decision); coach principle 5 deflects those questions as "훈련 외 주제". Every quantitative rule in the knowledge base, prompts, and `domain.js` constants was re-verified against 2024–2026 evidence in `docs/research/v2-*.md`; the approved change list with evidence grades is `docs/research/v2-selection-plan.md`. When changing a threshold (rep range, volume target, first-attempt %), grep for every place the old number is written in prompts, comments, `SESSIONS` templates, and screens — the 2026-09 review found five stale copies after the code constant had been updated.
+**Contracts.**
+- Snapshot: `{schemaVersion:1, uploadedAt, todayKst, appVersion, profile:{age,heightCm,weightKg}, equipment[], workouts[] (last 56 days, newest first), olderLastPerformed[], cardio[] (56 days), body[] (56 days + last one before), catalog:{push,pull,legs,upper,free}}`. **Raw data only** — no recommended weight, 1RM, plateau, weak parts, target sets, volume verdicts, or cycle info.
+- `RoutinePlan = {id, createdAt, date, session, title, note, exercises:[{name, note, sets:[{weight, reps(string), warmup, restSec}]}]}`; `CardioPlan = {id, createdAt, date, mode, title, note, segments:[{type, sec, speed, incline}]}`. Saving the same kind overwrites.
+
+**Guide text.** claude.ai ignores server `instructions`, so the coach guide is returned inside the `get_training_context` result. **Edit it only in `api/_lib/guide.mjs`** (minimal guide — design doc decision 6).
+
+**Config & storage.** Env var `HEALTH_SYNC_TOKEN` (the connector code, 20+ chars; same value in the MCP URL path and the app's Bearer header). Storage is **Vercel Blob, private** (`useCache:false`), keys `fitness/snapshot.json` · `fitness/plan-routine.json` · `fitness/plan-cardio.json`.
+
+**App side (`js/ai.js`).** The file name stays; its content is connector sync only. `KEYS.SYNC_TOKEN` (the code) and `KEYS.CLAUDE_SYNC` (`{lastUploadAt, lastUploadHash, lastImportedRoutineId, lastImportedCardioId}`) are device-only and excluded from backups. `buildClaudeSnapshot` · `uploadClaudeSnapshot({force})` (skips when the hash is unchanged; failures are silent, only [지금 보내기] toasts) · `fetchClaudePlans` (today's plans with an id not yet imported → `state.claudeRoutine` / `state.claudeCardio`). Timing: end of `init()`, `visibilitychange` (at most once per 60 s), and upload-only after saving a workout or cardio session. **No code → no requests.**
+Claude routines open step 2 as `generatedRoutine={source:'claude', …, exercises[{name, note, claudeSets}]}`; `startGeneratedRoutine` builds the sets exactly as saved (weight snapped to equipment units only — no `getSessionSetPlan`, set schemes, auto warm-up sets, or superset suggestions), and a session with `source:'claude'` turns off in-session auto-adjustments (top-set miss backoff deload, +30 s rest autoregulation). Manual edits still work. Claude cardio goes through `cardioNormalizePlan` into the preview.
 
 ## 디자인 규칙 (감사 후 확정 — docs/research/design-audit.md §5)
 
 새 화면·문구를 쓸 때 이 규칙을 따른다. **대부분을 테스트가 실제로 막는다**(`디자인 규칙 —` 로 시작하는 테스트 — 이모지·하드코딩 색·11px 하한·해요체 통일·느낌표 금지·한 문장 40자).
-규칙을 어기면 `node --test tests/characterization.test.mjs` 가 위반 목록을 파일:줄 로 뱉는다.
-검사 대상은 **화면 파일**(`js/screens.js`·`core.js`·`bodymap.js`·`domain.js`)의 한글 문자열이다.
-⚠️ 사각지대 하나: `EXERCISE_SAFETY[].mod` 는 `js/data.js` 에 있지만 부상 토스트로 **화면에 뜬다**. 지금 111문장이 문체·길이 규칙을 어기고 있고(부상 안내라 뜻이 바뀔 위험이 커서 일괄 재작성은 보류), `부상 안내(mod) 문구 위반이 더 늘지 않는다` 테스트가 **개수만** 못박아 두었다 — 종목을 새로 넣을 땐 해요체·40자로 쓸 것. `js/ai.js` 전체와 `data.js` 의 `COACH_KNOWLEDGE` 는 AI 프롬프트라 예외이고, `domain.js` 의 프롬프트 블록 빌더는 테스트의 `PROMPT_BUILDERS` 목록으로 뺀다 — 새 프롬프트 빌더를 만들면 그 목록에 이름을 추가할 것.
+규칙을 어기면 `node --test $(ls tests/*.test.mjs)` 가 위반 목록을 파일:줄 로 뱉는다.
+검사 대상은 **화면 파일**(`js/screens.js`·`core.js`·`bodymap.js`·`domain.js`)의 한글 문자열이다. `js/ai.js` 의 문구는 `tests/claude-sync.test.mjs` 의 `디자인 규칙 —` 시험이 같은 규칙으로 본다.
 
 **이모지**
 1. 기본 UI에 이모지를 쓰지 않는다. 아이콘이 필요하면 `ICONS` 31종에서 고른다 (`icon('trophy', 16)`).
 2. 아이콘 세트에 없으면 **아이콘 없이 글자만** 쓴다. 새 이모지를 넣지 않는다.
 3. 경고·주의는 ⚠️ 대신 **`var(--warn)` 색 + `info` 아이콘**.
 4. 축하 연출은 화면당 1개까지.
-   (AI 프롬프트 문자열(`js/ai.js`·`js/data.js`의 지식 블록)은 화면이 아니라 예외다.)
 
 **색**
 1. `--accent`(주황) · `--warn`(앰버) · `--danger`(빨강) · `--success`(초록) · `--purple` 만 쓴다.
@@ -145,22 +171,27 @@ Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root (not created yet
 Plain scripts loaded in this order (later files may call earlier ones; the tail of `screens.js` runs `init()`):
 
 ```
-index.html      → HTML shell + <link> + 5 <script src> tags
+index.html      → HTML shell + <link> + 6 <script src> tags
 css/styles.css  → all styles
-js/data.js      → static tables: ICONS(31 SVG), DEFAULT_PROFILE, MEMORY_CATEGORY_META,
+js/data.js      → static tables: ICONS(31 SVG), DEFAULT_PROFILE,
                   INITIAL_1RM, EXERCISE_ALIASES_1RM, SESSIONS, GYM_EQUIPMENT,
                   EXERCISE_BODY_PART_MAP, EXERCISES_BY_PRIMARY, SET_SCHEMES, REST_*,
-                  INJURY_AREAS, EXERCISE_SAFETY, COACH_KNOWLEDGE, WALK_*, MOBILITY_*,
-                  BODY_PART_* maps
+                  SUPERSET_*, WALK_*, MOBILITY_*, BODY_PART_* maps
 js/core.js      → KEYS, storage, state, save*/clearWizard, generateDemoData, KST date utils,
                   helpers (icon/showToast/renderMarkdown), init()
 js/domain.js    → pure logic: 1RM / progressive overload, set schemes, volume & balance
                   analysis, cardio progression, display-order helpers (sortByDateDesc)
 js/bodymap.js   → 자극 근육 인체도: 앞/뒤 전신 SVG(자체 제작 원본) + 근육키→영역 매핑,
                   buildMuscleMapSvg / buildMuscleMapBlock (순수 함수) — docs/muscle-map-assets.md
-js/ai.js        → buildUserContext, prompts, all Anthropic API calls + load…IfNeeded gates
+js/ai.js        → Claude connector sync: buildClaudeSnapshot, uploadClaudeSnapshot,
+                  fetchClaudePlans, plan → generatedRoutine / cardio preview,
+                  Claude set summary · edit · session-exercise builders (no AI calls)
 js/screens.js   → renderX() builders + render() + window.* onclick handlers +
                   workout-session logic + swipe/touch init + the init() call (load tail)
+
+api/mcp/[token].mjs → MCP endpoint (4 tools)      api/snapshot.mjs → POST snapshot
+api/plan.mjs        → GET today's plans           api/_lib/        → auth · store · kst · guide · tools
+scripts/dev-server.mjs → local dev server only (static + api/, memory store)
 ```
 
 Each `js/*.js` begins with `'use strict'` (the original was one strict script — preserve this). When adding a new static file, add it to `service-worker.js` `CORE_ASSETS` and bump `CACHE_VERSION`. The split was pure code movement (line-for-line identical, just regrouped); classification is for navigation only.
@@ -171,7 +202,7 @@ Each `js/*.js` begins with `'use strict'` (the original was one strict script �
 
 **트리거 (요청 → 스킬):**
 - 새 기능·화면 추가, 기능 큰 변경, 리메이크 → `healthapp-feature`
-- AI 동작(코치 말투·루틴·리뷰·정체기) 프롬프트 수정 → `healthapp-ai-prompt`
+- 커넥터 지침(api/_lib/guide.mjs) 수정 → `healthapp-ai-prompt`
 - 배포·출시·"폰에 반영"·캐시 버전 올리기 → `healthapp-deploy`
 - 모든 코드 작업의 완료 조건 → `.claude/QA_CHECKLIST.md`
 - 단순 질문·설명·사소한 한 줄 수정은 스킬 없이 직접 응답.
@@ -183,3 +214,18 @@ Each `js/*.js` begins with `'use strict'` (the original was one strict script �
 |------|----------|------|------|
 | 2026-06-13 | 초기 구성 (스킬 3 + QA 체크리스트 + 분리 목표 구조) | `.claude/skills/healthapp-*`, `.claude/QA_CHECKLIST.md`, `CLAUDE.md` | 비개발자용 헬스앱 작업 하네스 |
 | 2026-06-13 | index.html 분리 완료 (CSS + JS 5파일, 빌드 없음) | `index.html`, `css/`, `js/`, `service-worker.js`, `tests/` | 단일 11k줄 → 탐색·수정 쉬운 구조 |
+
+## 작업 규칙
+
+### 분할·주간 루틴은 처방하지 않기
+- 운동 분할과 주간 루틴은 처방하지 않는다. 세션 종류(푸쉬·풀·레그·상체 등)는 재료로만 주고, 매주 루틴은 사용자가 자유롭게 구성한다.
+- 새 세션 종류는 추가하되 주간 스케줄은 강제하지 않는다.
+- "균형 맞추게 하체도 넣자" 같은 참견을 하지 않는다. 하체는 레그와 같이 쓴다.
+- 종목 구성은 Claude 앱의 Opus가 짠다. 자동 추천은 힌트일 뿐이며 수동 선택이 항상 우선이다.
+- 이유: 사용자가 자율을 선호한다.
+
+### 브라우저마다 저장소가 따로
+- 헬스앱 PWA는 브라우저마다 localStorage가 완전히 따로다. 삼성 인터넷과 Chrome은 데이터와 연결 코드를 공유하지 않는다.
+- 안드로이드 뒤로가기: 앱은 history 트랩으로 뒤로가기를 가로채는데, 삼성 인터넷의 화면 옆 스와이프 제스처는 트랩을 무시하고 앱을 바로 닫는다. Chrome PWA에서는 같은 트랩이 정상 작동하므로 Chrome으로 홈에 추가해 쓰라고 안내한다.
+- 브라우저를 바꾸면 새 저장소는 비어 있다. 이관은 옛 브라우저 앱의 더보기 > 데이터 내보내기 → 새 브라우저 앱의 더보기 > 데이터 가져오기로 한다.
+- 연결 코드는 백업에서 빠지므로 새 브라우저에서 더보기 > Claude 연결에 다시 넣는다. 유산소·운동 기록과 사이클은 백업에 들어간다.

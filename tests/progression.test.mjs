@@ -140,17 +140,6 @@ test('일반 고립: 상단 미달 → 같은 무게 유지', () => {
   assert.equal(rec.weight, 20);
 });
 
-// ═══ 7. 통증 게이트: 최근 2주 통증 기록 → 증량 금지 ═══
-test('통증 게이트: 상단 달성해도 최근 통증 있으면 증량 금지', () => {
-  seedLog([
-    workout(daysAgo(2), '레그 프레스', [set(100, 12), set(100, 12, { painFlag: true, painSite: '무릎' })]),
-  ]);
-  const rec = app.getProgressiveRecommendation('레그 프레스', '8-12');
-  assert.notEqual(rec.source, 'progress');
-  assert.equal(rec.weight, 100);
-  assert.ok(rec.painGated, '통증 게이트 표시가 있어야 함');
-});
-
 // ═══ 8. 리뷰 반영 회귀 테스트 ═══
 test('레거시 기록: setsDetail 없이 reps가 배열([12,12,12])이어도 진행 계산에 포함', () => {
   seedLog([
@@ -181,15 +170,6 @@ test('1RM 되돌리기: 세션에 남은 다른 완료 세트가 세운 기록�
   app.recalc1RMAfterEdit('레그 프레스', 150);
   assert.equal(app.get1RM('레그 프레스'), 210, '남은 세트의 e1RM(180×(1+5/30))=210 유지');
   app.state.activeSession = null;
-});
-
-test('통증 게이트: 15일 지난 통증은 게이트 해제', () => {
-  seedLog([
-    workout(daysAgo(2), '레그 프레스', [set(100, 12), set(100, 12)]),
-    workout(daysAgo(16), '레그 프레스', [set(100, 12, { painFlag: true })]),
-  ]);
-  const rec = app.getProgressiveRecommendation('레그 프레스', '8-12');
-  assert.equal(rec.source, 'progress');
 });
 
 test('1RM 되돌리기: 완료 세트 재저장으로 또 갱신돼도 최초 기준값(prev1RM) 보존', () => {
@@ -256,29 +236,6 @@ test('별칭: 랫풀다운/랫 풀 다운이 같은 추천 무게를 낸다 (65k
   assert.equal(canon.source, 'progress', '표준명이 별칭 기록을 못 보면 rm_estimate로 떨어진다');
   assert.equal(canon.weight, alias.weight);
   assert.equal(canon.previousWeight, alias.previousWeight, '지난 무게도 같은 기록으로 인식');
-});
-
-test('별칭: 통증 게이트가 표기와 무관하게 걸린다', () => {
-  seedLog([workout(daysAgo(2), '랫풀다운', [set(60, 12, { painFlag: true })])]);
-  assert.equal(app.hasRecentPain('랫풀다운', 14), true);
-  assert.equal(app.hasRecentPain('랫 풀 다운', 14), true);
-});
-
-test('별칭: 통증 게이트가 추천까지 이어진다 (별칭으로 보고 → 표준명 조회에서도 증량 차단)', () => {
-  // 별칭 표기('체스트 프레스 머신')로만 기록 — 상단(10회) 달성이라 통증이 없으면 증량이 나온다.
-  seedLog([
-    workout(daysAgo(2), '체스트 프레스 머신', [set(60, 10), set(60, 10, { painFlag: true, painSite: '어깨' })]),
-  ]);
-  const canon = app.getProgressiveRecommendation('머신 체스트 프레스', '8-10');
-  assert.ok(canon, '표준명 조회에도 추천 카드가 나와야 함');
-  assert.ok(canon.painGated, '별칭으로 보고한 통증이 표준명 추천에서도 게이트를 걸어야 함');
-  assert.notEqual(canon.source, 'progress', '통증 있는데 증량 제안 금지');
-  assert.equal(canon.weight, 60, '증량 없이 지난 무게 유지');
-  // 별칭 표기로 물어봐도 같은 판정 (표기에 따라 안전 게이트가 갈리면 안 된다)
-  const alias = app.getProgressiveRecommendation('체스트 프레스 머신', '8-10');
-  assert.equal(alias.painGated, canon.painGated);
-  assert.equal(alias.source, canon.source);
-  assert.equal(alias.weight, canon.weight);
 });
 
 test('별칭: 종목 인덱스·SESSIONS 템플릿에 별칭 표기가 남아 있지 않다', () => {

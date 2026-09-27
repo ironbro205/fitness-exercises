@@ -113,18 +113,6 @@ test('진행: 보조 0kg 세트도 진행 판정에 포함된다 (weight>0 필�
   assert.equal(rec.previousWeight, 0);
 });
 
-test('진행: 통증 게이트는 "보조 유지"로 말한다 (증량 금지가 아니라)', () => {
-  seedLog([
-    workout(daysAgo(2), '어시스트 풀업', [set(40, 8, { painFlag: true }), set(40, 8), set(40, 8)]),
-    workout(daysAgo(5), '어시스트 풀업', [set(40, 8), set(40, 8), set(40, 8)]),
-  ]);
-  const rec = app.getProgressiveRecommendation('어시스트 풀업', '5-8');
-  assert.equal(rec.source, 'maintain');
-  assert.equal(rec.painGated, true);
-  assert.equal(rec.weight, 40, '통증 기록 시 보조를 줄이지 않는다');
-  assert.match(rec.note, /보조는 그대로/, '어시스트는 보조를 줄이는 게 증량이다 — 통증 때는 그대로 두라고 말해야 한다');
-});
-
 test('정방향 종목의 동작은 그대로다 (회귀 방지)', () => {
   seedLog([
     workout(daysAgo(2), '덤벨 벤치 프레스', [set(30, 8), set(30, 8), set(30, 8)]),
@@ -249,30 +237,3 @@ test('PR 문구: 어시스트는 "보조 −5kg"이 신기록, 정방향은 "+5.
   assert.equal(app.formatPRDelta(fwdPR), '+5.0kg');
 });
 
-// ═══ 7. 정체기 판정 (AI 컨텍스트) ═══
-test('정체: 보조가 꾸준히 줄어드는 종목을 정체로 잡지 않는다', () => {
-  // 4세션·4주 이상 관찰 가드를 넘기도록 넉넉히 심는다
-  seedLog([
-    workout(daysAgo(3), '어시스트 풀업', [set(25, 6), set(25, 6)]),
-    workout(daysAgo(12), '어시스트 풀업', [set(30, 6), set(30, 6)]),
-    workout(daysAgo(21), '어시스트 풀업', [set(35, 6), set(35, 6)]),
-    workout(daysAgo(33), '어시스트 풀업', [set(40, 6), set(40, 6)]),
-  ]);
-  assert.ok(app.getStalledLifts().indexOf('어시스트 풀업') === -1, '보조 40 → 25kg은 훌륭한 진행이다');
-});
-
-test('정체: 보조도 반복도 그대로면 정체로 잡는다', () => {
-  seedLog([
-    workout(daysAgo(3), '어시스트 풀업', [set(40, 6), set(40, 6)]),
-    workout(daysAgo(12), '어시스트 풀업', [set(40, 6), set(40, 6)]),
-    workout(daysAgo(21), '어시스트 풀업', [set(40, 6), set(40, 6)]),
-    workout(daysAgo(33), '어시스트 풀업', [set(40, 6), set(40, 6)]),
-  ]);
-  assert.ok(app.getStalledLifts().indexOf('어시스트 풀업') !== -1);
-});
-
-// ═══ 8. AI 프롬프트 ═══
-test('프롬프트: 코치 지식 블록이 어시스트 방향 반전을 명시한다', () => {
-  assert.match(app.COACH_KNOWLEDGE, /어시스트\(보조\) 기구 종목/);
-  assert.match(app.COACH_KNOWLEDGE, /보조를 한 칸 \*\*내린다\*\*/);
-});

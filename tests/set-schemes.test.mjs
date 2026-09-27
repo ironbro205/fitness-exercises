@@ -1277,30 +1277,6 @@ test('새 휴식 기준으로도 템플릿 세션이 60분을 넘지 않는다',
   });
 });
 
-// ═══ 9. EXERCISE_SAFETY 표기 정리 (별칭 → 표준명) ═══
-
-test('EXERCISE_SAFETY의 대체 종목(sub)이 전부 표준명이다', () => {
-  const offenders = [];
-  Object.keys(app.EXERCISE_SAFETY).forEach((name) => {
-    const sub = app.EXERCISE_SAFETY[name].sub || {};
-    Object.keys(sub).forEach((area) => {
-      if (app.EXERCISE_ALIASES_1RM[sub[area]]) offenders.push(`${name}.${area} = ${sub[area]}`);
-    });
-  });
-  assert.equal(offenders.join(' | '), '', '별칭 표기가 남아 있으면 진행도·통증 조회가 표준명 기록과 갈린다');
-});
-
-test('EXERCISE_SAFETY의 대체 종목이 모두 종목표에 등록된 이름이다', () => {
-  const unknown = [];
-  Object.keys(app.EXERCISE_SAFETY).forEach((name) => {
-    const sub = app.EXERCISE_SAFETY[name].sub || {};
-    Object.keys(sub).forEach((area) => {
-      if (!app.EXERCISE_BODY_PART_MAP[sub[area]]) unknown.push(`${name}.${area} = ${sub[area]}`);
-    });
-  });
-  assert.equal(unknown.join(' | '), '');
-});
-
 // ═══ 10. 삭제된 세트법 이관 (core.js migrateSetSchemeData) ═══
 // 이관하지 않으면 ① 종목별 사용자 선택이 조용히 클래스 기본값으로 되돌아가고
 // ② 진행 중 세션의 scheme 이 표에 없는 id라 화면이 세트법을 못 읽는다.
@@ -1666,56 +1642,6 @@ test('[탑세트] 오늘 세트에 무게가 없을 때만 지난 실측으로 �
   endSession();
 });
 
-test('[탑세트] 통증으로 잠긴 종목은 프리필이 처방을 넘지 못한다 (3차 H1)', () => {
-  // 3일 전 통증 기록(80kg) · 12일 전 95kg → 엔진은 painGated maintain 80.
-  // 옛 코드는 "최근 4세션 실측 최고"만 봐서 통증 이전 세션의 95를 미리 채웠다 —
-  // "통증 — 증량 보류" 카드 밑에 80 → 95 증량 화살표가 뜨는 경로였다.
-  seedRecalc([
-    session('벤치 프레스', 80, 8, 3, { painFlag: true }),
-    session('벤치 프레스', 95, 6, 12)
-  ]);
-  app.setSetSchemeOverride('벤치 프레스', 'straight');
-  const ex = startSession('벤치 프레스');
-  const prog = app.getProgressiveRecommendation('벤치 프레스', ex.targetReps);
-  assert.equal(prog.painGated, true, '전제: 통증 게이트가 걸렸다');
-  assert.equal(app.recentTopWeight('벤치 프레스'), 95, '전제: 지난 실측 최고는 95');
-
-  app.state.setSchemeOpen = true;
-  app.applySetScheme('top_backoff');
-  assert.equal(app.state.topSetSheet.weight, prog.weight, '처방(80)까지만 채운다');
-  assert.ok(app.state.topSetSheet.weight < 95, '통증 이전 세션의 무게로 올라가지 않는다');
-
-  // 확인해도 **실제 세트 무게**가 처방(80)을 넘지 않는다 — 통증 이전 세션의 95로 올라가면 안 된다.
-  // (progOf() 는 workoutLog 만 읽는 순수 함수라 확인 전후로 값이 같다 → 행위를 검사하지 못한다)
-  captureToast(() => app.confirmTopSetWeight());
-  const after = [...weightsOf(ex)];
-  assert.equal(Math.max.apply(null, after), prog.weight, '가장 무거운 세트가 처방을 넘었다: ' + after.join('/'));
-  assert.ok(after.every((w) => w <= 95 && w <= prog.weight), '통증 이전 세션의 무게로 올라갔다: ' + after.join('/'));
-  assert.equal(refWeight(), prog.weight, '기준 세트도 처방 그대로');
-  endSession();
-});
-
-test('[탑세트] 지난 실측 갈래도 통증 게이트에 클램프된다 (3차 H1 · 갈래 단위)', () => {
-  // 위 경로는 오늘 세트 무게(=처방)가 먼저 잡혀 안전하다. 그 아래 갈래(지난 실측)도 같은 상한을
-  // 지키는지 직접 확인한다 — 무게를 모르는 상태로 이 갈래에 들어오는 경우의 안전망이다.
-  seedRecalc([
-    session('벤치 프레스', 80, 8, 3, { painFlag: true }),
-    session('벤치 프레스', 95, 6, 12)
-  ]);
-  app.setSetSchemeOverride('벤치 프레스', 'straight');
-  const ex = startSession('벤치 프레스');
-  const prog = app.getProgressiveRecommendation('벤치 프레스', ex.targetReps);
-  workingSets(ex).forEach((s) => { s.weight = null; });     // 기준 세트 갈래를 비운다
-  assert.equal(app.sessionReferenceSet(ex), null);
-
-  const pre = app.topSetPrefill(ex);
-  // F4: 게이트가 실제로 값을 깎았으면(95 → 80) 더 이상 "지난 실측"이 아니라 오늘의 처방이다 —
-  // source가 'recent'로 남으면 시트가 "최근 4세션 실측"이라고 거짓말한다.
-  assert.equal(pre.source, 'plan', '전제: 클램프가 값을 바꿨다 → 오늘 처방으로 표시');
-  assert.equal(pre.weight, prog.weight, '95가 아니라 처방(80)으로 잘린다');
-  endSession();
-});
-
 test('[탑세트] 취소하면 아무것도 바뀌지 않는다', () => {
   seedRecalc([session('핵 스쿼트', 90, 7, 3)]);
   app.setSetSchemeOverride('핵 스쿼트', 'straight');
@@ -1913,14 +1839,7 @@ test('[표시] 첫 시도 갈래도 세트를 다 끝내면 튀지 않는다 (2�
 });
 
 test('[판정] 통증·재활은 증량을 멈춘다 (라벨이 사라져도 판정은 남는다)', () => {
-  seedRecalc([session('핵 스쿼트', 90, 8, 3, { painFlag: true }), session('핵 스쿼트', 90, 8, 10)]);
-  startSession('핵 스쿼트');
-  app.state.setSchemeOpen = false;
-  const pain = progOf();
-  assert.equal(pain.painGated, true, '통증 기록이 있으면 증량을 보류한다');
-  assert.equal(pain.weight, pain.previousWeight, '무게를 올리지 않는다');
-  endSession();
-
+  // 통증 게이트 단언은 부상 관리 삭제(설계서 결정 2)로 뺐다 — 재활 종목 판정만 남는다.
   seedRecalc([session('페이스 풀', 20, 15, 3)]);
   startSession('페이스 풀');
   app.state.setSchemeOpen = false;

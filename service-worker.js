@@ -1,5 +1,5 @@
 // 헬스앱 Service Worker - 오프라인 캐싱
-const CACHE_VERSION = 'health-app-v69';
+const CACHE_VERSION = 'health-app-v70';
 const CACHE_NAME = `health-app-${CACHE_VERSION}`;
 
 // 캐싱할 핵심 자원
@@ -55,11 +55,11 @@ self.addEventListener('fetch', function(event) {
   // POST 등 캐싱 안 하는 메소드는 패스
   if (event.request.method !== 'GET') return;
   
-  // Anthropic API 등 외부 요청은 캐싱 X
+  // Claude 커넥터 API(/api/ — 스냅샷·계획·MCP)는 어느 호스트든 가로채지 않는다(GET 포함, 캐시 금지).
+  // 외부 폰트 등도 캐싱 X
   var url = new URL(event.request.url);
-  if (url.hostname === 'api.anthropic.com' || 
-      url.hostname.includes('googleapis.com') ||
-      url.hostname.includes('vercel.app') && url.pathname.startsWith('/api')) {
+  if (url.pathname.startsWith('/api/') ||
+      url.hostname.includes('googleapis.com')) {
     return;
   }
   

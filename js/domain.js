@@ -319,42 +319,12 @@ function repRangeToStr(range) {
   return range.low === range.high ? String(range.low) : range.low + '-' + range.high;
 }
 
-// 최근 N일 내 이 종목에 통증 기록이 있는지 (세트별 painFlag 또는 종목별 painFlag)
-function hasRecentPain(exerciseName, days) {
-  // 세트 사이 채팅에서 확인된 통증 신호 (전용 저장소 — 세션 취소·0세트 종료에도 보존됨)
-  var chatSignals = _recentChatSignals(exerciseName, days);
-  for (var c = 0; c < chatSignals.length; c++) {
-    if (chatSignals[c].pain) return true;
-  }
-  var cutoff = new Date(Date.now() - (days || 14) * 86400000).toISOString().slice(0, 10);
-  var canonical = canonicalExerciseName(exerciseName);
-  var log = state.data.workoutLog || [];
-  for (var i = 0; i < log.length; i++) {
-    var w = log[i];
-    if (!w.date || w.date < cutoff) continue;
-    var exList = w.exercises || w.exercisesData;
-    if (!Array.isArray(exList)) continue;
-    for (var j = 0; j < exList.length; j++) {
-      var ex = exList[j];
-      if (canonicalExerciseName(ex.name) !== canonical) continue;
-      if (ex.painFlag) return true;
-      var sets = ex.setsDetail;
-      if (Array.isArray(sets)) {
-        for (var k = 0; k < sets.length; k++) {
-          if (sets[k] && (sets[k].painFlag || sets[k].pain_flag)) return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
 // 점진적 과부하 추천 — 종목 클래스별 진행 규칙 (더블 프로그레션 기반)
 // · compound_heavy / light_isolation: 상단 반복 2세션 연속 달성해야 증량 (경량 고립은 "아주 드물게")
 // · compound_moderate / isolation: 상단 1세션 달성 → 증량 (장비 최소 단위)
 // · rehab: 무게 진행 금지 — 진행 지표는 통증 감소
 // · **역방향(어시스트)**: 같은 더블 프로그레션이되 진행 = 보조 무게 **감소**. 0kg(맨몸)에서 바닥.
-// · 하드 가드레일: 반복은 클래스 범위로 클램프, 최근 2주 통증 기록 시 증량 금지
+// · 하드 가드레일: 반복은 클래스 범위로 클램프
 // 기록이 없으면 1RM 기반 추천으로 폴백
 function getProgressiveRecommendation(exerciseName, targetReps) {
   var cls = getExerciseClass(exerciseName);
@@ -420,23 +390,6 @@ function getProgressiveRecommendation(exerciseName, targetReps) {
 
   var inc = getWeightIncrement(exerciseName); // 장비 증량 단위 (덤벨 2kg / 그 외 5kg)
   var topReps = range.high;
-
-  // 하드 가드레일: 최근 2주 통증 기록 → 증량 금지, 점검 제안으로 전환
-  if (hasRecentPain(exerciseName, 14)) {
-    return {
-      weight: maxW,
-      source: 'maintain',
-      painGated: true,
-      reverse: reverse,
-      previousWeight: maxW,
-      previousReps: lastReps,
-      repRange: range,
-      exClass: cls,
-      note: reverse
-        ? '최근 2주 통증 기록 — 보조는 그대로, 폼·그립·가동범위를 점검해요'
-        : '최근 2주 내 통증 기록 — 증량 대신 폼·그립·가동범위를 점검해요'
-    };
-  }
 
   // 탑세트+백오프 스킴에서 백오프 비율(90%·경량 85%)은 무게가 달라 여기서 자동으로 빠진다 →
   // 증량 기준이 "3세트 전부 상단" 에서 "탑세트가 상단" 으로 느슨해진다. 이는 탑세트 방식의
@@ -821,7 +774,7 @@ function getSessionSetPlan(exerciseName, fallbackWeight, targetReps, opts) {
 
     if (prog.source === 'progress' || prog.source === 'regress') {
       reps = range.low;
-    } else if (prog.source === 'maintain' && !prog.painGated) {
+    } else if (prog.source === 'maintain') {
       // 하한 이상·상단 미달 → 다음 목표는 지난 최대 +1 (하한 미만이면 하한부터 다시).
       if (lastMax >= range.low) {
         reps = Math.min(lastMax + 1, range.high);
@@ -832,7 +785,7 @@ function getSessionSetPlan(exerciseName, fallbackWeight, targetReps, opts) {
         reps = range.low;
       }
     } else {
-      // painGated·rehab·rm_estimate(기록 있음) 은 기존 동작 그대로.
+      // rehab·rm_estimate(기록 있음) 은 기존 동작 그대로.
       reps = Math.min(Math.max(lastMax, range.low), range.high);
     }
   }
@@ -1619,15 +1572,17 @@ function baseRestSec(exercise, set) {
 // 종목 카드에 적는 "휴식 N초" — 다음에 실제로 걸릴 휴식이다.
 // getExerciseRestSec(클래스 기본값)만 읽으면 AI 가 준 exercise.rest 나 세트법이 넣은 set.rest 를
 // 무시해, 화면에 적힌 초와 실제로 도는 타이머가 어긋난다.
-function exerciseRestLabelSec(exercise) {
+// restFn 을 넘기면 그 규칙으로 읽는다(Claude 세션 = claudeRestSec, 받은 0초도 그대로).
+function exerciseRestLabelSec(exercise, restFn) {
+  var fn = restFn || baseRestSec;
   var sets = (exercise && exercise.sets) || [];
   for (var i = 0; i < sets.length; i++) {
-    if (sets[i] && !sets[i].completed && !sets[i].isWarmup) return baseRestSec(exercise, sets[i]);
+    if (sets[i] && !sets[i].completed && !sets[i].isWarmup) return fn(exercise, sets[i]);
   }
   for (var j = sets.length - 1; j >= 0; j--) {          // 본세트를 다 끝냈으면 마지막 본세트 기준
-    if (sets[j] && !sets[j].isWarmup) return baseRestSec(exercise, sets[j]);
+    if (sets[j] && !sets[j].isWarmup) return fn(exercise, sets[j]);
   }
-  return baseRestSec(exercise, null);
+  return fn(exercise, null);
 }
 
 function resolveRestSec(exercise, set) {
@@ -1671,7 +1626,6 @@ function canSupersetExercise(exerciseName) {
   if (cls !== 'isolation' && cls !== 'light_isolation') return false;
   if (getExerciseAxialLoad(exerciseName) === 'high') return false; // 허리 보호
   if (!isMachineOrCableExercise(exerciseName)) return false;       // 한 자리에서 번갈아 되는 조합만
-  if (hasRecentPain(exerciseName, 14)) return false;
   return true;
 }
 
@@ -2096,150 +2050,6 @@ function getIdleComebackMessage(workoutLog, todayStr) {
   return { days: days, message: days + '일째 쉬는 중이에요. 가볍게 다시 시작해볼까요?' };
 }
 
-// ═══════════════════════════════════════════════
-// 코치 기억 노트 (묶음3): 코치 응답 끝의 숨김 블록 파싱 + 중복제거 병합
-// ═══════════════════════════════════════════════
-
-// 코치 응답 끝의 ```memory [...] ``` 블록을 떼어내고 항목을 추출.
-// 반환: { clean: 블록 제거된 본문, items: [{category, text}] }. 절대 throw 안 함.
-function parseCoachMemoryBlock(responseText) {
-  var text = String(responseText == null ? '' : responseText);
-  var re = /```memory\s*([\s\S]*?)```\s*$/;
-  var m = text.match(re);
-  if (!m) return { clean: text.trim(), items: [] };
-  var clean = text.slice(0, m.index).trim();
-  var items = [];
-  try {
-    var parsed = JSON.parse(m[1].trim());
-    if (Array.isArray(parsed)) {
-      parsed.forEach(function(it) {
-        if (it && it.text && String(it.text).trim()) {
-          items.push({ category: it.category || 'other', text: String(it.text).trim() });
-        }
-      });
-    }
-  } catch (e) { /* 망가진 블록 → 본문에서만 제거, 항목 없음 */ }
-  return { clean: clean, items: items };
-}
-
-// 코치 응답 끝의 숨김 블록 → 앱이 실제로 적용할 수 있는 변경 제안 (#2).
-//
-// 코치 채팅은 글자만 돌려줄 뿐 앱을 전혀 못 건드렸다. 그래서 "쉬는시간 줄여줘" 에
-// "줄였어요" 라고 답해 놓고 실제 운동은 그대로였다. 이제 코치가 응답 끝에 이 블록을 붙이면
-// 화면에 [적용] 버튼이 뜨고, 누를 때만 반영된다 (루틴 수정 화면이 쓰던 승인 흐름과 같다).
-//
-// ```apply
-// [{"action":"rest","exercise":"인클라인 덤벨 프레스","value":90}]
-// ```
-//
-// 받는 값은 전부 여기서 좁힌다 — 화면·타이머에 닿기 전에 걸러야 이상한 값이 세션에 박히지 않는다.
-var COACH_APPLY_FIELDS = { rest: true, weight: true, reps: true, sets: true };
-
-// 스트리밍 중 화면에 흘려보낼 텍스트. 아직 닫히지 않은 ```apply 블록을 여는 표시부터 잘라낸다.
-function stripCoachApplyBlock(text) {
-  var t = String(text == null ? '' : text);
-  var i = t.indexOf('```apply');
-  return (i === -1 ? t : t.slice(0, i)).trim();
-}
-
-function parseCoachApplyBlock(responseText) {
-  var text = String(responseText == null ? '' : responseText);
-  var open = text.indexOf('```apply');
-  if (open === -1) return { clean: text.trim(), actions: [] };
-  // 블록이 응답 **맨 끝**에 있을 때만 잡으면, 모델이 뒤에 한 줄 덧붙이거나(흔하다)
-  // 세션 채팅의 max_tokens 512 에 걸려 블록이 잘리는 순간 원문 JSON 이 그대로 채팅에 남는다.
-  // 위치와 상관없이, 닫히지 않았어도 본문에서는 무조건 걷어낸다.
-  var rest = text.slice(open + '```apply'.length);
-  var close = rest.indexOf('```');
-  var body = (close === -1) ? '' : rest.slice(0, close);
-  var tail = (close === -1) ? '' : rest.slice(close + 3);
-  var clean = (text.slice(0, open).trim() + '\n' + tail.trim()).trim();
-  var actions = [];
-  try {
-    var parsed = JSON.parse(body.trim());
-    if (!Array.isArray(parsed)) parsed = [parsed];
-    parsed.forEach(function(it) {
-      if (!it || !COACH_APPLY_FIELDS[it.action]) return;
-      var value = it.value;
-      if (it.action === 'reps') {
-        value = String(value == null ? '' : value).trim();
-        if (!/^\d+(\s*-\s*\d+)?$/.test(value)) return;
-      } else {
-        value = Number(value);
-        if (!isFinite(value)) return;
-        if (it.action === 'rest') { if (value < 30 || value > REST_MAX_SEC) return; }
-        else if (it.action === 'weight') { if (value < 0 || value > 1000) return; }
-        else if (it.action === 'sets') { if (value < 1 || value > 10) return; }
-      }
-      actions.push({
-        action: it.action,
-        exercise: it.exercise ? String(it.exercise).trim() : '',
-        value: value
-      });
-    });
-  } catch (e) { /* 망가진 블록 → 본문에서만 제거, 제안 없음 */ }
-  return { clean: clean, actions: actions.slice(0, 4) };   // 한 번에 네 가지까지
-}
-
-// 제안 한 줄을 사람이 읽는 문장으로. 카드에 그대로 적힌다.
-var COACH_APPLY_KR = { rest: '쉬는시간', weight: '무게', reps: '목표 반복', sets: '세트' };
-var COACH_APPLY_UNIT = { rest: '초', weight: 'kg', reps: '회', sets: '개' };
-
-function describeCoachAction(act, currentValue) {
-  if (!act) return '';
-  var label = COACH_APPLY_KR[act.action] || act.action;
-  var unit = COACH_APPLY_UNIT[act.action] || '';
-  var to = act.value + unit;
-  var head = act.exercise ? (act.exercise + ' · ') : '';
-  if (currentValue !== undefined && currentValue !== null && String(currentValue) !== String(act.value)) {
-    return head + label + ' ' + currentValue + unit + ' → ' + to;
-  }
-  return head + label + ' ' + to;
-}
-
-function normalizeMemoryKey(category, text) {
-  return category + '|' + String(text).trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 24);
-}
-
-// 기존 노트에 새 항목 병합. 중복(카테고리+텍스트 앞부분) 건너뛰기, 미지 카테고리는 other 보정.
-// 최대 40개 유지(초과 시 오래된 auto부터 제거). 저장은 호출자 책임.
-function mergeCoachMemory(existing, newItems, source, today, idBase) {
-  var out = (existing || []).slice();
-  var seen = {};
-  out.forEach(function(m) { seen[normalizeMemoryKey(m.category, m.text)] = true; });
-  (newItems || []).forEach(function(it, i) {
-    if (!it || !it.text || !String(it.text).trim()) return;
-    var cat = MEMORY_CATEGORIES.indexOf(it.category) !== -1 ? it.category : 'other';
-    var key = normalizeMemoryKey(cat, it.text);
-    if (seen[key]) return;
-    seen[key] = true;
-    out.push({
-      id: (idBase || 'mem') + '_' + out.length + '_' + i,
-      category: cat,
-      text: String(it.text).trim().slice(0, 140),
-      source: source || 'auto',
-      date: today
-    });
-  });
-  // 40개 초과 시 오래된 auto부터 제거 (manual은 최대한 보존)
-  while (out.length > 40) {
-    var idx = -1;
-    for (var k = 0; k < out.length; k++) { if (out[k].source === 'auto') { idx = k; break; } }
-    out.splice(idx === -1 ? 0 : idx, 1);
-  }
-  return out;
-}
-
-// 시스템 프롬프트용 기억 노트 텍스트. 없으면 '없음'.
-function formatCoachMemoryForPrompt(items) {
-  var list = items || [];
-  if (!list.length) return '없음';
-  return list.map(function(m) {
-    var meta = MEMORY_CATEGORY_META[m.category] || MEMORY_CATEGORY_META.other;
-    return '- [' + meta.kr + '] ' + m.text;
-  }).join('\n');
-}
-
 // 통합 부위 코드 → 한국어 라벨 빠른 조회 (현재 직접 BODY_PART_GROUPS[g].kr 사용)
 // 헬퍼 미사용 — 호출 위치 추가 시 재활성화
 
@@ -2330,125 +2140,8 @@ function getExercisePart(exerciseName) {
 }
 
 // ═══════════════════════════════════════════════
-// 루틴 균형 분석 (AI에게 줄 가공된 데이터)
+// 부위별 볼륨 집계
 // ═══════════════════════════════════════════════
-function analyzeRoutineBalance(exercises) {
-  if (!exercises || exercises.length === 0) return { partCounts: {}, totalExercises: 0, mainCount: 0, isolationCount: 0, stretchedCount: 0, warnings: [] };
-  
-  var partCounts = {};        // primary 기준 (정수)
-  var partCountsWithSec = {}; // primary 1.0 + secondary 0.5 (소수)
-  var compoundCount = 0;
-  var isolationCount = 0;
-  var stretchedCount = 0;
-  var mainCount = 0;
-  var unknownExercises = [];
-  
-  exercises.forEach(function(ex) {
-    var info = getExercisePart(ex.name);
-    if (!info) {
-      unknownExercises.push(ex.name);
-      return;
-    }
-    
-    if (ex.isMain) mainCount++;
-    
-    // primary 부위 +1
-    partCounts[info.primary] = (partCounts[info.primary] || 0) + 1;
-    partCountsWithSec[info.primary] = (partCountsWithSec[info.primary] || 0) + 1.0;
-    
-    // secondary 부위 +0.5 (자극 기여도)
-    if (info.secondary && info.secondary.length > 0) {
-      info.secondary.forEach(function(s) {
-        partCountsWithSec[s] = (partCountsWithSec[s] || 0) + 0.5;
-      });
-    }
-    
-    if (info.compound) compoundCount++;
-    else isolationCount++;
-    
-    if (info.stretched) stretchedCount++;
-  });
-  
-  var warnings = [];
-  var totalEx = exercises.length;
-  
-  // 한 부위 primary 4개 이상 = 과잉
-  Object.keys(partCounts).forEach(function(part) {
-    if (partCounts[part] >= 4) {
-      warnings.push((BODY_PART_KR[part] || part) + ' 종목 ' + partCounts[part] + '개 (과잉 - 3개 이하 권장)');
-    }
-  });
-  
-  // 동일 부위·각도 중복 체크
-  var angleMap = {};
-  exercises.forEach(function(ex) {
-    var info = getExercisePart(ex.name);
-    if (!info || !info.angle) return;
-    var key = info.primary + '_' + info.angle;
-    angleMap[key] = (angleMap[key] || 0) + 1;
-  });
-  Object.keys(angleMap).forEach(function(key) {
-    if (angleMap[key] >= 2) {
-      var parts = key.split('_');
-      warnings.push('동일 부위·각도 중복: ' + (BODY_PART_KR[parts[0]] || parts[0]) + ' ' + parts[1] + ' ' + angleMap[key] + '개');
-    }
-  });
-  
-  if (mainCount === 0 && totalEx >= 3) {
-    warnings.push('메인 종목(isMain) 없음 - 1~2개 지정 권장');
-  }
-  if (mainCount > 3) {
-    warnings.push('메인 종목 ' + mainCount + '개 (1~2개 권장 - 너무 많음)');
-  }
-  
-  if (stretchedCount === 0 && totalEx >= 4) {
-    warnings.push('신장 위치 강조 종목 없음 - 1개 이상 권장 (Maeo 2023)');
-  }
-  
-  return {
-    partCounts: partCounts,
-    partCountsWithSec: partCountsWithSec,
-    totalExercises: totalEx,
-    compoundCount: compoundCount,
-    isolationCount: isolationCount,
-    stretchedCount: stretchedCount,
-    mainCount: mainCount,
-    unknownExercises: unknownExercises,
-    warnings: warnings
-  };
-}
-
-// 균형 분석 결과를 텍스트로 변환
-function formatBalanceAnalysis(analysis) {
-  if (!analysis || analysis.totalExercises === 0) return '루틴 비어있음';
-  
-  var lines = [];
-  lines.push('총 ' + analysis.totalExercises + '개 종목 (메인 ' + analysis.mainCount + ', 복합 ' + analysis.compoundCount + ', 고립 ' + analysis.isolationCount + ', 신장강조 ' + analysis.stretchedCount + ')');
-  
-  // primary 부위 카운트
-  var partList = Object.keys(analysis.partCounts).sort(function(a, b) { return analysis.partCounts[b] - analysis.partCounts[a]; });
-  if (partList.length > 0) {
-    lines.push('primary 부위: ' + partList.map(function(p) { return (BODY_PART_KR[p] || p) + ' ' + analysis.partCounts[p]; }).join(', '));
-  }
-  
-  // primary + secondary 통합 (실제 자극)
-  if (analysis.partCountsWithSec) {
-    var secList = Object.keys(analysis.partCountsWithSec).sort(function(a, b) { return analysis.partCountsWithSec[b] - analysis.partCountsWithSec[a]; });
-    if (secList.length > 0) {
-      lines.push('실제 자극 (secondary 0.5 포함): ' + secList.map(function(p) { return (BODY_PART_KR[p] || p) + ' ' + analysis.partCountsWithSec[p].toFixed(1); }).join(', '));
-    }
-  }
-  
-  if (analysis.warnings.length > 0) {
-    lines.push('⚠️ 경고: ' + analysis.warnings.join(' | '));
-  }
-  
-  if (analysis.unknownExercises && analysis.unknownExercises.length > 0) {
-    lines.push('⚠️ 매핑 안 된 종목 (부위 추측 불가): ' + analysis.unknownExercises.join(', '));
-  }
-  
-  return lines.join('\n');
-}
 
 // 최근 N주 부위별 누적 세트 수 — 직접(primary만) / 분할환산(간접 0.5 포함) 두 벌을 함께 반환.
 // STATS 화면이 '직접 몇 세트'를 따로 보여줘야 해서 분리. 계산 규칙은 기존과 동일.
@@ -2457,20 +2150,6 @@ function getRecentVolumeSplitByPart(weeks) {
   var since = new Date(today);
   since.setDate(today.getDate() - (weeks * 7));
   return getVolumeSplitSince(getDateStr(since));
-}
-
-// 이번 주(월요일, KST 기준) 시작일 'YYYY-MM-DD'. 볼륨 폐루프의 "이번 주 누적" 창(선별안 A6).
-function getThisWeekStartStr() {
-  var todayStr = getTodayStr();
-  var t = new Date(todayStr + 'T00:00:00Z');
-  var dow = t.getUTCDay() || 7;            // 월=1 … 일=7
-  t.setUTCDate(t.getUTCDate() - (dow - 1));
-  return t.toISOString().slice(0, 10);
-}
-
-// 이번 주 누적(월요일부터 오늘까지) 부위별 세트 — 직접/환산 두 벌.
-function getThisWeekVolumeSplitByPart() {
-  return getVolumeSplitSince(getThisWeekStartStr());
 }
 
 // sinceStr(포함) 이후 기록의 부위별 세트 합 — 직접(primary만) / 환산(간접 0.5 포함).
@@ -2516,11 +2195,6 @@ function getVolumeSplitSince(sinceStr) {
   });
   
   return { direct: direct, fractional: fractional };
-}
-
-// 기존 호출부 호환 — 분할환산(간접 0.5 포함) 맵만 돌려준다. 동작 변경 없음.
-function getRecentVolumeByPart(weeks) {
-  return getRecentVolumeSplitByPart(weeks).fractional;
 }
 
 // 부위 그룹 → 주간 볼륨 임계(세트). getVolumeDiagnosis와 STATS 화면이 같은 숫자를 쓰도록 한 곳에만 둔다.
@@ -2680,322 +2354,144 @@ function isExerciseAvailable(exerciseName) {
   return spec.owned !== false;
 }
 
-// 보유 장비 한국어 이름 목록 (맨몸 제외 — 프롬프트에 나열용)
-function getOwnedEquipmentLabels() {
-  return Object.keys(GYM_EQUIPMENT)
-    .filter(function(id) { return id !== 'bodyweight' && GYM_EQUIPMENT[id].owned; })
-    .map(function(id) { return GYM_EQUIPMENT[id].kr; });
+// ═══════════════════════════════════════════════
+// 숫자 강제 — 글자 섞인 숫자 칸("300초"·"4.5km/h")을 숫자로 접는다 (유산소 구간 정규화용)
+// ═══════════════════════════════════════════════
+
+// 시간 칸의 단위 배수. ★단위를 무시하고 숫자만 읽으면 "2분 쉬세요"가 2초가 되고,
+// 유산소 구간이 "5분"·"120초" 로 섞여 오면 5:120 비율로 짜인다(옳게는 300:120).
+// 단위 표기가 없으면 그 칸의 기본 단위로 준 것으로 보고 1배.
+function aiTimeFactor(text, baseUnit) {
+  var perSec;
+  if (/시간|hours?\b|hrs?\b|\d\s*h\b/i.test(text)) perSec = 3600;
+  else if (/분|minutes?\b|mins?\b|\d\s*m\b/i.test(text)) perSec = 60;
+  else if (/초|seconds?\b|secs?\b|\d\s*s\b/i.test(text)) perSec = 1;
+  else return 1;
+  return (baseUnit === 'min') ? (perSec / 60) : perSec;
 }
 
-// 보유 장비로 불가능한 등록 종목 이름들 (AI에게 "쓰지 말 것"으로 넘김)
-function getUnavailableExerciseNames() {
-  return Object.keys(EXERCISE_BODY_PART_MAP).filter(function(name) {
-    return !isExerciseAvailable(name);
-  });
-}
-
-// AI 프롬프트용 '보유 장비' 블록. 루틴 생성·루틴 수정·코치 채팅이 공유한다.
-function buildEquipmentPromptBlock() {
-  var block = '## 🏋️ 보유 장비 (사용자 헬스장에 실제로 있는 기구 — 종목 추천의 절대 제약)\n' +
-    '맨몸 운동은 항상 가능하고, 그 외에는 아래 장비로 할 수 있는 종목만 추천한다.\n' +
-    getOwnedEquipmentLabels().join(' · ') + '\n' +
-    '- 위 목록에 없는 기구가 필요한 종목은 추천하지 말 것. 같은 부위를 보유 장비로 자극하는 종목으로 대체한다.\n' +
-    '- 사용자가 없는 기구의 종목을 요청하면 "그 기구는 헬스장에 없다"고 알리고 가능한 대안을 제시한다.\n';
-  var unavailable = getUnavailableExerciseNames();
-  if (unavailable.length) {
-    block += '- 장비가 없어 사용 금지인 종목: ' + unavailable.join(', ') + '\n';
+// 숫자 강제. 글자면 앞에 나오는 첫 숫자를 읽는다 — "3-4"→3, "8~12"→8 처럼
+// 범위를 준 경우 **아래값**을 택한다(세트·무게를 부풀리지 않는 쪽이 안전).
+// 읽을 수 없으면 fallback 을 그대로 돌려준다(호출부가 기본값을 정한다).
+// opts.min / opts.max: 범위 밖은 잘라서 병적인 값(999999kg)이 저장되지 않게 한다.
+// opts.positive: 0 이하를 "값 없음"으로 본다 — 기존 `parsed.X || 기본값` 의 falsy 동작을 그대로 유지하는 스위치.
+// opts.unit: 'sec' | 'min' — 시간 칸이면 단위를 읽어 그 기준으로 환산한다("1시간"→3600초).
+function aiNum(value, fallback, opts) {
+  opts = opts || {};
+  var n;
+  if (typeof value === 'number') {
+    n = value;
+  } else if (typeof value === 'string') {
+    // 맨 앞 숫자를 먼저 본다("-5" 의 부호를 살리려고). 앞이 글자면 뒤에서 부호 없는 첫 숫자("약 3세트"→3).
+    var m = value.match(/^\s*(-?\d+(?:\.\d+)?)/) || value.match(/(\d+(?:\.\d+)?)/);
+    n = m ? parseFloat(m[1]) : NaN;
+    if (isFinite(n) && opts.unit) n = n * aiTimeFactor(value, opts.unit);
+  } else {
+    n = NaN;                                   // boolean · null · 배열 · 객체
   }
-  return block;
-}
-
-// 부위별 종목 목록 (코치 채팅용).
-// 코치 프롬프트에는 원래 종목 목록이 하나도 안 들어갔다. 그래서 모델이 팔 얘기만 나오면
-// 프롬프트 안에서 유일하게 본 종목 이름(볼륨 부족 부위의 권장 종목)을 그대로 읊었다 —
-// "이두 뭐 하지?" 에 리버스컬만 답하던 원인이다(#5). 앱이 아는 종목을 통째로 보여주면
-// 코치가 없는 종목을 지어내지도, 한 종목에 갇히지도 않는다.
-// 루틴 생성기의 종목 풀과 달리 1RM·태그를 싣지 않는다 — 그 수치는 "사용자 현재 데이터"에 이미 있고,
-// 여긴 "무슨 이름을 써도 되는가"만 알려주면 된다. 장비로 못 하는 종목은 뺀다.
-function buildExerciseCatalogBlock() {
-  var ORDER = ['chest', 'chest_upper', 'chest_lower', 'shoulders_front', 'shoulders_side', 'shoulders_rear',
-               'triceps', 'lats', 'upper_back', 'traps', 'biceps', 'forearms',
-               'quads', 'hamstrings', 'glutes', 'glutes_med', 'adductors', 'calves', 'abs', 'obliques'];
-  var byPart = {};
-  Object.keys(EXERCISE_BODY_PART_MAP).forEach(function(name) {
-    if (isAliasExerciseName(name)) return;    // 같은 운동의 별칭 표기 — 표준명만 보여준다
-    if (!isExerciseAvailable(name)) return;   // 헬스장에 없는 기구 종목은 이름조차 꺼내지 않는다
-    var info = EXERCISE_BODY_PART_MAP[name];
-    var key = info.primary;
-    if (!byPart[key]) byPart[key] = [];
-    byPart[key].push(name + (info.stretched ? '(신장강조)' : ''));
-  });
-
-  var lines = [];
-  ORDER.forEach(function(key) {
-    if (!byPart[key] || !byPart[key].length) return;
-    lines.push('- ' + (BODY_PART_KR[key] || key) + ': ' + byPart[key].join(', '));
-    delete byPart[key];
-  });
-  Object.keys(byPart).forEach(function(key) {   // ORDER 에 빠진 부위가 생겨도 잃지 않는다
-    lines.push('- ' + (BODY_PART_KR[key] || key) + ': ' + byPart[key].join(', '));
-  });
-
-  return '## 이 앱이 아는 종목 (부위별 — 이 이름들로만 말한다)\n' +
-    lines.join('\n') + '\n' +
-    '- 목록에 없는 종목은 추천하지 말 것. 사용자가 물으면 "이 앱에는 없다"고 밝히고 같은 부위의 위 종목으로 대체한다.\n' +
-    '- 종목을 고를 땐 사용자가 노린 근육을 주동근으로 쓰는 것을 먼저 고른다. 예를 들어 이두는 회외(손바닥이 위를 보는) 컬이 먼저이고, 리버스 컬은 상완요골근·상완근 종목이라 이두 질문의 답이 아니다.\n';
-}
-
-// 장비 코드 가드레일: AI가 프롬프트를 어기고 이 헬스장에 없는 기구 종목을 넣었을 때
-// 같은 부위의 보유 종목으로 교체(마땅한 게 없으면 제거)한다.
-// 안전 가드레일(applySafetyGuardrail) **다음에** 돌린다 — 안전 교체가 우선이고, 그 결과를 장비로 한 번 더 거른다.
-// 반환: { exercises: 교정된 배열, changes: [{from, to}] }
-function applyEquipmentGuardrail(exercises) {
-  if (!Array.isArray(exercises) || !exercises.length) return { exercises: exercises, changes: [] };
-  var changes = [];
-  var names = {};
-  exercises.forEach(function(e) { if (e && e.name) names[e.name] = true; });
-  var out = exercises.map(function(ex) {
-    if (!ex || !ex.name || isExerciseAvailable(ex.name)) return ex;
-    var info = EXERCISE_BODY_PART_MAP[ex.name] || getExercisePart(ex.name);
-    var pool = (info && EXERCISES_BY_PRIMARY[info.primary]) || [];
-    // 같은 부위 후보 중 점수가 가장 높은 것을 고른다:
-    // 복합/고립 성격이 같으면 +2, 부하를 걸 수 있으면(맨몸이 아니면) +1.
-    // 무게를 싣던 머신 종목이 맨몸 종목으로 바뀌어 자극이 통째로 빠지는 걸 막는다.
-    var sub = null, best = -1;
-    for (var i = 0; i < pool.length; i++) {
-      var cand = pool[i];
-      if (cand === ex.name || names[cand] || !isExerciseAvailable(cand)) continue;
-      var candInfo = EXERCISE_BODY_PART_MAP[cand];
-      var score = 0;
-      if (info && candInfo.compound === info.compound) score += 2;
-      if (candInfo.equipment !== 'bodyweight') score += 1;
-      if (score > best) { best = score; sub = cand; }
-    }
-    if (!sub) { changes.push({ from: ex.name, to: null }); return null; }
-    changes.push({ from: ex.name, to: sub });
-    names[sub] = true;
-    var copy = {};
-    Object.keys(ex).forEach(function(k) { copy[k] = ex[k]; });
-    copy.name = sub;
-    copy.weight = null; // 다른 종목이므로 무게는 기록 기반으로 다시 계산
-    var subInfo = EXERCISE_BODY_PART_MAP[sub];
-    if (subInfo) {
-      copy.type = subInfo.compound ? '복합' : '고립';
-      copy.isMain = !!(ex.isMain && subInfo.mainEligible);
-    }
-    if (copy.reps !== undefined) copy.reps = repRangeToStr(clampRepsToClass(sub, copy.reps));
-    if (copy.rir !== undefined) copy.rir = (copy.type === '복합') ? '2-3' : '0-2';
-    if (copy.rest !== undefined && copy.rest) copy.rest = (copy.type === '복합') ? '120-180' : '60-120';
-    copy.note = '헬스장에 ' + ex.name + ' 기구가 없어 대신 배치';
-    return copy;
-  }).filter(Boolean);
-  return { exercises: out, changes: changes };
+  if (!isFinite(n)) return fallback;
+  if (opts.positive && n <= 0) return fallback;
+  if (typeof opts.min === 'number' && n < opts.min) n = opts.min;
+  if (typeof opts.max === 'number' && n > opts.max) n = opts.max;
+  return n;
 }
 
 // ═══════════════════════════════════════════════
-// 종목 안전 (부상 대조 + VETO 가드레일)
+// 유산소 구간 정규화 — 인터벌 모드·걷기(경사) 모드 공용
+// AI/폴백이 준 구간(길이 sec 기반)을 totalSec 에 "정확히" 맞춘다.
+//  - 각 구간 경계를 30초 배수(30·60·90…)로 스냅한다 → 모든 구간 길이가 30초 단위(연구: ±15~30초 진행).
+//  - totalSec 은 항상 60의 배수(mins*60)라 30 격자로 스냅해도 총합은 정확히 totalSec(초과·미달 0).
+//  - 종류/속력 이상값 정리, 퇴화(0초) 구간 제거, 첫 구간 0초부터 연속 보장.
+//  - opts.incline 이 true 면 incline(경사 %)도 정리해 함께 싣는다(걷기 모드). 상한은 opts.inclineMax.
+//  - opts.allowedTypes / opts.speedMin / opts.speedMax 로 모드별 허용 범위를 좁힐 수 있다.
+// ★시간·경사·종류·속력 상한은 프롬프트만 믿지 않고 여기(코드)에서 절대 불가하게 보정한다.
 // ═══════════════════════════════════════════════
+var CARDIO_ALLOWED_TYPES = { warmup: 1, run: 1, walk: 1, cooldown: 1 };
+// 걷기 모드는 'run' 을 쓰지 않는다 — 걷기 쪽 모든 로직(경사 기록·코칭 문구·기록 요약)이
+// type === 'walk' 를 본 구간으로 삼기 때문에, run 이 섞이면 그 세션의 경사 기록이 통째로 사라진다.
+var CARDIO_WALK_ALLOWED_TYPES = { warmup: 1, walk: 1, cooldown: 1 };
 
-// 기억 노트(injury)의 자유 텍스트에서 부상 부위 키워드를 찾아 부위 키 배열 반환 (예: ['lower_back'])
-function getUserInjuryAreas() {
-  var notes = (state.coachMemory || []).filter(function(m) { return m.category === 'injury'; });
-  if (!notes.length) return [];
-  var areas = [];
-  Object.keys(INJURY_AREAS).forEach(function(key) {
-    var kws = INJURY_AREAS[key].keywords;
-    var hit = notes.some(function(n) {
-      var text = n.text || '';
-      return kws.some(function(kw) { return text.indexOf(kw) !== -1; });
-    });
-    if (hit) areas.push(key);
-  });
-  return areas;
-}
+function cardioFitToTotal(raw, totalSec, opts) {
+  opts = opts || {};
+  var defSpeed = opts.defaultSpeed || {};
+  var defLabel = opts.defaultLabel || {};
+  var wantIncline = !!opts.incline;
+  var inclineMax = (typeof opts.inclineMax === 'number') ? opts.inclineMax : 0;
+  var allowed = opts.allowedTypes || CARDIO_ALLOWED_TYPES;
+  var spdMin = (typeof opts.speedMin === 'number') ? opts.speedMin : 1;
+  var spdMax = (typeof opts.speedMax === 'number') ? opts.speedMax : 20;
+  var list = Array.isArray(raw) ? raw : [];
 
-// 종목 하나를 사용자 부상과 대조: { level: 'contra'|'caution'|null, area, sub, mod }
-// userAreas를 생략하면 getUserInjuryAreas()로 계산 (반복 호출 시엔 미리 구해 넘길 것)
-function checkExerciseSafety(exerciseName, userAreas) {
-  var safety = EXERCISE_SAFETY[exerciseName];
-  // 별칭(예: '인클라인 덤벨 프레스')으로 들어오면 표준명으로 한 번 더 조회
-  if (!safety && EXERCISE_ALIASES_1RM[exerciseName]) {
-    safety = EXERCISE_SAFETY[EXERCISE_ALIASES_1RM[exerciseName]];
+  // 속력 숫자 정리: km/h, 모드별 범위로 클램프, 소수 1자리. 이상값이면 종류별 기본값.
+  // aiNum 을 쓰는 이유: Number("8.0km/h") 는 NaN 이라 모델이 단위를 붙이면 처방이 통째로 기본값으로 주저앉는다.
+  function cleanSpeed(v, type) {
+    var n = aiNum(v, null, { positive: true });
+    if (n === null) n = defSpeed[type] || 4;
+    if (n < spdMin) n = spdMin;
+    if (n > spdMax) n = spdMax;
+    return Math.round(n * 10) / 10;
   }
-  if (!safety) return { level: null, area: null, sub: null, mod: null };
-  if (userAreas === undefined) userAreas = getUserInjuryAreas();
-  var result = { level: null, area: null, sub: null, mod: null };
-  userAreas.forEach(function(area) {
-    if (safety.contra && safety.contra.indexOf(area) !== -1) {
-      if (result.level !== 'contra') {
-        result = { level: 'contra', area: area, sub: (safety.sub && safety.sub[area]) || null, mod: null };
-      }
-    } else if (safety.caution && safety.caution.indexOf(area) !== -1 && result.level !== 'contra') {
-      result = { level: 'caution', area: area, sub: (safety.sub && safety.sub[area]) || null, mod: (safety.mod && safety.mod[area]) || null };
+  // 경사 정리: 0~상한 클램프, 0.5% 격자. 상한 초과는 코드가 잘라낸다(§1-3 12% 초과 금지).
+  function cleanIncline(v) {
+    var n = aiNum(v, 0, { min: 0 });
+    if (n > inclineMax) n = inclineMax;
+    return Math.round(n * 2) / 2;
+  }
+
+  var clean = [];
+  var sum = 0;
+  for (var i = 0; i < list.length; i++) {
+    var seg = list[i] || {};
+    var type = allowed[seg.type] ? seg.type : 'walk';       // 허용 밖 종류(걷기 모드의 run 등)는 walk 로 접는다
+    // "300초" 처럼 단위가 붙어도 구간을 통째로 버리지 않는다. 길이는 어차피 아래에서
+    // 총시간에 맞춰 비율로 다시 늘려 쓰므로, 단위를 잘못 읽어도 구간 비율은 살아남는다.
+    var sec = aiNum(seg.sec, null, { positive: true, unit: 'sec' });
+    if (sec === null) continue;
+    var item = {
+      type: type,
+      sec: sec,
+      speed: cleanSpeed(seg.speed, type),
+      label: (typeof seg.label === 'string' && seg.label.trim()) ? seg.label.trim() : (defLabel[type] || '구간')
+    };
+    if (wantIncline) item.incline = cleanIncline(seg.incline);
+    clean.push(item);
+    sum += sec;
+  }
+  if (!clean.length || sum <= 0) return null;
+
+  var STEP = 30;                                         // 30초 격자
+  var out = [];
+  var prev = 0;                                          // 확정된 끝(항상 30의 배수)
+  var cum = 0;
+  var n = clean.length;
+  for (var j = 0; j < n; j++) {
+    cum += clean[j].sec * totalSec / sum;               // 스케일된 이상적 끝(실수, 초)
+    var end;
+    if (j === n - 1) {
+      end = totalSec;                                    // 마지막 구간은 정확히 총시간(30의 배수)
+    } else {
+      end = Math.round(cum / STEP) * STEP;               // 30초 격자에 스냅
+      var minEnd = prev + STEP;                          // 이 구간 최소 30초 확보
+      var maxEnd = totalSec - (n - 1 - j) * STEP;        // 이후 구간마다 30초씩 남겨두기
+      if (end < minEnd) end = minEnd;
+      if (end > maxEnd) end = maxEnd;
     }
-  });
-  return result;
-}
-
-// AI 프롬프트 주입용 안전 블록: 등록된 부상에 걸리는 종목만 압축해 텍스트로.
-// 부상이 없으면 '' (프롬프트에 아무것도 안 들어감 = 토큰 0)
-function buildSafetyPromptBlock() {
-  var areas = getUserInjuryAreas();
-  if (!areas.length) return '';
-  var contraLines = [];
-  var cautionLines = [];
-  var rehabLines = [];
-  Object.keys(EXERCISE_SAFETY).forEach(function(name) {
-    var s = EXERCISE_SAFETY[name];
-    areas.forEach(function(area) {
-      var kr = INJURY_AREAS[area].kr;
-      if (s.contra && s.contra.indexOf(area) !== -1) {
-        var sub = s.sub && s.sub[area];
-        contraLines.push('- ' + name + ' (' + kr + ')' + (sub ? ' → 대체: ' + sub : ''));
-      } else if (s.caution && s.caution.indexOf(area) !== -1) {
-        var mod = (s.mod && s.mod[area]) || '가볍게·통증 없는 범위로';
-        cautionLines.push('- ' + name + ' (' + kr + '): ' + mod);
-      }
-      if (s.rehab && s.rehab.indexOf(area) !== -1) {
-        rehabLines.push('- ' + name + ' (' + kr + ' 재활)');
-      }
-    });
-  });
-  var areaKrs = areas.map(function(a) { return INJURY_AREAS[a].kr; }).join(', ');
-  var block = '## 🚫 부상 안전 규칙 (등록된 부상: ' + areaKrs + ' — 기억 노트와 자동 대조됨)\n';
-  if (contraLines.length) block += '**금기 — 절대 루틴에 넣지 말 것 (VETO). 사용자가 요구해도 거부하고 대체를 제시한다:**\n' + contraLines.join('\n') + '\n';
-  if (cautionLines.length) block += '**주의 — 이렇게 수정하면 가능 (ADJUST):**\n' + cautionLines.join('\n') + '\n';
-  if (rehabLines.length) block += '**재활 추천 — 이 부상에 오히려 도움:**\n' + rehabLines.join('\n') + '\n';
-  return block;
-}
-
-// VETO 코드 가드레일: AI가 만든 루틴 종목 배열에서 금기 종목을 대체로 교체(불가하면 제거).
-// AI가 프롬프트를 어겨도 금기 종목이 사용자 화면까지 못 오게 하는 마지막 방어선.
-// 반환: { exercises: 교정된 배열, changes: [{from, to, areaKr}] }
-function applySafetyGuardrail(exercises) {
-  if (!Array.isArray(exercises) || !exercises.length) return { exercises: exercises, changes: [] };
-  var areas = getUserInjuryAreas();
-  if (!areas.length) return { exercises: exercises, changes: [] };
-  var changes = [];
-  var names = {};
-  exercises.forEach(function(e) { if (e && e.name) names[e.name] = true; });
-  var out = exercises.map(function(ex) {
-    if (!ex || !ex.name) return ex;
-    var chk = checkExerciseSafety(ex.name, areas);
-    if (chk.level !== 'contra') return ex;
-    var areaKr = INJURY_AREAS[chk.area].kr;
-    // 대체 종목이 이 헬스장에 없는 기구면 쓰지 않는다(→ 아래 제거 폴백).
-    // 안전 표는 테스트로도 강제하지만, 데이터 실수가 사용자 화면까지 새지 않게 하는 이중 방어선이다.
-    if (chk.sub && !isExerciseAvailable(chk.sub)) chk.sub = null;
-    if (chk.sub && !names[chk.sub]) {
-      changes.push({ from: ex.name, to: chk.sub, areaKr: areaKr });
-      names[chk.sub] = true;
-      var copy = {};
-      Object.keys(ex).forEach(function(k) { copy[k] = ex[k]; });
-      copy.name = chk.sub;
-      copy.weight = null; // 다른 종목이므로 무게는 기록 기반으로 다시 계산
-      // 메타데이터도 대체 종목 기준으로 갱신 (원 종목 값이 남으면 메인 표시·웜업·반복수가 잘못됨)
-      var subInfo = EXERCISE_BODY_PART_MAP[chk.sub];
-      if (subInfo) {
-        copy.type = subInfo.compound ? '복합' : '고립';
-        copy.isMain = !!(ex.isMain && subInfo.mainEligible);
-      }
-      if (copy.reps !== undefined) copy.reps = repRangeToStr(clampRepsToClass(chk.sub, copy.reps));
-      if (copy.rir !== undefined) copy.rir = (copy.type === '복합') ? '2-3' : '0-2';
-      if (copy.rest !== undefined && copy.rest) copy.rest = (copy.type === '복합') ? '120-180' : '60-120';
-      copy.note = areaKr + ' 부상 보호 — ' + ex.name + ' 대신 배치';
-      // 대체 종목 자체가 사용자의 부상 부위에 '주의'면 그 수정 지침까지 붙인다.
-      // (예: 바벨 스쿼트 → 핵 스쿼트는 "골반이 말리지 않는 깊이까지만"이 있어야 안전 교체가 완성된다)
-      // 부위별로 따로 조회한다 — checkExerciseSafety에 부위를 한꺼번에 넘기면
-      // caution끼리 서로 덮어써서 교체 사유와 다른 부위의 문구가 붙을 수 있다.
-      var subMods = [];
-      [chk.area].concat(areas).forEach(function(a) {
-        if (areas.indexOf(a) === -1) return;
-        var sc = checkExerciseSafety(chk.sub, [a]);
-        if (sc.level === 'caution' && sc.mod && subMods.indexOf(sc.mod) === -1) subMods.push(sc.mod);
-      });
-      if (subMods.length) copy.note += ' · ' + subMods.join(' · ');
-      return copy;
-    }
-    changes.push({ from: ex.name, to: null, areaKr: areaKr });
-    return null; // 대체 불가(이미 루틴에 있음/대체 없음)면 제거
-  }).filter(Boolean);
-  return { exercises: out, changes: changes };
-}
-
-// ═══════════════════════════════════════════════
-// 세트 사이 채팅 신호 (3단계 — 통증·자극·RPE 피드백 루프)
-// ═══════════════════════════════════════════════
-
-// 최근 N일 내 이 종목의 자극 평가 ('bad'|'good'|null). 가장 최근 기록 우선.
-function getRecentFeel(exerciseName, days) {
-  // 채팅 신호 저장소 먼저 ([0]=최신)
-  var chatSignals = _recentChatSignals(exerciseName, days);
-  for (var c = 0; c < chatSignals.length; c++) {
-    if (chatSignals[c].feel === 'bad' || chatSignals[c].feel === 'good') return chatSignals[c].feel;
+    if (end <= prev) continue;                           // 격자 부족 시 병합(누적은 유지)
+    var outSeg = {
+      startSec: prev,
+      endSec: end,
+      type: clean[j].type,
+      speed: clean[j].speed,
+      label: clean[j].label
+    };
+    if (wantIncline) outSeg.incline = clean[j].incline;
+    out.push(outSeg);
+    prev = end;
   }
-  var cutoff = new Date(Date.now() - (days || 14) * 86400000).toISOString().slice(0, 10);
-  var canonical = canonicalExerciseName(exerciseName);
-  var log = state.data.workoutLog || [];
-  for (var i = 0; i < log.length; i++) {
-    var w = log[i];
-    if (!w.date || w.date < cutoff) continue;
-    var exList = w.exercises || w.exercisesData;
-    if (!Array.isArray(exList)) continue;
-    for (var j = 0; j < exList.length; j++) {
-      var ex = exList[j];
-      if (canonicalExerciseName(ex.name) === canonical && (ex.feel === 'bad' || ex.feel === 'good')) return ex.feel;
-    }
-  }
-  return null;
-}
-
-// 확인된 채팅 신호를 전용 저장소에 즉시 기록 (세션 취소·0세트 종료·종목 교체와 무관하게 보존).
-// 통증 게이트(hasRecentPain)·자극 조회(getRecentFeel)가 workoutLog와 함께 이 저장소도 읽는다.
-function recordChatSignal(exerciseName, signal) {
-  if (!exerciseName || !signal) return false;
-  var log = storage.get(KEYS.CHAT_SIGNALS, []);
-  if (!Array.isArray(log)) log = []; // 손상됐지만 JSON으로는 읽히는 값 방어
-  log.unshift({
-    date: getTodayStr(),
-    name: exerciseName,
-    pain: !!signal.pain,
-    painNote: signal.painNote || null,
-    feel: signal.feel || null,
-    rpe: signal.rpe || null
-  });
-  return storage.set(KEYS.CHAT_SIGNALS, log.slice(0, 200));
-}
-
-// 최근 N일 내 채팅 신호 조회 (내부용 — [0]=최신)
-// 저장된 date가 KST(getTodayStr) 기준이므로 cutoff도 KST로 계산 (UTC면 오전 9시 전 하루 오차)
-function _recentChatSignals(exerciseName, days) {
-  var cutoff = getDateStr(new Date(Date.now() - (days || 14) * 86400000));
-  var canonical = canonicalExerciseName(exerciseName);
-  var log = storage.get(KEYS.CHAT_SIGNALS, []);
-  if (!Array.isArray(log)) return [];
-  return log.filter(function(s) {
-    return s && canonicalExerciseName(s.name) === canonical && s.date && s.date >= cutoff;
-  });
-}
-
-// 추출된 채팅 신호를 세션 종목 객체에 적용 (사용자 확인 후 호출).
-// painFlag는 1단계 통증 게이트(hasRecentPain)가 읽어 증량을 자동 중단한다.
-function applyChatSignalToExercise(ex, signal) {
-  if (!ex || !signal) return false;
-  var applied = false;
-  if (signal.pain) {
-    ex.painFlag = true;
-    if (signal.painNote) ex.painNote = signal.painNote;
-    applied = true;
-  }
-  if (signal.feel === 'good' || signal.feel === 'bad') {
-    ex.feel = signal.feel;
-    applied = true;
-  }
-  if (typeof signal.rpe === 'number') {
-    ex.chatRpe = signal.rpe;
-    applied = true;
-  }
-  return applied;
+  if (!out.length) return null;
+  // 마지막 구간이 정확히 끝(totalSec)까지 덮게 보정
+  if (out[out.length - 1].endSec !== totalSec) out[out.length - 1].endSec = totalSec;
+  return out;
 }
 
 // ═══════════════════════════════════════════════
@@ -3044,21 +2540,16 @@ function cardioWalkMainIncline(session) {
   return max;
 }
 
-// 권장 경사 상한 — 허리(lower_back) 이력이면 한 단계 낮춘다(§7-6 규칙7).
-// 절대 상한 12%는 어떤 경우에도 넘지 않는다(§1-3).
-function cardioWalkInclineCap(injuryAreas) {
-  var areas = Array.isArray(injuryAreas) ? injuryAreas : [];
-  return (areas.indexOf('lower_back') !== -1) ? WALK_PRESCRIPTION.inclineMaxBack : WALK_PRESCRIPTION.inclineMax;
+// 권장 경사 상한 — 절대 상한 12%는 어떤 경우에도 넘지 않는다(§1-3).
+function cardioWalkInclineCap() {
+  return WALK_PRESCRIPTION.inclineMax;
 }
 
 // 이번 세션에 쓸 경사 % — §4-2 향상 게이트를 코드로 구현한 보수적 판정.
-// ★로컬 계산은 "올리지 않는다"(유지 또는 하향만). 상향은 시간 축이 먼저이고(§4-1),
-//   축 선택·폭 판단은 지난 기록 전체를 보는 AI(generateCardioWalk)가 맡는다.
-function cardioWalkNextIncline(log, injuryAreas) {
-  var cap = cardioWalkInclineCap(injuryAreas);
-  var areas = Array.isArray(injuryAreas) ? injuryAreas : [];
-  var back = areas.indexOf('lower_back') !== -1;
-  var start = back ? WALK_PRESCRIPTION.inclineStartBack : WALK_PRESCRIPTION.inclineStart;
+// ★로컬 계산은 "올리지 않는다"(유지 또는 하향만). 상향은 시간 축이 먼저다(§4-1).
+function cardioWalkNextIncline(log) {
+  var cap = cardioWalkInclineCap();
+  var start = WALK_PRESCRIPTION.inclineStart;
 
   var sessions = cardioWalkSessions(log);
   if (!sessions.length) return Math.min(start, cap);
@@ -3129,44 +2620,15 @@ function cardioWalkBodyWeight() {
   return 70;
 }
 
-// 걷기 처방에 필요한 값을 한 번만 계산해 묶는다 — 로컬 폴백(screens.js)과 AI 프롬프트(ai.js)가
-// 같은 기준 경사를 쓰도록, 그리고 한 번의 생성에서 로그를 여러 번 훑지 않도록.
+// 걷기 처방에 필요한 값을 한 번만 계산해 묶는다 — 한 번의 구성에서 로그를 여러 번 훑지 않도록.
 function cardioWalkContext() {
   var log = (state.data && Array.isArray(state.data.cardioLog)) ? state.data.cardioLog : [];
-  var areas = (typeof getUserInjuryAreas === 'function') ? getUserInjuryAreas() : [];
-  var legs = cardioLegsAdjacency();
   return {
     log: log,
-    areas: areas,
-    back: areas.indexOf('lower_back') !== -1,
     sessions: cardioWalkSessions(log),
-    cap: cardioWalkInclineCap(areas),
-    anchorIncline: cardioWalkNextIncline(log, areas),
-    legsToday: legs.today,
-    legsYesterday: legs.yesterday
+    cap: cardioWalkInclineCap(),
+    anchorIncline: cardioWalkNextIncline(log)
   };
-}
-
-// 하체 웨이트와의 인접(선별안 D4): 걷기 엔진이 웨이트 기록을 전혀 안 봐서 "하체 다음 날 한 단계 낮춤"이
-// 문서에만 있고 사용자에게 한 번도 전달되지 않았다. 근비대 간섭은 없지만(Schumann 2022·Held 2026) 하체 세션
-// 뒤 48시간은 급성 피로로 하지 수행이 떨어진다(Doma 2019). 판정만 하고 처방은 프롬프트가 한다.
-function cardioLegsAdjacency() {
-  var out = { today: false, yesterday: false };
-  var log = (state.data && Array.isArray(state.data.workoutLog)) ? state.data.workoutLog : [];
-  if (!log.length) return out;
-  var todayStr = getTodayStr();
-  var yStr = getDateStr(new Date(Date.now() - 86400000));
-  function isLegs(w) {
-    var k = String(w.sessionKr || w.sessionName || w.sessionType || '').toUpperCase();
-    return k.indexOf('LEGS') !== -1 || k.indexOf('하체') !== -1;
-  }
-  for (var i = 0; i < log.length; i++) {
-    var w = log[i];
-    if (!w || !w.date || !isLegs(w)) continue;
-    if (w.date === todayStr) out.today = true;
-    else if (w.date === yStr) out.yesterday = true;
-  }
-  return out;
 }
 
 // 걷기 세션 총시간 상한(§4-1) — 본 구간 33분을 넘기지 않도록 총시간 자체를 자른다.
