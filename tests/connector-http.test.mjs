@@ -180,7 +180,7 @@ test('snapshot — POST 외에는 405', async () => {
   assertNoStore(res);
 });
 
-test('plan — 401, 저장 전 null, 저장 뒤 {week: 이번 주 계획, cardio: 오늘 것}, routine 없음', async () => {
+test('plan — 401, 저장 전 null, 저장 뒤 {week: 이번 주 계획, nextWeek, cardio: 오늘 것}, routine 없음', async () => {
   storeMod.resetMemoryStore();
   var r401 = await planMod.default.fetch(getPlan('nope'));
   assert.equal(r401.status, 401);
@@ -189,7 +189,7 @@ test('plan — 401, 저장 전 null, 저장 뒤 {week: 이번 주 계획, cardio
   var empty = await planMod.default.fetch(getPlan(TOKEN));
   assert.equal(empty.status, 200);
   assertNoStore(empty);
-  assert.deepEqual(await empty.json(), { week: null, cardio: null });
+  assert.deepEqual(await empty.json(), { week: null, nextWeek: null, cardio: null });
 
   var store = storeMod.getStore();
   await store.setJSON(storeMod.KEY_SNAPSHOT, validSnapshot());
@@ -198,7 +198,7 @@ test('plan — 401, 저장 전 null, 저장 뒤 {week: 이번 주 계획, cardio
   var next = await tools.saveWeekPlan({ week: 'next', days: 3, targets: {}, sessions: [Object.assign({}, session, { label: '다음 주' })] });
   assert.ok(!next.isError, next.content[0].text);
   var onlyNext = await (await planMod.default.fetch(getPlan(TOKEN))).json();
-  assert.equal(onlyNext.week, null, '다음 주 계획은 오지 않는다');
+  assert.equal(onlyNext.week, null, '다음 주 계획은 week 로 오지 않는다');
 
   var saved = await tools.saveWeekPlan({ week: 'this', days: 4, targets: { chest: 10 }, sessions: [session] });
   assert.ok(!saved.isError, saved.content[0].text);
@@ -208,7 +208,7 @@ test('plan — 401, 저장 전 null, 저장 뒤 {week: 이번 주 계획, cardio
   assert.equal(res.status, 200);
   assertNoStore(res);
   var body = await res.json();
-  assert.deepEqual(Object.keys(body).sort(), ['cardio', 'week']);
+  assert.deepEqual(Object.keys(body).sort(), ['cardio', 'nextWeek', 'week']);
   assert.ok(!('routine' in body));
   assert.equal(body.week.weekStart, kstMod.kstWeekStart(kstMod.kstDateStr(new Date())));
   assert.equal(body.week.sessions[0].label, '상체 A');
@@ -222,6 +222,24 @@ test('plan — 401, 저장 전 null, 저장 뒤 {week: 이번 주 계획, cardio
   var body2 = await (await planMod.default.fetch(getPlan(TOKEN))).json();
   assert.equal(body2.cardio, null);
   assert.equal(body2.week.sessions[0].label, '상체 A');
+});
+
+test('plan — 응답 키는 week·nextWeek·cardio, nextWeek = 다음 주 계획', async () => {
+  storeMod.resetMemoryStore();
+  var store = storeMod.getStore();
+  await store.setJSON(storeMod.KEY_SNAPSHOT, validSnapshot());
+  var tools = toolsMod.createTools({ store: store });
+  var session = { label: '다음 A', type: 'upper', exercises: [{ name: '벤치프레스', sets: [{ weight: 60, reps: '8-10' }] }] };
+  var saved = await tools.saveWeekPlan({ week: 'next', days: 3, targets: {}, sessions: [session] });
+  assert.ok(!saved.isError, saved.content[0].text);
+  var res = await planMod.default.fetch(getPlan(TOKEN));
+  assert.equal(res.status, 200);
+  assertNoStore(res);
+  var body = await res.json();
+  assert.deepEqual(Object.keys(body), ['week', 'nextWeek', 'cardio']);
+  assert.equal(body.week, null);
+  assert.equal(body.nextWeek.weekStart, kstMod.kstAddDays(kstMod.kstWeekStart(kstMod.kstDateStr(new Date())), 7));
+  assert.equal(body.nextWeek.sessions[0].label, '다음 A');
 });
 
 test('plan — GET 외에는 405', async () => {

@@ -716,8 +716,10 @@ export function createTools(deps) {
   // What the app fetches (GET /api/plan): this week's plan and today's cardio plan.
   async function getAppPlans() {
     var today = kstDateStr(now());
-    var week = await store.getJSON(weekKey(kstWeekStart(today)));
-    return { week: week || null, cardio: await todayCardio(today) };
+    var mon = kstWeekStart(today);
+    var week = await store.getJSON(weekKey(mon));
+    var nextWeek = await store.getJSON(weekKey(kstAddDays(mon, 7)));
+    return { week: week || null, nextWeek: nextWeek || null, cardio: await todayCardio(today) };
   }
 
   async function getSavedPlans() {

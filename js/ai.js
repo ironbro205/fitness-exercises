@@ -73,6 +73,33 @@ function claudeInWindow(dateStr, cutoff) {
   return typeof dateStr === 'string' && dateStr > cutoff;
 }
 
+// 기록 날짜 → 'YYYY-MM-DD'. 'YYYY-M-D' 는 두 자리로 채우고, ISO 날짜·시각('2026-09-25T…')은 앞 10자.
+// 그 밖(빈 값·숫자·이상한 글자·없는 날짜 '2026-02-30')은 null — 스냅샷에서 그 항목만 뺀다(서버 검사는 엄격).
+function claudeNormDate(v) {
+  if (typeof v !== 'string') return null;
+  var m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/) || v.match(/^(\d{4})-(\d{2})-(\d{2})T/);
+  if (!m) return null;
+  var y = parseInt(m[1], 10), mo = parseInt(m[2], 10), d = parseInt(m[3], 10);
+  var t = new Date(Date.UTC(y, mo - 1, d));
+  if (t.getUTCFullYear() !== y || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d) return null;
+  return m[1] + '-' + String(mo).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+}
+
+// 날짜를 정규화한 얕은 사본 목록 (날짜가 망가진 항목은 빠진다). 원본 기록은 건드리지 않는다.
+function claudeWithNormDates(list) {
+  var out = [];
+  (Array.isArray(list) ? list : []).forEach(function(item) {
+    if (!item || typeof item !== 'object') return;
+    var date = claudeNormDate(item.date);
+    if (date === null) return;
+    var copy = {};
+    Object.keys(item).forEach(function(k) { copy[k] = item[k]; });
+    copy.date = date;
+    out.push(copy);
+  });
+  return out;
+}
+
 function claudeNum(v) {
   if (v === null || v === undefined || v === '' || typeof v === 'boolean') return null;
   var n = Number(v);
@@ -172,9 +199,8 @@ function buildClaudeSnapshot(nowDate) {
     if (c && c.workoutId && !condByWorkout[c.workoutId]) condByWorkout[c.workoutId] = c;
   });
 
-  var log = sortByDateDesc((Array.isArray(data.workoutLog) ? data.workoutLog : []).filter(function(w) {
-    return w && typeof w.date === 'string';
-  }));
+  // 날짜는 claudeNormDate 로 맞추고, 망가진 기록만 뺀다(8주 창 비교도 정규화된 날짜로).
+  var log = sortByDateDesc(claudeWithNormDates(data.workoutLog));
   var workouts = [];
   var recentNames = {};
   var older = {};
@@ -197,12 +223,12 @@ function buildClaudeSnapshot(nowDate) {
     return !recentNames[key];
   }).map(function(key) { return older[key]; }));
 
-  var cardio = claudeByDateDesc((Array.isArray(data.cardioLog) ? data.cardioLog : []).filter(function(c) {
-    return c && claudeInWindow(c.date, cutoff);
+  var cardio = claudeByDateDesc(claudeWithNormDates(data.cardioLog).filter(function(c) {
+    return claudeInWindow(c.date, cutoff);
   }).map(claudeCardioEntry));
 
-  var bodyAll = claudeByDateDesc((Array.isArray(data.bodyLog) ? data.bodyLog : []).filter(function(b) {
-    return b && typeof b.date === 'string' && claudeNum(b.weight) !== null;
+  var bodyAll = claudeByDateDesc(claudeWithNormDates(data.bodyLog).filter(function(b) {
+    return claudeNum(b.weight) !== null;
   }));
   var body = [];
   var tookOlderBody = false;
@@ -316,9 +342,10 @@ function claudeWeekRev(p) {
   return p ? String(p.id) + '|' + String(p.updatedAt) : '';
 }
 
-// /api/plan 응답 { week, cardio } 를 state 에 둔다. 반환: 무엇이 바뀌었는가.
+// /api/plan 응답 { week, nextWeek, cardio } 를 state 에 둔다. 반환: 무엇이 바뀌었는가.
 //  · week: 모양이 맞고 이번 주(월요일 기준) 것이면 저장, null 이면 지운다. 그 밖(모양이 틀림·다른 주)은 그대로 둔다.
 //    적용 끝에 남은 계획이 이번 주 것이 아니면 지운다(앱을 켜 둔 채 월요일이 된 경우).
+//  · nextWeek: 같은 규칙으로 다음 주(이번 주 월요일 + 7일) 것만. 월요일이 되면 그 계획은 week 로 온다.
 //  · cardio: **오늘 것이고 가져온 적 없는 id** 만.
 //  · 옛 서버의 routine 필드는 보지 않는다.
 function applyClaudePlans(plans, todayStr) {
@@ -326,7 +353,11 @@ function applyClaudePlans(plans, todayStr) {
   var sync = getClaudeSyncState();
   var w = plans ? plans.week : undefined;
   var c = plans && plans.cardio;
+  var nw = plans ? plans.nextWeek : undefined;
+  var thisMon = getWeekStartStr(today);
+  var nextMon = addDaysStr(thisMon, 7);
   var beforeWeek = claudeWeekRev(state.weekPlan);
+  var beforeNext = claudeWeekRev(state.nextWeekPlan);
   if (w === null) {
     state.weekPlan = null;
     try { localStorage.removeItem(KEYS.WEEK_PLAN); } catch (e) {}
@@ -338,8 +369,20 @@ function applyClaudePlans(plans, todayStr) {
     state.weekPlan = null;
     try { localStorage.removeItem(KEYS.WEEK_PLAN); } catch (e) {}
   }
+  if (nw === null) {
+    state.nextWeekPlan = null;
+    try { localStorage.removeItem(KEYS.NEXT_WEEK_PLAN); } catch (e) {}
+  } else if (claudeValidWeek(nw) && nw.weekStart === nextMon) {
+    state.nextWeekPlan = nw;
+    storage.set(KEYS.NEXT_WEEK_PLAN, nw);
+  }
+  if (state.nextWeekPlan && state.nextWeekPlan.weekStart !== nextMon) {
+    state.nextWeekPlan = null;
+    try { localStorage.removeItem(KEYS.NEXT_WEEK_PLAN); } catch (e) {}
+  }
   var nextCardio = (claudeValidCardio(c) && c.date === today && c.id !== sync.lastImportedCardioId) ? c : null;
   var changed = beforeWeek !== claudeWeekRev(state.weekPlan) ||
+                beforeNext !== claudeWeekRev(state.nextWeekPlan) ||
                 (state.claudeCardio ? state.claudeCardio.id : null) !== (nextCardio ? nextCardio.id : null);
   state.claudeCardio = nextCardio;
   return changed;
