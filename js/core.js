@@ -29,6 +29,8 @@ var KEYS = {
   CLAUDE_SYNC: 'fitness_claude_sync',
   // 이번 주 계획 WeekPlan (서버에서 받아 온 것 · 백업 제외). docs/weekly-plan.md
   WEEK_PLAN: 'fitness_week_plan',
+  // 다음 주 계획 WeekPlan (홈 카드 한 줄용 · 서버에서 받아 온 것 · 백업 제외)
+  NEXT_WEEK_PLAN: 'fitness_next_week_plan',
   // 주간 세션 손 편집 { 'weekStart|label': { rev: 세션 updatedAt, exercises } } (백업 제외)
   WEEK_EDITS: 'fitness_week_edits'
 };
@@ -173,7 +175,7 @@ var BACKUP_VERSION = 1;
 
 // 앱 표시 버전 — service-worker.js 의 CACHE_VERSION 과 항상 동일하게 맞춘다(배포 때 둘 다 올림).
 // 더보기 화면 푸터에 노출 + "내 폰이 최신본인가?"를 눈으로 확인하는 단일 기준.
-var APP_VERSION = 'v71';
+var APP_VERSION = 'v72';
 // 백업에 담지 않는 키. 두 부류:
 // (1) 로컬 전용·민감 → 복원해도 그대로 보존 (Claude 연결 코드·동기화 상태)
 // (2) 임시 진행상태·파생 캐시 → 복원 시 정리 (옛 세션/캐시가 새 데이터와 충돌 방지)
@@ -183,6 +185,7 @@ var BACKUP_LOCAL_ONLY_KEYS = [
   KEYS.SYNC_TOKEN,         // 연결 코드 — 새 브라우저에서 더보기 > Claude 연결에 다시 넣는다
   KEYS.CLAUDE_SYNC,        // 이 기기의 전송·가져오기 기록
   KEYS.WEEK_PLAN,          // 이번 주 계획 — 서버에서 다시 받는다
+  KEYS.NEXT_WEEK_PLAN,     // 다음 주 계획 — 서버에서 다시 받는다
   KEYS.WEEK_EDITS          // 주간 세션 손 편집
 ];
 var BACKUP_TRANSIENT_KEYS = [
@@ -668,6 +671,8 @@ var state = {
   generatedRoutine: null,
   // 이번 주 계획 (js/ai.js 가 받아 KEYS.WEEK_PLAN 에 둔다). 없으면 운동 탭은 기본 부위 카드.
   weekPlan: null,
+  // 다음 주 계획 (js/ai.js 가 받아 KEYS.NEXT_WEEK_PLAN 에 둔다). 홈 「이번 주 계획」 카드 한 줄에만 쓴다.
+  nextWeekPlan: null,
   workoutShowBasic: false,      // 계획이 있어도 기본 루틴(부위 카드)을 보는 중 — 저장 안 함
   // Claude 커넥터 (js/ai.js) — 오늘 받아 온, 아직 열지 않은 유산소. 저장하지 않는다(열 때마다 다시 받는다).
   claudeCardio: null,
@@ -858,6 +863,14 @@ function init() {
   } else {
     state.weekPlan = null;
     if (savedWeek) { try { localStorage.removeItem(KEYS.WEEK_PLAN); } catch (e) {} }
+  }
+  // 다음 주 계획 — 모양이 맞고 다음 주(이번 주 월요일 + 7일) 것이 아니면 버린다.
+  var savedNextWeek = storage.get(KEYS.NEXT_WEEK_PLAN, null);
+  if (claudeValidWeek(savedNextWeek) && savedNextWeek.weekStart === addDaysStr(thisWeekStart, 7)) {
+    state.nextWeekPlan = savedNextWeek;
+  } else {
+    state.nextWeekPlan = null;
+    if (savedNextWeek) { try { localStorage.removeItem(KEYS.NEXT_WEEK_PLAN); } catch (e) {} }
   }
   var weekEdits = storage.get(KEYS.WEEK_EDITS, null);
   if (weekEdits && typeof weekEdits === 'object') {

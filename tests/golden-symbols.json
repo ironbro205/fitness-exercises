@@ -1,5 +1,5 @@
 {
-  "functionCount": 455,
+  "functionCount": 458,
   "functions": [
     "_buildRecentSetsMap",
     "addBodyRecord",
@@ -126,6 +126,7 @@
     "claudeFmtUploadAt",
     "claudeInWindow",
     "claudeLastHardestWeight",
+    "claudeNormDate",
     "claudeNum",
     "claudeOwnedEquipmentLabels",
     "claudePendingWorkSets",
@@ -147,6 +148,7 @@
     "claudeWeekSessionExercises",
     "claudeWeightText",
     "claudeWindowCutoff",
+    "claudeWithNormDates",
     "claudeWorkingSets",
     "claudeWorkoutEntry",
     "clearSchemeRestOverrides",
@@ -257,6 +259,7 @@
     "groupVolumeBy",
     "handleRoleButtonKeydown",
     "hardestWeight",
+    "homeNextWeekLineHtml",
     "homeWeekPlanCardHtml",
     "icon",
     "init",

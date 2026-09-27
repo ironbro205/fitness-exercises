@@ -761,22 +761,61 @@ test('저장된 플랜 — 이번 주·다음 주 계획과 오늘 유산소만'
   assert.ok(empty.includes('이번 주 계획이 없어요.'));
 });
 
-test('getAppPlans — 이번 주 계획만 week로, 다음 주 계획은 안 오고, 유산소는 오늘 것만', async () => {
+test('getAppPlans — 이번 주 계획은 week로, 다음 주 계획은 week에 섞이지 않고, 유산소는 오늘 것만', async () => {
   var store = fakeStore({ [KEY_SNAPSHOT]: snapshot() });
   var sun = createTools({ store: store, now: at(NOW), uuid: seq('a-') });
-  assert.deepEqual(await sun.getAppPlans(), { week: null, cardio: null });
+  assert.deepEqual(await sun.getAppPlans(), { week: null, nextWeek: null, cardio: null });
   await sun.saveWeekPlan(weekInput());   // Sunday → next week (a-1)
-  assert.deepEqual(await sun.getAppPlans(), { week: null, cardio: null }, '다음 주 계획은 오지 않는다');
+  assert.equal((await sun.getAppPlans()).week, null, '다음 주 계획은 week 로 오지 않는다');
   await sun.saveWeekPlan(weekInput({ week: 'this' })); // a-2
   await sun.saveTodayCardio({ mode: 'walk', title: '걷기', segments: [{ type: 'walk', sec: 600, speed: 5, incline: 8 }] });
   var plans = await sun.getAppPlans();
-  assert.deepEqual(Object.keys(plans).sort(), ['cardio', 'week']);
+  assert.deepEqual(Object.keys(plans).sort(), ['cardio', 'nextWeek', 'week']);
   assert.equal(plans.week.id, 'a-2');
   assert.equal(plans.week.weekStart, THIS_MON);
   assert.equal(plans.cardio.title, '걷기');
   var monday = await createTools({ store: store, now: at('2026-09-27T15:00:00.000Z') }).getAppPlans();
   assert.equal(monday.week.id, 'a-1', '월요일이 되면 그 주 계획');
   assert.equal(monday.cardio, null, '어제 유산소는 안 온다');
+});
+
+test('getAppPlans — 다음 주 계획을 nextWeek 로 준다', async () => {
+  var store = fakeStore({ [KEY_SNAPSHOT]: snapshot() });
+  var sun = createTools({ store: store, now: at(NOW), uuid: seq('n-') });
+  await sun.saveWeekPlan(weekInput());   // Sunday → next week (n-1)
+  var plans = await sun.getAppPlans();
+  assert.equal(plans.week, null);
+  assert.equal(plans.nextWeek.id, 'n-1');
+  assert.equal(plans.nextWeek.weekStart, NEXT_MON);
+  // 평일에도 다음 주 계획이 있으면 준다
+  var wed = await createTools({ store: store, now: at('2026-09-23T03:00:00.000Z') }).getAppPlans();
+  assert.equal(wed.nextWeek.id, 'n-1');
+});
+
+test('getAppPlans — 다음 주 계획이 없으면 nextWeek 는 null', async () => {
+  var store = fakeStore({ [KEY_SNAPSHOT]: snapshot() });
+  var sun = createTools({ store: store, now: at(NOW), uuid: seq('m-') });
+  await sun.saveWeekPlan(weekInput({ week: 'this' }));
+  var plans = await sun.getAppPlans();
+  assert.equal(plans.week.id, 'm-1');
+  assert.equal(plans.nextWeek, null);
+  // 월요일이 되면 그 주 계획은 week 로 오고, 그다음 주 계획이 없으면 nextWeek 는 null
+  await sun.saveWeekPlan(weekInput());   // Sunday → next week (m-2)
+  var monday = await createTools({ store: store, now: at('2026-09-27T15:00:00.000Z') }).getAppPlans();
+  assert.equal(monday.week.id, 'm-2');
+  assert.equal(monday.nextWeek, null);
+});
+
+test('getAppPlans — 다다음 주 계획은 주지 않는다', async () => {
+  var store = fakeStore({ [KEY_SNAPSHOT]: snapshot() });
+  var sun = createTools({ store: store, now: at(NOW), uuid: seq('f-') });
+  await sun.saveWeekPlan(weekInput());   // next week (f-1)
+  var far = Object.assign({}, await store.getJSON(weekKey(NEXT_MON)), { id: 'far', weekStart: kstAddDays(NEXT_MON, 7) });
+  await store.setJSON(weekKey(kstAddDays(NEXT_MON, 7)), far);
+  store.map.delete(weekKey(NEXT_MON));
+  var plans = await sun.getAppPlans();
+  assert.equal(plans.week, null);
+  assert.equal(plans.nextWeek, null, '다다음 주 계획이 nextWeek 로 왔다');
 });
 
 test('비슷한 이름 — 문자 겹침이 없으면 제안하지 않는다', () => {

@@ -1,5 +1,6 @@
-// GET /api/plan — the app fetches its saved plans: { week, cardio }.
-// week = the plan of the KST week (Mon–Sun) containing today, cardio = today's (KST) cardio plan; each null if none.
+// GET /api/plan — the app fetches its saved plans: { week, nextWeek, cardio }.
+// week = the plan of the KST week (Mon–Sun) containing today, nextWeek = the plan of the week after it,
+// cardio = today's (KST) cardio plan; each null if none.
 // 401 wrong/missing code (or server token not configured).
 import { checkBearer } from './_lib/auth.mjs';
 import { getStore } from './_lib/store.mjs';
@@ -16,7 +17,7 @@ export async function handlePlan(request) {
   if (!checkBearer(request)) return json(401, { error: 'unauthorized' });
   try {
     var plans = await createTools({ store: getStore() }).getAppPlans();
-    return json(200, { week: plans.week, cardio: plans.cardio });
+    return json(200, { week: plans.week, nextWeek: plans.nextWeek, cardio: plans.cardio });
   } catch (e) {
     console.error('plan store error:', e && e.message);
     return json(500, { error: 'store_error' });

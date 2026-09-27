@@ -1471,3 +1471,220 @@ test('끝난 세션이 계획에서 빠진 경우 — 끝난 줄(✓·요일)로
   app.setTab('home');
   assert.ok(app.renderHome().includes('>1 / 5<'), '끝낸 1 / 전체 4+1');
 });
+
+// ═══ 14. 다음 주 계획 준비 표시 (지시서 v72 · 1절) ═══
+function nextWeekPlan(app, over) {
+  const ws = app.getWeekStartStr(app.getTodayStr());
+  return fourDayWeek(app, Object.assign({ id: 'nx-1', days: 3, weekStart: app.addDaysStr(ws, 7) }, over || {}));
+}
+
+test('applyClaudePlans — nextWeek: 다음 주 것이면 저장, 같은 id·updatedAt 이면 안 바뀜', () => {
+  const app = loadApp();
+  assert.equal(app.applyClaudePlans({ week: null, nextWeek: nextWeekPlan(app), cardio: null }), true);
+  assert.equal(app.state.nextWeekPlan.id, 'nx-1');
+  assert.equal(app.storage.get(app.KEYS.NEXT_WEEK_PLAN).id, 'nx-1', '기기에 저장');
+  assert.equal(app.KEYS.NEXT_WEEK_PLAN, 'fitness_next_week_plan');
+  assert.equal(app.state.weekPlan, null, '다음 주 계획은 이번 주 계획으로 쓰지 않는다');
+  assert.equal(app.applyClaudePlans({ week: null, nextWeek: nextWeekPlan(app), cardio: null }), false, 'id·updatedAt 이 같으면 안 바뀜');
+  assert.equal(app.applyClaudePlans({ week: null, nextWeek: nextWeekPlan(app, { updatedAt: REV2 }), cardio: null }), true, 'updatedAt 이 바뀌면 바뀜');
+  assert.equal(app.applyClaudePlans({ week: null, nextWeek: nextWeekPlan(app, { id: 'nx-2', updatedAt: REV2 }), cardio: null }), true, 'id 가 바뀌면 바뀜');
+});
+
+test('applyClaudePlans — nextWeek: null 이면 지운다', () => {
+  const app = loadApp();
+  app.applyClaudePlans({ week: null, nextWeek: nextWeekPlan(app), cardio: null });
+  assert.equal(app.applyClaudePlans({ week: null, nextWeek: null, cardio: null }), true);
+  assert.equal(app.state.nextWeekPlan, null);
+  assert.equal(app.localStorage.getItem('fitness_next_week_plan'), null);
+});
+
+test('applyClaudePlans — nextWeek: 다른 주·모양이 틀린 응답·필드 없음은 무시(기존 유지)', () => {
+  const app = loadApp();
+  const ws = app.getWeekStartStr(app.getTodayStr());
+  app.applyClaudePlans({ week: null, nextWeek: nextWeekPlan(app), cardio: null });
+  assert.equal(app.applyClaudePlans({ week: null, nextWeek: nextWeekPlan(app, { id: 'this', weekStart: ws }), cardio: null }), false);
+  assert.equal(app.applyClaudePlans({ week: null, nextWeek: nextWeekPlan(app, { id: 'far', weekStart: app.addDaysStr(ws, 14) }), cardio: null }), false);
+  assert.equal(app.applyClaudePlans({ week: null, nextWeek: nextWeekPlan(app, { id: 'bad', sessions: [] }), cardio: null }), false);
+  assert.equal(app.applyClaudePlans({ week: null, cardio: null }), false, '옛 서버(nextWeek 필드 없음)');
+  assert.equal(app.state.nextWeekPlan.id, 'nx-1');
+  assert.equal(app.storage.get(app.KEYS.NEXT_WEEK_PLAN).id, 'nx-1');
+  // 처음부터 다른 주면 받지 않는다
+  const b = loadApp();
+  b.applyClaudePlans({ week: null, nextWeek: nextWeekPlan(b, { weekStart: ws }), cardio: null });
+  assert.equal(b.state.nextWeekPlan, null);
+  assert.equal(b.storage.get(b.KEYS.NEXT_WEEK_PLAN), null);
+});
+
+test('applyClaudePlans — 월요일로 넘어가면 지난 nextWeek 는 버린다 (그 계획은 week 로 온다)', () => {
+  const app = loadApp();
+  const ws = app.getWeekStartStr(app.getTodayStr());
+  const nextMon = app.addDaysStr(ws, 7);
+  app.applyClaudePlans({ week: null, nextWeek: nextWeekPlan(app), cardio: null });
+  // 켜 둔 채 월요일: 서버는 그 계획을 week 로, nextWeek 는 없음(null)
+  const changed = app.applyClaudePlans({ week: nextWeekPlan(app), nextWeek: null, cardio: null }, nextMon);
+  assert.equal(changed, true);
+  assert.equal(app.state.weekPlan.id, 'nx-1', '그 계획은 이번 주 계획으로');
+  assert.equal(app.state.nextWeekPlan, null);
+  assert.equal(app.localStorage.getItem('fitness_next_week_plan'), null);
+  // nextWeek 필드가 오지 않아도(모양 틀림·옛 서버) 지난 nextWeek 는 버린다
+  const b = loadApp();
+  b.applyClaudePlans({ week: null, nextWeek: nextWeekPlan(b), cardio: null });
+  assert.equal(b.applyClaudePlans({ week: null, cardio: null }, nextMon), true);
+  assert.equal(b.state.nextWeekPlan, null);
+  assert.equal(b.localStorage.getItem('fitness_next_week_plan'), null);
+});
+
+test('init — 저장된 다음 주 계획: 다음 주 것이면 되살리고, 아니면(다른 주·모양 틀림) 버린다 · 백업 제외', () => {
+  const app = loadApp();
+  const ws = app.getWeekStartStr(app.getTodayStr());
+  app.storage.set(app.KEYS.NEXT_WEEK_PLAN, nextWeekPlan(app));
+  app.init();
+  assert.equal(app.state.nextWeekPlan.id, 'nx-1', '다음 주 계획은 되살린다');
+
+  app.storage.set(app.KEYS.NEXT_WEEK_PLAN, nextWeekPlan(app, { weekStart: ws }));
+  app.init();
+  assert.equal(app.state.nextWeekPlan, null, '이번 주 날짜의 계획을 다음 주로 되살렸다');
+  assert.equal(app.localStorage.getItem('fitness_next_week_plan'), null);
+
+  app.storage.set(app.KEYS.NEXT_WEEK_PLAN, nextWeekPlan(app, { sessions: [] }));
+  app.init();
+  assert.equal(app.state.nextWeekPlan, null, '모양이 틀린 계획을 되살렸다');
+  assert.equal(app.localStorage.getItem('fitness_next_week_plan'), null);
+
+  app.storage.set(app.KEYS.NEXT_WEEK_PLAN, nextWeekPlan(app));
+  app.init();
+  const backup = app.buildBackupObject();
+  assert.equal(backup.data.fitness_next_week_plan, undefined, '백업에 담겼다');
+  assert.ok(app.BACKUP_LOCAL_ONLY_KEYS.includes('fitness_next_week_plan'));
+});
+
+const NEXT_LINE = '다음 주 계획 준비됨 · ';
+
+test('홈 카드 — 이번 주 계획 없음: 다음 주 계획이 있으면 맨 아래 한 줄(누를 수 없는 글자 줄)', () => {
+  const app = loadApp();
+  app.setTab('home');
+  assert.ok(!app.renderHome().includes(NEXT_LINE), '다음 주 계획이 없는데 줄이 있다');
+  app.applyClaudePlans({ week: null, nextWeek: nextWeekPlan(app), cardio: null });
+  const html = app.renderHome();
+  assert.ok(html.includes(NEXT_LINE + '3일</p>'));
+  // 카드 맨 아래 — 줄 뒤에 카드가 닫힌다
+  const at = html.indexOf(NEXT_LINE);
+  assert.ok(html.indexOf('계획이 없어요') < at);
+  assert.ok(html.slice(at).startsWith(NEXT_LINE + '3일</p></div></div>'), '카드 맨 아래가 아니다');
+  // 누를 수 없는 글자 줄 — onclick·role·tabindex 없음, 카드도 눌리지 않는다
+  const tag = html.slice(html.lastIndexOf('<p', at), at);
+  assert.ok(!/onclick|role=|tabindex/.test(tag), '누를 수 있는 줄: ' + tag);
+  assert.ok(!html.includes('openWeekPlanFromHome()'), '이번 주 계획이 없는데 카드가 눌린다');
+  // 운동 탭에는 넣지 않는다
+  app.setTab('workout');
+  assert.ok(!app.renderWorkout().includes(NEXT_LINE));
+});
+
+test('홈 카드 — 이번 주 계획 있음: 다음 주 계획이 있으면 같은 자리(맨 아래) 한 줄, 없으면 없다', () => {
+  const app = loadApp();
+  app.setTab('home');
+  app.applyClaudePlans({ week: fourDayWeek(app), cardio: null });
+  assert.ok(!app.renderHome().includes(NEXT_LINE), '다음 주 계획이 없는데 줄이 있다');
+  app.applyClaudePlans({ week: fourDayWeek(app), nextWeek: nextWeekPlan(app, { days: 5 }), cardio: null });
+  const html = app.renderHome();
+  const at = html.indexOf(NEXT_LINE);
+  assert.ok(at !== -1);
+  assert.ok(html.slice(at).startsWith(NEXT_LINE + '5일</p></div></div>'), '카드 맨 아래가 아니다');
+  assert.ok(html.indexOf('openWeekPlanFromHome()') < at, '카드 안에 있다');
+  // 카드 전체 동작만 — 줄에는 따로 onclick·role·tabindex 가 없다
+  assert.ok(!/onclick|role=|tabindex/.test(html.slice(html.lastIndexOf('<p', at), at)));
+  app.setTab('workout');
+  assert.ok(!app.renderWorkout().includes(NEXT_LINE), '운동 탭에 들어갔다');
+});
+
+test('홈 카드 다음 주 줄 — 문구 · 흐린 글자색(주황 아님) · 11px', () => {
+  const app = loadApp();
+  app.setTab('home');
+  app.applyClaudePlans({ week: null, nextWeek: nextWeekPlan(app, { days: 4 }), cardio: null });
+  const html = app.renderHome();
+  const at = html.indexOf(NEXT_LINE);
+  const tag = html.slice(html.lastIndexOf('<p', at), at);
+  assert.ok(html.includes(NEXT_LINE + '4일</p>'));
+  assert.ok(/class="[^"]*text-\[11px\]/.test(tag), '11px: ' + tag);
+  assert.ok(/class="[^"]*text-stone-500/.test(tag), '흐린 글자색: ' + tag);
+  assert.ok(!/accent|--warn|--danger|--success|--purple/.test(tag), '강조색: ' + tag);
+});
+
+// ═══ 15. 스냅샷 날짜 정리 (지시서 v72 · 2절) ═══
+test('claudeNormDate — 두 자리 그대로 · 한 자리 채움 · ISO 시각은 앞 10자 · 그 밖은 null', () => {
+  const app = loadApp();
+  assert.equal(app.claudeNormDate('2026-09-25'), '2026-09-25');
+  assert.equal(app.claudeNormDate('2026-9-5'), '2026-09-05');
+  assert.equal(app.claudeNormDate('2026-10-5'), '2026-10-05');
+  assert.equal(app.claudeNormDate('2026-9-25'), '2026-09-25');
+  assert.equal(app.claudeNormDate('2026-09-25T10:20:30.000Z'), '2026-09-25');
+  assert.equal(app.claudeNormDate('2026-09-25T00:00'), '2026-09-25');
+  for (const bad of ['', null, undefined, 20260925, 1759000000000, 'abc', '2026-02-30', '2026-13-01', '2026-00-10',
+    '2026-09-25x', ' 2026-09-25', '2026/09/25', '26-09-25', '2026-9-5T10:00', '2026-02-30T00:00:00Z', {}, true]) {
+    assert.equal(app.claudeNormDate(bad), null, JSON.stringify(bad));
+  }
+});
+
+test('스냅샷 — 이상한 날짜 기록 1건이 섞여도 서버 검사를 통과: 한 자리 월·일은 채워 남고 망가진 기록만 빠진다', () => {
+  const app = loadApp();
+  const d = (n) => kstDaysAgo(app, n);
+  // 창 안에서 일(日)이 한 자리인 날짜를 고른다 → 'YYYY-M-D' 모양으로 만든다
+  let n = 3;
+  while (Number(d(n).slice(8)) >= 10) n++;
+  const padded = d(n);
+  const [y, m, dd] = padded.split('-');
+  const unpadded = y + '-' + Number(m) + '-' + Number(dd);
+  assert.notEqual(unpadded, padded);
+  const ex = (name, w) => [{ name, setsDetail: [{ weight: w, reps: 10, isWarmup: false, completed: true }] }];
+  app.state.profile = { age: 37, height: 170, weight: 77.5 };
+  app.state.data.conditionLog = [];
+  app.state.data.workoutLog = [
+    { id: 'ok', startTime: 5, date: d(1), sessionType: 'push', sessionName: 'PUSH', duration: 50, exercises: ex('머신 체스트 프레스', 60) },
+    { id: 'short', startTime: 4, date: unpadded, sessionType: 'pull', sessionName: 'PULL', duration: 40, exercises: ex('바벨 컬', 30) },
+    { id: 'iso', startTime: 3, date: d(2) + 'T10:00:00.000Z', sessionType: 'legs', sessionName: 'LEGS', duration: 45, exercises: ex('레그 프레스', 120) },
+    { id: 'bad', startTime: 2, date: '2026-02-30', sessionType: 'push', sessionName: 'BAD', duration: 30, exercises: ex('덤벨 숄더 프레스', 20) },
+    { id: 'junk', startTime: 1, date: 'abc', sessionType: 'push', sessionName: 'JUNK', duration: 30, exercises: ex('덤벨 숄더 프레스', 22) },
+    { id: 'old', startTime: 0, date: '2020-1-5', sessionType: 'pull', sessionName: 'PULL', duration: 40, exercises: ex('시티드 케이블 로우', 50) },
+    { id: 'oldbad', startTime: 0, date: 12345, sessionType: 'pull', sessionName: 'PULL', duration: 40, exercises: ex('랫 풀 다운', 50) },
+  ];
+  app.state.data.cardioLog = [
+    { id: 'c1', date: unpadded, mode: 'walk', totalSec: 600, segments: [{ type: 'walk', sec: 600, targetSpeed: 5, incline: 8 }] },
+    { id: 'c2', date: '', mode: 'walk', totalSec: 600, segments: [{ type: 'walk', sec: 600, targetSpeed: 5, incline: 8 }] },
+    { id: 'c3', date: '2026-99-99', mode: 'interval', totalSec: 600, segments: [] },
+  ];
+  app.state.data.bodyLog = [
+    { date: unpadded, weight: 77, bodyFat: null },
+    { date: 'nope', weight: 76, bodyFat: null },
+    { date: d(1) + 'T08:00:00+09:00', weight: 77.5, bodyFat: 17 },
+  ];
+  app._lastSetsCache = null;
+  const snap = plain(app.buildClaudeSnapshot());
+  assert.equal(validateSnapshot(snap), null, '서버 검사 통과');
+  assert.deepEqual(snap.workouts.map((w) => w.sessionName).sort(), ['LEGS', 'PULL', 'PUSH'], '망가진 기록만 빠진다');
+  assert.ok(snap.workouts.some((w) => w.date === padded && w.sessionName === 'PULL'), '한 자리 월·일은 두 자리로');
+  assert.ok(snap.workouts.some((w) => w.date === d(2) && w.sessionName === 'LEGS'), 'ISO 시각은 앞 10자');
+  assert.deepEqual(snap.olderLastPerformed.map((o) => [o.name, o.date]), [['시티드 케이블 로우', '2020-01-05']], '창 밖 기록도 정리');
+  assert.deepEqual(snap.cardio.map((c) => c.date), [padded]);
+  assert.deepEqual(snap.body.map((b) => b.date), [d(1), padded]);
+  // 원본 기록은 건드리지 않는다
+  assert.equal(app.state.data.workoutLog[1].date, unpadded);
+});
+
+test('스냅샷 — 8주 창 비교도 정규화된 날짜로 (한 자리 날짜가 창 경계에서 잘못 빠지거나 들어오지 않는다)', () => {
+  const app = loadApp();
+  const d = (n) => kstDaysAgo(app, n);
+  const unpad = (s) => { const [y, m, dd] = s.split('-'); return y + '-' + Number(m) + '-' + Number(dd); };
+  app.state.profile = { age: 37, height: 170, weight: 77.5 };
+  app.state.data.conditionLog = []; app.state.data.cardioLog = []; app.state.data.bodyLog = [];
+  app.state.data.workoutLog = [
+    { id: 'in', startTime: 2, date: unpad(d(55)), sessionType: 'push', sessionName: 'IN', duration: 50,
+      exercises: [{ name: '머신 체스트 프레스', setsDetail: [{ weight: 60, reps: 8, isWarmup: false, completed: true }] }] },
+    { id: 'out', startTime: 1, date: unpad(d(56)) + '', sessionType: 'pull', sessionName: 'OUT', duration: 50,
+      exercises: [{ name: '바벨 컬', setsDetail: [{ weight: 30, reps: 10, isWarmup: false, completed: true }] }] },
+  ];
+  app._lastSetsCache = null;
+  const snap = plain(app.buildClaudeSnapshot());
+  assert.equal(validateSnapshot(snap), null);
+  assert.deepEqual(snap.workouts.map((w) => [w.sessionName, w.date]), [['IN', d(55)]]);
+  assert.deepEqual(snap.olderLastPerformed.map((o) => [o.name, o.date]), [['바벨 컬', d(56)]]);
+});

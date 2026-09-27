@@ -122,6 +122,7 @@ function homeWeekPlanCardHtml(idleMsg) {
           '<p class="text-xs uppercase tracking-widest text-stone-500 font-mono mb-1">이번 주 계획</p>' +
           '<p class="text-sm text-stone-400 mt-2">계획이 없어요</p>' +
           idleLine +
+          homeNextWeekLineHtml() +
         '</div>' +
       '</div>';
   }
@@ -145,8 +146,18 @@ function homeWeekPlanCardHtml(idleMsg) {
         '</div>' +
         remainLine +
         idleLine +
+        homeNextWeekLineHtml() +
       '</div>' +
     '</div>';
+}
+
+// 홈 「이번 주 계획」 카드 맨 아래 한 줄 — 다음 주 계획이 받아져 있을 때만. 누를 수 없는 글자 줄
+// (이번 주 계획이 있으면 카드 전체가 운동 탭으로 보낸다).
+function homeNextWeekLineHtml() {
+  var next = state.nextWeekPlan;
+  if (!next) return '';
+  return '<p class="text-[11px] font-mono text-stone-500 mt-3">' +
+    '다음 주 계획 준비됨 · ' + escapeHtml(next.days) + '일</p>';
 }
 
 // ═══════════════════════════════════════════════
