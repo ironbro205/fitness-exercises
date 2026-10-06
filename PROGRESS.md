@@ -321,3 +321,10 @@ _다음 세션 재개: "헬스앱 작업 이어서 해줘" — 첫 할 일: 사�
 - `53f5705` — feat: progressive overload engine v2 — exercise classes + rep-range guardrails
 
 _다음 세션 재개: **★"트래커→코치" 개편 전체 종료(2026-07-14)** — 1단계(과부하 엔진+운동중 UX, v35~36) · 2단계(종목 안전 77종목+VETO+Sonnet 5, v37) · 3단계(세트 사이 채팅+통증 피드백 루프, v38) · 핫픽스 2건(v39 getResponseText / v40 thinking disabled) 전부 main 병합·운영 배포·**사용자 폰 QA 통과("이제 잘 된다")**. 현재 운영 = v40. 다음 후보(사용자 지시 대기): ①**Opus 전환 재평가**(개편 완료 조건 충족 — 코치 1마디 Sonnet 5 ~30원 vs Opus ~45원, thinking 끈 상태 기준 재산정 필요) ②Phase B 잔여(fetchAIRecommendation·analyzePlateauWithAI 지식 주입) ③3단계 실사용 피드백 수집(채팅 추출 정확도·painFlag 게이트 체감). ⚠️신규 sonnet-5 호출 = thinking disabled 세트 + getResponseText 필수(세션22 교훈). 반려 확정: 서버 프록시 X·부상 하드코딩 X(기억 노트 유지)._
+
+## 변경 이력(CLAUDE.md에서 이동)
+
+| 날짜 | 변경 내용 | 대상 | 사유 |
+|------|----------|------|------|
+| 2026-06-13 | 초기 구성 (스킬 3 + QA 체크리스트 + 분리 목표 구조) | `.claude/skills/healthapp-*`, `.claude/QA_CHECKLIST.md`, `CLAUDE.md` | 비개발자용 헬스앱 작업 하네스 |
+| 2026-06-13 | index.html 분리 완료 (CSS + JS 5파일, 빌드 없음) | `index.html`, `css/`, `js/`, `service-worker.js`, `tests/` | 단일 11k줄 → 탐색·수정 쉬운 구조 |
