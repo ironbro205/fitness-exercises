@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **The AI coach is Claude, not the app.** The user's phone Claude app (Opus) reads the training record through a remote MCP connector in this repo (`api/`) and saves **the week's weight plan** (3–5 sessions the user picks from day by day) and today's cardio plan; the app fetches those plans and runs them as written. **The app records and executes; it makes no AI calls** (no API key, no in-app model calls, no coaching screens). See **Claude 커넥터** below, `docs/claude-connector-plan.md`, and `docs/weekly-plan.md` (weekly plan — supersedes decision 6 of the connector plan).
 
-The five tabs are **홈 · 운동 · 러닝 · 기록 · 더보기**. There is **no food/nutrition feature** — it was removed in the remake, so ignore any older reference to a "연료" tab, `FOOD_DB`, or food analysis.
+The five tabs are **홈 · 운동 · 러닝 · 기록 · 더보기**. There is **no food/nutrition feature**.
 
 The app is **plain static files, no build step** — a thin `index.html` shell plus `css/styles.css` and six `js/*.js` files. No framework. The only server code is the connector (`api/*.mjs`, Vercel functions) with its own `package.json`; the app files never import it. Logic is guarded by a small zero-dependency test harness (see Running & testing).
 
@@ -82,9 +82,9 @@ The user's tracked data lives in `state.data`: `workoutLog`, `cardioLog`, `perso
 - Set schemes / rest / supersets: `SET_SCHEMES`, `SET_ROLE_KR`, `REST_*`, `SUPERSET_*`.
 - Cardio & mobility: `WALK_PRESCRIPTION`, `MOBILITY_DRILLS`.
 
-**Progressive-overload / 1RM engine:** `calculate1RM`, `get1RM` / `update1RM`, `getProgressiveRecommendation`, `suggestWorkingWeight`, `estimate1RMFromPart`, `initializeOneRMData`. This drives the weight recommendations for the **base template path** (부위 카드 → `SESSIONS`) (#11 switched these from a fixed scheme to progressive overload). Claude routines bypass it — their sets run exactly as saved.
+**Progressive-overload / 1RM engine:** `calculate1RM`, `get1RM` / `update1RM`, `getProgressiveRecommendation`, `suggestWorkingWeight`, `estimate1RMFromPart`, `initializeOneRMData`. This drives the weight recommendations for the **base template path** (부위 카드 → `SESSIONS`). Claude routines bypass it — their sets run exactly as saved.
 
-**Dates are KST-based.** `getTodayStr` / `getDateStr` apply a +9h offset so the "day" rolls over at Korean midnight, not UTC. Use these helpers (not raw `new Date()`) for anything day-bucketed — weekly counts, "today" filters, etc. Several past bugs (#9, #10) came from timezone edges.
+**Dates are KST-based.** `getTodayStr` / `getDateStr` apply a +9h offset so the "day" rolls over at Korean midnight, not UTC. Use these helpers (not raw `new Date()`, which rolls the day over at UTC midnight) for anything day-bucketed — weekly counts, "today" filters, etc.
 
 ## Claude 커넥터
 
@@ -103,7 +103,7 @@ Design docs (source of truth): `docs/claude-connector-plan.md` + `docs/weekly-pl
 - Snapshot: `{schemaVersion:1, uploadedAt, todayKst, appVersion, profile:{age,heightCm,weightKg}, equipment[], workouts[] (last 56 days, newest first; plan sessions carry planWeek/planLabel/planType), olderLastPerformed[], cardio[] (56 days), body[] (56 days + last one before), catalog:{push,pull,legs,upper,free}, weekSets:{weekStart, byGroup}, muscleWeights:{name:{group:1|0.5}}}`. **Raw data only** — no recommended weight, 1RM, plateau, weak parts, target sets, or volume verdicts. The only counted values are `weekSets` (this week's working sets per group, the same number the app shows) and the per-exercise `muscleWeights` table they are counted with (`exerciseGroupWeights` / `getWeekGroupSets` in `js/domain.js` are the source of truth).
 - `WeekPlan = {id, createdAt, updatedAt, weekStart(Monday), days(3|4|5), deload, note, targets:{group:sets}, sessions:[{label, type(full|upper|lower|push|pull), note, updatedAt, exercises:[{name, note, sets:[{weight, reps(string), warmup, restSec}]}]}]}` — one per week (Blob `fitness/week/<weekStart>.json`); sessions already done that week (per the latest snapshot) are kept by the server and cannot be changed. `CardioPlan = {id, createdAt, date, mode, title, note, segments:[{type, sec, speed, incline}]}` — saving overwrites.
 
-**Guide text.** claude.ai ignores server `instructions`, so the coach guide is returned inside the `get_training_context` result. **Edit it only in `api/_lib/guide.mjs`** (minimal guide — design doc decision 6).
+**Guide text.** claude.ai ignores server `instructions`, so the coach guide is returned inside the `get_training_context` result. **Edit it only in `api/_lib/guide.mjs`** (policy: `docs/weekly-plan.md`).
 
 **Changing tools.** After a deploy that adds/removes/renames MCP tools, claude.ai keeps the old tool list (even with `ttlMs` 0 and in new chats). Tell the user to disconnect and reconnect the connector in claude.ai Settings > Connectors (web). Changing only tool behavior or the guide text needs no reconnect.
 
@@ -135,7 +135,7 @@ Picking a week session (운동 탭 cards, ordered so sessions not overlapping th
 1. 이 저장소는 **Tailwind 를 쓰지 않는다.** `px-5`·`mt-4` 같은 이름은 `css/styles.css` 에 손으로 적어 둔 것이다.
    **CSS 에 없는 이름을 쓰면 오류도 경고도 없이 아무 일도 안 일어난다.** 새 클래스를 쓰기 전에 정의가 있는지 본다.
 2. **HTML 의 `class` 속성에는 백슬래시를 쓰지 않는다.** `class="mt-0.5"` 로 쓰고, CSS 쪽에서만 `.mt-0\.5` 로 이스케이프한다.
-   `class="mt-0\.5"` 는 클래스 이름 자체가 `mt-0\.5` 라 `.mt-0\.5`(= 이름 `mt-0.5`)와 **영원히** 안 맞는다(51곳이 이래서 여백 0 이었다).
+   `class="mt-0\.5"` 는 클래스 이름 자체가 `mt-0\.5` 라 `.mt-0\.5`(= 이름 `mt-0.5`)와 **영원히** 안 맞는다.
 3. 화면 맨 위에서 시작하는 여백은 `calc(48px + env(safe-area-inset-top, 0px))` 을 쓴다.
    `viewport-fit=cover` 라 폰에서는 상태바가 화면 위에 겹쳐 온다 — 한쪽만 보정하면 화면을 오갈 때 상단이 튄다.
    (1·2·3 전부 `디자인 규칙 —` 테스트가 파일:줄 로 잡는다.)
@@ -168,7 +168,7 @@ The five canonical triage roles use their default label strings (`needs-triage`,
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root (not created yet — produced lazily by `/grill-with-docs`). See `docs/agents/domain.md`.
 
-## Code map (post-split)
+## Code map
 
 Plain scripts loaded in this order (later files may call earlier ones; the tail of `screens.js` runs `init()`):
 
@@ -196,7 +196,7 @@ api/plan.mjs        → GET this week's plan + today's cardio           api/_lib
 scripts/dev-server.mjs → local dev server only (static + api/, memory store)
 ```
 
-Each `js/*.js` begins with `'use strict'` (the original was one strict script — preserve this). When adding a new static file, add it to `service-worker.js` `CORE_ASSETS` and bump `CACHE_VERSION`. The split was pure code movement (line-for-line identical, just regrouped); classification is for navigation only.
+Each `js/*.js` begins with `'use strict'` (preserve this). When adding a new static file, add it to `service-worker.js` `CORE_ASSETS` and bump `CACHE_VERSION`.
 
 ## 하네스: 헬스앱
 
@@ -209,13 +209,7 @@ Each `js/*.js` begins with `'use strict'` (the original was one strict script �
 - 모든 코드 작업의 완료 조건 → `.claude/QA_CHECKLIST.md`
 - 단순 질문·설명·사소한 한 줄 수정은 스킬 없이 직접 응답.
 
-**실행 원칙 (전역 규칙 우선):** 구현은 **메인 Claude 직접도, `Workflow` 도구·서브에이전트 병렬 위임도 자유**(울트라코드 우선). `Workflow`는 완료를 스스로 추적하므로 옛 Stop hook 버그(#33049)에 영향받지 않는다 — 추적 안 되는 background plain executor 직접 spawn만 피한다. 외부 리뷰는 Codex가 담당. 새 기능·다중 파일 수정·배포는 **dev-pipeline** 게이트를 거친다.
-
-**변경 이력:**
-| 날짜 | 변경 내용 | 대상 | 사유 |
-|------|----------|------|------|
-| 2026-06-13 | 초기 구성 (스킬 3 + QA 체크리스트 + 분리 목표 구조) | `.claude/skills/healthapp-*`, `.claude/QA_CHECKLIST.md`, `CLAUDE.md` | 비개발자용 헬스앱 작업 하네스 |
-| 2026-06-13 | index.html 분리 완료 (CSS + JS 5파일, 빌드 없음) | `index.html`, `css/`, `js/`, `service-worker.js`, `tests/` | 단일 11k줄 → 탐색·수정 쉬운 구조 |
+**실행 원칙 (전역 규칙 우선):** 구현은 **메인 Claude 직접도, `Workflow` 도구·서브에이전트 병렬 위임도 자유**다. 추적되지 않는 background plain executor 를 직접 spawn 하는 것만 피한다(`Workflow`는 완료를 스스로 추적한다). 새 기능·다중 파일 수정·배포는 구현 → verifier 검증 → 검사(테스트) → 수동 QA → 사용자 승인 후 커밋 순서로 한다.
 
 ## 작업 규칙
 
