@@ -209,7 +209,7 @@ Each `js/*.js` begins with `'use strict'` (preserve this). When adding a new sta
 - 모든 코드 작업의 완료 조건 → `.claude/QA_CHECKLIST.md`
 - 단순 질문·설명·사소한 한 줄 수정은 스킬 없이 직접 응답.
 
-**실행 원칙 (전역 규칙 우선):** 구현은 **메인 Claude 직접도, `Workflow` 도구·서브에이전트 병렬 위임도 자유**다. 추적되지 않는 background plain executor 를 직접 spawn 하는 것만 피한다(`Workflow`는 완료를 스스로 추적한다). 새 기능·다중 파일 수정·배포는 구현 → verifier 검증 → 검사(테스트) → 수동 QA → 사용자 승인 후 커밋 순서로 한다.
+**실행 원칙 (전역 규칙 우선):** 구현은 전역 규칙대로 역할 이름으로 맡긴다(주 Claude 는 설계·검산). 독립 작업은 `Workflow` 도구·서브에이전트로 병렬로 나눠도 된다. 추적되지 않는 background plain executor 를 직접 spawn 하는 것만 피한다(`Workflow`는 완료를 스스로 추적한다). 새 기능·다중 파일 수정·배포는 구현 → verifier 검증 → 검사(테스트) → 수동 QA → 사용자 승인 후 커밋 순서로 한다.
 
 ## 작업 규칙
 
