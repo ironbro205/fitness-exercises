@@ -135,7 +135,9 @@ var mcpHandler = createMcpHandler(function (server) {
     return tools().getSavedPlans();
   });
 }, {
-  serverInfo: { name: 'fitness-coach', version: '1.0.0' }
+  serverInfo: { name: 'fitness-coach', version: '1.0.0' },
+  // Refuse subscriptions/listen at once: claude.ai's listen stream would otherwise stay open until the 300s function timeout, and our tool list never changes.
+  maxSubscriptions: 0
 });
 
 function tokenFromPath(request) {
