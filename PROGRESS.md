@@ -1,6 +1,13 @@
 # PROGRESS — 헬스앱
 
-## 마지막 한 일 (2026-09-27 — 세션 31: 주간 계획 전환 + 5주 사이클 삭제 + ACSM 2026 반영, PR #88 v71 · PR #89 v72 배포)
+## 마지막 한 일 (2026-10-21 — 세션 32: Vercel 메모리 한도 원인 제거, PR #91)
+
+- Vercel 경고 메일: 팀(alfrjfp2) Fluid Provisioned Memory 90%(326.1/360 GB-Hrs). Usage 화면 프로젝트별 보기에서 이 앱이 97.5%(318.1). 9/27 커넥터 배포부터 하루 16~24시간씩 쌓임.
+- 원인: claude.ai 가 `subscriptions/listen` POST 를 보내면 mcp-handler 2.1.1(SDK listenRouter)이 15초 keepalive SSE 를 끝없이 열어 둠 → 2~4분마다 `Task timed out after 300 seconds`, 하루 종일.
+- 수정: `api/mcp/[token].mjs` 에 `maxSubscriptions: 0`(listen 을 -32603 으로 바로 거절), `vercel.json` 에 `api/mcp/*.mjs` maxDuration 30. 시험 `tests/connector-listen.test.mjs`(node_modules 없으면 건너뜀). 앱 파일은 안 바꿔서 CACHE_VERSION 그대로.
+- 검증: 시험 539/539. 운영에 직접 요청 → listen 0.7초 JSON 거절, tools/list 0.7초 도구 5개. 배포 뒤 12분 동안 새 배포의 시간 초과 0건(전엔 2~4분마다).
+
+### 이전 (2026-09-27 — 세션 31: 주간 계획 전환 + 5주 사이클 삭제 + ACSM 2026 반영, PR #88 v71 · PR #89 v72 배포)
 
 - **grill로 확정 → `docs/weekly-plan.md`(결정 1~11)**. 월요일에 Claude가 한 주(3일 전신 A·B·C / 4일 상하 A·B / 5일 PUSH·PULL·하체 A·상체·하체 B)를 숫자까지 저장, 사용자는 날마다 남은 세션을 고른다. 안 한 세션은 주 중 Claude가 고친다. 세트 바닥선 = 부위당 주 10세트·주 2회(ACSM 2026).
 - **서버**: `save_week_plan`·`update_week_sessions`(끝난 세션 보호, 일요일 저장 = 다음 주), 주별 Blob `fitness/week/<월요일>.json`, `save_today_routine` 삭제, `/api/plan` → `{week, cardio}`. 컨텍스트에 이번 주·다음 주 계획, 이번 주 실제 세트, 종목별 부위 세트 무게.
@@ -96,6 +103,8 @@
 - **★교훈**: ①워커 보고서는 재료 — 코디네이터가 선별(클러스터 보류·레스트포즈 제외 사례) ②/model은 사용자 기본값을 덮어씀 ③Codex hang이면 버전부터 ④terminal close로는 codex broker가 안 죽음(별도 kill).
 
 ## 다음 할 일
+- [ ] **폰 Claude 도구 확인**: 「이번 주 계획 보여 줘」가 되는지(listen 거절을 claude.ai 가 오류로 보는지 미검증). 안 되면 대안 = 서버 capabilities `tools.listChanged:false`(필터가 비어 ack 뒤 정상 종료).
+- [ ] 하루 이틀 뒤 Vercel Usage > Fluid Provisioned Memory 에서 이 앱 막대가 거의 0인지
 - [ ] **월요일(9/28) 첫 사용 확인**: 운동 탭에 상체 A·하체 A·상체 B·하체 B 카드 → 한 세션 끝내면 ✓·요일로 내려가는지, 기록 탭 「이번 주 부위별 세트」가 차는지, 홈 카드 1/4
 - [ ] 첫 주 뒤: 정렬 규칙·목표 눈금 체감, 주 중 수정(`update_week_sessions`) 한 번 써 보기, Claude가 잡은 세션 분량(상체 A 8종목·본 세트 약 28개)이 70분 안에 되는지
 - [ ] 기존 동작(범위 밖): `sets` 배열만 있는 아주 옛 기록 모양은 스냅샷 세트가 0개로 감
@@ -103,17 +112,19 @@
 
 ## 막힌 점 / 주의
 - **MCP 도구 목록이 바뀌는 배포 뒤에는 사용자에게 claude.ai 설정 > 커넥터에서 연결을 끊었다 다시 연결하라고 안내**한다(새 대화만으로는 옛 목록이 남음). 도구 동작·안내문만 바뀌면 필요 없다.
-- 메인 체크아웃(`/home/iron/projects/fitness-exercises`)은 origin/main보다 뒤처져 있고 커밋 안 된 CLAUDE.md 수정이 있다 — 작업은 origin/main 기준 worktree에서 한다.
+- 메인 체크아웃(`/home/iron/projects/fitness-exercises`)은 10-21 기준 origin/main 과 같다. 커밋 안 된 `.claude/skills/healthapp-feature/SKILL.md` 한 줄 수정(「울트라코드 우선」 삭제)은 이 세션 것이 아니라 남겨 둠.
+- `maxSubscriptions: 0` 과 `vercel.json` maxDuration 30 은 지우지 않는다 — 지우면 claude.ai listen 이 다시 300초씩 붙잡혀 팀 무료 한도가 차고 같은 팀 앱 12개가 모두 멈춘다.
 - 이번 주·다음 주 계획과 손 편집본은 기기 전용(백업 제외) — 새 브라우저에서는 연결 코드를 넣으면 다시 받아 온다.
 - 검사: 이 저장소는 lint·타입검사·빌드 명령이 없다. 완료 조건은 `node --test $(ls tests/*.test.mjs)` + 헤드리스 실제 클릭 + 라이브 스팟체크.
 
 ## 마지막 커밋
+- 01a9d52 MCP listen 스트림이 함수를 붙잡지 않게 (#91) — 2026-10-21 · 서버만(앱 v72 그대로)
 - 5139ff1 다음 주 계획 표시 + 스냅샷 날짜 정리 + 옛 캐시 삭제 (#89) — 2026-09-27 · 운영 v72
 - 92361ca 주간 계획 전환·5주 사이클 삭제·ACSM 2026 (#88) — 2026-09-27 · 운영 v71
 - PR #86 세트 구성 규칙 v69 (feat/set-rules-v69 → main squash) — 2026-09-03 · 운영 v69
 - 525b5e1 화면 간소화 8건 + 리뷰 확정 8건 수정 (#78) — 2026-08-25 · 운영 v65
 
-_다음 세션 재개: "헬스앱 작업 이어서 해줘" — 첫 할 일: 사용자가 월요일에 주간 계획을 실제로 써 본 결과(운동 탭 카드·✓·기록 탭 세트 카드)를 듣고, 불편한 점을 고친다._
+_다음 세션 재개: "헬스앱 작업 이어서 해줘" — 첫 할 일: PR #91 뒤 폰 Claude 도구가 되는지와 Vercel Usage 막대가 0에 가까운지 듣고, 안 되면 listChanged:false 대안으로 바꾼다._
 
 
 ### 이전 (2026-08-08 — 세션 23: 허리 부상 금지운동 과잉 제한 완화 [브랜치 `ironbro205/injury-logic-fix`])

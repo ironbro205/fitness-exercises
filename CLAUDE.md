@@ -48,7 +48,7 @@ Logic regression is guarded by **zero-dependency tests**. The check command runs
 node --test $(ls tests/*.test.mjs)
 ```
 
-(the bare-directory `node --test tests/` form is unreliable in this environment — always pass the file names). The connector tests (`tests/connector-*.test.mjs`) and the app-side sync tests (`tests/claude-sync.test.mjs`) need no `node_modules`. The harness (`tests/_harness.mjs`) loads the app's JS in a Node `vm` with a stub DOM, then golden-master-checks the pure functions (1RM, progressive overload, volume analysis, cardio plan summary) and asserts no global function/data table went missing (`tests/golden-symbols.json`). It auto-loads `js/*.js` if present, else the inline `<script>` in `index.html`, so the same tests run before and after the split.
+(the bare-directory `node --test tests/` form is unreliable in this environment — always pass the file names). The connector tests (`tests/connector-*.test.mjs`) and the app-side sync tests (`tests/claude-sync.test.mjs`) need no `node_modules` (`tests/connector-listen.test.mjs` drives the real MCP handler and is skipped without them). The harness (`tests/_harness.mjs`) loads the app's JS in a Node `vm` with a stub DOM, then golden-master-checks the pure functions (1RM, progressive overload, volume analysis, cardio plan summary) and asserts no global function/data table went missing (`tests/golden-symbols.json`). It auto-loads `js/*.js` if present, else the inline `<script>` in `index.html`, so the same tests run before and after the split.
 
 **Local integration (connector + app):** run the dev server, then drive the MCP endpoint with the Inspector CLI.
 
@@ -98,6 +98,7 @@ Design docs (source of truth): `docs/claude-connector-plan.md` + `docs/weekly-pl
 - `api/plan.mjs` — `GET` → `{week, nextWeek, cardio}`: `week` = the plan for the KST week (Mon–Sun) containing today, `nextWeek` = next week's plan (saved on a Sunday), `cardio` = today's only; else `null`.
 - `api/_lib/auth.mjs` (constant-time compare; rejects everything if the env var is missing or under 20 chars) · `store.mjs` (`getJSON`/`setJSON`; memory store never used on Vercel) · `kst.mjs` · `tools.mjs` (pure tool logic + snapshot → readable text) · `guide.mjs`.
 - All responses `Cache-Control: no-store`.
+- Keep `maxSubscriptions: 0` in `api/mcp/[token].mjs` and `maxDuration: 30` in `vercel.json`. Without them claude.ai's `subscriptions/listen` holds an SSE stream open until the 300 s timeout, all day, and fills the team's free Fluid Provisioned Memory (2026-10-21, PR #91) — every project in the team gets paused.
 
 **Contracts.**
 - Snapshot: `{schemaVersion:1, uploadedAt, todayKst, appVersion, profile:{age,heightCm,weightKg}, equipment[], workouts[] (last 56 days, newest first; plan sessions carry planWeek/planLabel/planType), olderLastPerformed[], cardio[] (56 days), body[] (56 days + last one before), catalog:{push,pull,legs,upper,free}, weekSets:{weekStart, byGroup}, muscleWeights:{name:{group:1|0.5}}}`. **Raw data only** — no recommended weight, 1RM, plateau, weak parts, target sets, or volume verdicts. The only counted values are `weekSets` (this week's working sets per group, the same number the app shows) and the per-exercise `muscleWeights` table they are counted with (`exerciseGroupWeights` / `getWeekGroupSets` in `js/domain.js` are the source of truth).
