@@ -130,7 +130,10 @@ var EXERCISE_ALIASES_1RM = {
   '시티드 로우 머신': '머신 시티드 로우',
   '해머 컬': '덤벨 해머 컬',
   '레그프레스': '레그 프레스',
-  '레그 익스텐션': '머신 레그 익스텐션'
+  '레그 익스텐션': '머신 레그 익스텐션',
+  '스티프 레그 데드리프트': '스티프 데드리프트',
+  '스티프 레그드 데드리프트': '스티프 데드리프트',
+  '머신 사이드 레터럴 레이즈': '머신 레터럴 레이즈'
   // 제거: '인클라인 덤벨 컬' → '인클라인 덤벨 컬' (자기 자신 무의미)
   // 제거: '시티드 햄스트링 컬' → '머신 라잉 레그 컬' (다른 운동 - 시티드/라잉 자세 다름)
   // 제거: '힙 어덕션' → '머신 힙 어브덕션' (어덕션=내전근 vs 어브덕션=둔근, 정반대 운동)
@@ -265,6 +268,7 @@ var GYM_EQUIPMENT = {
   leg_curl:                   { kr: '레그컬 머신(라잉·시티드)',         owned: true,  source: 'stated' },
   hip_thrust_machine:         { kr: '힙쓰러스트 머신',                 owned: true,  source: 'stated' },
   adduction_machine:          { kr: '이너타이(힙 어덕션) 머신',         owned: true,  source: 'stated' },
+  lateral_raise_machine:      { kr: '레터럴 레이즈 머신',              owned: true,  source: 'stated' },
 
   // ── 사용자 목록엔 없지만 기존 1RM 기록으로 보유가 확인된 장비 ──
   // (임의로 지우면 사용자의 실제 기록·PR이 있는 종목이 추천에서 사라진다)
@@ -313,6 +317,10 @@ var EXERCISE_BODY_PART_MAP = {
   '덤벨 사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'dumbbell' },
   '사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'dumbbell' },
   '케이블 원 암 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'cable', unilateral: true },
+  '머신 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'lateral_raise_machine' },
+  '머신 사이드 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'lateral_raise_machine' },
+  '머신 원 암 레터럴 레이즈': { primary: 'shoulders_side', secondary: [], compound: false, mainEligible: false, equipment: 'lateral_raise_machine', unilateral: true },
+  '업라이트 로우': { primary: 'shoulders_side', secondary: ['traps'], compound: true, mainEligible: false, equipment: 'barbell' },
   '리버스 펙 덱 플라이': { primary: 'shoulders_rear', secondary: ['upper_back'], compound: false, mainEligible: false, equipment: 'rear_pec_deck' },
   '원암 리버스 펙 덱 플라이': { primary: 'shoulders_rear', secondary: [], compound: false, mainEligible: false, equipment: 'rear_pec_deck', unilateral: true },
   '페이스 풀': { primary: 'shoulders_rear', secondary: ['upper_back'], compound: false, mainEligible: false, equipment: 'cable' },
@@ -373,7 +381,13 @@ var EXERCISE_BODY_PART_MAP = {
   '덤벨 얼터네이트 컬': { primary: 'biceps', secondary: ['forearms'], compound: false, mainEligible: false, equipment: 'dumbbell' },
   '컨센트레이션 컬': { primary: 'biceps', secondary: [], compound: false, mainEligible: false, equipment: 'dumbbell' },
   '케이블 컬': { primary: 'biceps', secondary: [], compound: false, mainEligible: false, equipment: 'cable' },
+  
+  // 전완 (forearms) — 주간 세트에 세지 않는다(BODY_PART_GROUPS 위 주석). 리스트 컬류는 이두 보조 없이 전완 단독.
   '이지 바 리버스 컬': { primary: 'forearms', secondary: ['biceps'], compound: false, mainEligible: false, equipment: 'barbell' },
+  '덤벨 리스트 컬': { primary: 'forearms', secondary: [], compound: false, mainEligible: false, equipment: 'dumbbell' },
+  '바벨 리스트 컬': { primary: 'forearms', secondary: [], compound: false, mainEligible: false, equipment: 'barbell' },
+  '리버스 덤벨 리스트 컬': { primary: 'forearms', secondary: [], compound: false, mainEligible: false, equipment: 'dumbbell' },
+  '리버스 바벨 리스트 컬': { primary: 'forearms', secondary: [], compound: false, mainEligible: false, equipment: 'barbell' },
   
   // 하체 - 대퇴사두
   '레그 프레스': { primary: 'quads', secondary: ['glutes', 'hamstrings'], compound: true, mainEligible: true, equipment: 'leg_press' },
@@ -392,6 +406,10 @@ var EXERCISE_BODY_PART_MAP = {
   '덤벨 루마니안 데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back'], compound: true, mainEligible: true, stretched: true, equipment: 'dumbbell' },
   '루마니안 데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back'], compound: true, mainEligible: true, stretched: true, equipment: 'barbell' },
   '데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back', 'upper_back'], compound: true, mainEligible: true, equipment: 'barbell' },
+  '스티프 데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back'], compound: true, mainEligible: true, stretched: true, equipment: 'barbell' },
+  '스티프 레그 데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back'], compound: true, mainEligible: true, stretched: true, equipment: 'barbell' },
+  '스티프 레그드 데드리프트': { primary: 'hamstrings', secondary: ['glutes', 'lower_back'], compound: true, mainEligible: true, stretched: true, equipment: 'barbell' },
+  '노르딕 컬': { primary: 'hamstrings', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'bodyweight' },
   '머신 라잉 레그 컬': { primary: 'hamstrings', secondary: [], compound: false, mainEligible: false, equipment: 'leg_curl' },
   '라잉 레그 컬': { primary: 'hamstrings', secondary: [], compound: false, mainEligible: false, equipment: 'leg_curl' },
   '시티드 레그 컬': { primary: 'hamstrings', secondary: [], compound: false, mainEligible: false, stretched: true, equipment: 'leg_curl' },
@@ -673,6 +691,9 @@ var EXERCISE_AXIAL_LOAD = {
   '데드리프트': 'high',
   '루마니안 데드리프트': 'high',
   '바벨 루마니안 데드리프트': 'high',
+  '스티프 데드리프트': 'high',
+  '스티프 레그 데드리프트': 'high',
+  '스티프 레그드 데드리프트': 'high',
   '스탠딩 카프 레이즈': 'high',
   '레그 프레스': 'mid',
   '머신 힙 쓰러스트': 'mid'
@@ -738,9 +759,10 @@ var LIGHT_ISOLATION_PARTS = ['shoulders_side', 'shoulders_rear', 'calves', 'abs'
 //    근비대 자극이 약하고, RP 등 표준 볼륨 랜드마크 표에도 별도 부위로 들어가지 않는다.
 //    막대가 구조적으로 항상 0 → 영원히 '부족'으로 떠서 진단 전체의 신호를 깎아먹었다.
 //  - 전완: RP는 정식 부위로 다루지만 '중립·회내 당기기가 이미 있으면 주 1회 해머/리버스컬로
-//    MEV~MRV 충족'이라 별도 추적 이득이 작다. 이 앱은 직접 종목이 1개(이지 바 리버스 컬)뿐이라
+//    MEV~MRV 충족'이라 별도 추적 이득이 작다. 당시엔 직접 종목이 1개(이지 바 리버스 컬)뿐이라
 //    역시 영구 부족 오탐이었고, 그 오탐이 AI 프롬프트에 '권장 종목: 이지 바 리버스 컬'을 항상
 //    실어 보내 이두 질문에도 리버스컬만 답하게 만들었다(#5).
+//    리스트 컬 4종을 더한 뒤에도 사용자 결정으로 전완은 세지 않는다(리스트 컬 무게표 = {}).
 // 두 부위 모두 자극 인체도(js/bodymap.js)와 BODY_PART_KR 에는 그대로 남는다 — 표시는 하되 세지 않는다.
 var BODY_PART_GROUPS = {
   chest:           { kr: '가슴',       subParts: ['chest', 'chest_upper', 'chest_lower'], size: 'large' },

@@ -13,12 +13,13 @@ var CLAUDE_SNAPSHOT_SCHEMA = 1;
 var CLAUDE_WINDOW_DAYS = 56;            // 최근 8주 원자료
 var CLAUDE_VISIBLE_SYNC_MIN_MS = 60000; // 다시 보일 때 동기화 최소 간격
 // 세션별 종목 목록의 부위 묶음 (free = 전체). 어깨 후면은 PULL 에 둔다.
+// 전완(forearms)은 pull·upper 에 둔다 — 전완 종목을 PULL·상체 세션에 넣을 수 있게.
 var CLAUDE_CATALOG_PARTS = {
   push: ['chest', 'chest_upper', 'chest_lower', 'shoulders_front', 'shoulders_side', 'triceps'],
-  pull: ['lats', 'upper_back', 'traps', 'shoulders_rear', 'biceps'],
+  pull: ['lats', 'upper_back', 'traps', 'shoulders_rear', 'biceps', 'forearms'],
   legs: ['quads', 'hamstrings', 'glutes', 'glutes_med', 'calves', 'adductors', 'abs', 'obliques'],
   upper: ['chest', 'chest_upper', 'chest_lower', 'shoulders_front', 'shoulders_side', 'triceps',
-          'lats', 'upper_back', 'traps', 'shoulders_rear', 'biceps']
+          'lats', 'upper_back', 'traps', 'shoulders_rear', 'biceps', 'forearms']
 };
 var CLAUDE_CARDIO_MODE_KR = { interval: '인터벌', walk: '경사 걷기' };
 
