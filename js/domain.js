@@ -2074,6 +2074,9 @@ function getExercisePart(exerciseName) {
   if (name.indexOf('숄더') >= 0 || name.indexOf('레터럴') >= 0) {
     return { primary: name.indexOf('레터럴') >= 0 ? 'shoulders_side' : 'shoulders_front', secondary: [], compound: name.indexOf('프레스') >= 0 };
   }
+  // 리스트 컬·손목 컬·리버스 컬은 전완 — 아래 '컬'(이두) 규칙보다 먼저
+  if (name.indexOf('리스트') >= 0 || name.indexOf('손목') >= 0) return { primary: 'forearms', secondary: [], compound: false };
+  if (name.indexOf('리버스 컬') >= 0 || name.indexOf('리버스컬') >= 0) return { primary: 'forearms', secondary: ['biceps'], compound: false };
   if (name.indexOf('컬') >= 0) return { primary: 'biceps', secondary: [], compound: false };
   if (name.indexOf('푸시 다운') >= 0 || name.indexOf('익스텐션') >= 0 && name.indexOf('트라이셉') >= 0) return { primary: 'triceps', secondary: [], compound: false };
   if (name.indexOf('로우') >= 0) return { primary: 'upper_back', secondary: ['lats', 'biceps'], compound: true };

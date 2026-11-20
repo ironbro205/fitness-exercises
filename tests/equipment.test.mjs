@@ -83,3 +83,61 @@ test('신규 장비 종목이 부위 인덱스(EXERCISES_BY_PRIMARY)에 반영�
   assert.ok(app.EXERCISES_BY_PRIMARY.calves.includes('레그 프레스 카프 레이즈'));
   assert.ok(app.EXERCISES_BY_PRIMARY.obliques.includes('케이블 팔로프 프레스'));
 });
+
+test('새 종목 9개 — 부위·장비 등록, 전완 단독, 카탈로그 반영', () => {
+  const plain = (v) => JSON.parse(JSON.stringify(v));
+  const wristCurls = ['덤벨 리스트 컬', '바벨 리스트 컬', '리버스 덤벨 리스트 컬', '리버스 바벨 리스트 컬'];
+  const added = ['머신 레터럴 레이즈', '머신 원 암 레터럴 레이즈', '업라이트 로우', ...wristCurls, '스티프 데드리프트', '노르딕 컬'];
+  assert.equal(added.length, 9);
+  added.forEach((name) => {
+    assert.ok(app.EXERCISE_BODY_PART_MAP[name], `"${name}"이 EXERCISE_BODY_PART_MAP에 없다`);
+    assert.equal(app.isExerciseAvailable(name), true, `"${name}"을 할 수 없다고 나온다`);
+  });
+
+  wristCurls.forEach((name) => {
+    const info = app.EXERCISE_BODY_PART_MAP[name];
+    assert.equal(info.primary, 'forearms', name);
+    assert.equal(info.secondary.length, 0, name);
+    assert.deepEqual(plain(app.exerciseGroupWeights(name)), {}, `"${name}"이 주간 세트에 세인다`);
+  });
+
+  [...wristCurls, '이지 바 리버스 컬'].forEach((name) => {
+    assert.ok(app.EXERCISES_BY_PRIMARY.forearms.includes(name), `"${name}"이 forearms 인덱스에 없다`);
+    assert.ok(!app.EXERCISES_BY_PRIMARY.biceps.includes(name), `"${name}"이 biceps 인덱스에 있다`);
+  });
+
+  const cat = app.buildClaudeCatalog();
+  ['pull', 'upper', 'free'].forEach((s) => assert.ok(cat[s].includes('덤벨 리스트 컬'), `${s}에 '덤벨 리스트 컬'이 없다`));
+  ['push', 'legs'].forEach((s) => assert.ok(!cat[s].includes('덤벨 리스트 컬'), `${s}에 '덤벨 리스트 컬'이 있다`));
+
+  ['스티프 데드리프트', '노르딕 컬'].forEach((name) => {
+    assert.ok(app.EXERCISES_BY_PRIMARY.hamstrings.includes(name), `"${name}"이 hamstrings 인덱스에 없다`);
+  });
+  ['머신 레터럴 레이즈', '머신 원 암 레터럴 레이즈', '업라이트 로우'].forEach((name) => {
+    assert.ok(app.EXERCISES_BY_PRIMARY.shoulders_side.includes(name), `"${name}"이 shoulders_side 인덱스에 없다`);
+  });
+});
+
+test('표기 변형 — 리스트·손목·리버스 컬은 전완, 스티프·머신 사이드 변형은 표준명과 같다', () => {
+  const plain = (v) => JSON.parse(JSON.stringify(v));
+  ['케이블 리스트 컬', '손목 컬'].forEach((name) => {
+    const info = app.getExercisePart(name);
+    assert.equal(info.primary, 'forearms', name);
+    assert.deepEqual(plain(info.secondary), [], name);
+  });
+  const rev = app.getExercisePart('바벨 리버스 컬');
+  assert.equal(rev.primary, 'forearms');
+  assert.deepEqual(plain(rev.secondary), ['biceps']);
+  assert.equal(app.getExercisePart('덤벨 스파이더 컬').primary, 'biceps', '표에 없는 이두 컬은 그대로 이두');
+
+  assert.deepEqual(plain(app.exerciseGroupWeights('스티프 레그 데드리프트')), plain(app.exerciseGroupWeights('스티프 데드리프트')));
+  assert.deepEqual(plain(app.exerciseGroupWeights('스티프 레그드 데드리프트')), plain(app.exerciseGroupWeights('스티프 데드리프트')));
+  assert.equal(app.getExerciseAxialLoad('스티프 레그 데드리프트'), 'high');
+  assert.equal(app.getExerciseAxialLoad('스티프 레그드 데드리프트'), 'high');
+  assert.equal(app.getExerciseEquipment('머신 사이드 레터럴 레이즈'), 'lateral_raise_machine');
+
+  const free = app.buildClaudeCatalog().free;
+  ['스티프 레그 데드리프트', '스티프 레그드 데드리프트', '머신 사이드 레터럴 레이즈'].forEach((name) => {
+    assert.ok(!free.includes(name), `별칭 "${name}"이 카탈로그에 들어갔다`);
+  });
+});
